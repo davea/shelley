@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"compress/gzip"
 	"context"
 	"crypto/rand"
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -17,8 +19,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gregdel/pushover"
 	"shelley.exe.dev/claudetool/browse"
 	"shelley.exe.dev/db"
 	"shelley.exe.dev/db/generated"
@@ -28,6 +32,274 @@ import (
 	"shelley.exe.dev/ui"
 	"shelley.exe.dev/version"
 )
+
+// SSE event logger
+var (
+	sseLogFile     *os.File
+	sseLogMu       sync.Mutex
+	sseLogInitOnce sync.Once
+)
+
+// Pushover notifications
+var (
+	pushoverApp       *pushover.Pushover
+	pushoverRecipient *pushover.Recipient
+	pushoverInitOnce  sync.Once
+	pushoverHostname  string
+)
+
+func initPushover() {
+	pushoverInitOnce.Do(func() {
+		// Get hostname
+		var err error
+		pushoverHostname, err = os.Hostname()
+		if err != nil {
+			pushoverHostname = "unknown"
+		}
+
+		// Read config from ~/.pushover_config
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			log.Printf("pushover: failed to get home dir: %v", err)
+			return
+		}
+		configPath := filepath.Join(homeDir, ".pushover_config")
+		file, err := os.Open(configPath)
+		if err != nil {
+			log.Printf("pushover: config not found at %s: %v", configPath, err)
+			return
+		}
+		defer file.Close()
+
+		var userKey, appKey string
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "user_key=") {
+				userKey = strings.TrimPrefix(line, "user_key=")
+			} else if strings.HasPrefix(line, "app_key=") {
+				appKey = strings.TrimPrefix(line, "app_key=")
+			}
+		}
+
+		if userKey == "" || appKey == "" {
+			log.Printf("pushover: missing user_key or app_key in config")
+			return
+		}
+
+		pushoverApp = pushover.New(appKey)
+		pushoverRecipient = pushover.NewRecipient(userKey)
+		log.Printf("pushover: initialized successfully")
+	})
+}
+
+func sendPushoverNotification(slug string, summary string) {
+	initPushover()
+	if pushoverApp == nil || pushoverRecipient == nil {
+		return
+	}
+
+	title := fmt.Sprintf("Shelley [%s]", pushoverHostname)
+	msgText := fmt.Sprintf("%s\n\n%s", slug, summary)
+
+	// Build URL to the conversation
+	host := pushoverHostname
+	if !strings.Contains(host, ".") {
+		host = host + ".shelley.exe.xyz"
+	}
+	convoURL := fmt.Sprintf("https://%s/c/%s", host, slug)
+
+	msg := pushover.NewMessage(msgText)
+	msg.Title = title
+	msg.URL = convoURL
+	msg.URLTitle = "Open conversation"
+
+	go func() {
+		_, err := pushoverApp.SendMessage(msg, pushoverRecipient)
+		if err != nil {
+			log.Printf("pushover: failed to send notification: %v", err)
+		}
+	}()
+}
+
+// Track working state per conversation for detecting transitions
+var (
+	conversationWorkingState = make(map[string]bool)
+	conversationWorkingMu    sync.Mutex
+	conversationLastAgentMsg = make(map[string]string)
+)
+
+func logSSEEventWithMeta(slug *string, resp StreamResponse) {
+	sseLogInitOnce.Do(func() {
+		var err error
+		sseLogFile, err = os.OpenFile("/home/exedev/shelley_events.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Printf("failed to open SSE event log: %v", err)
+		}
+	})
+	if sseLogFile == nil {
+		return
+	}
+	sseLogMu.Lock()
+	defer sseLogMu.Unlock()
+
+	timestamp := time.Now().Format(time.RFC3339)
+	slugStr := ""
+	if slug != nil {
+		slugStr = *slug
+	}
+
+	eventType, metadata := classifySSEEventWithMeta(resp)
+	fmt.Fprintf(sseLogFile, "%s\t%s\t%s\t%s\n", timestamp, slugStr, eventType, metadata)
+
+	// Check for working state transition and send pushover notification
+	checkAndNotifyWorkingStateChange(slugStr, resp)
+}
+
+// Track pending notifications - we delay sending to ensure we have the final message
+var (
+	pendingNotifications   = make(map[string]time.Time) // convoID -> when working became false
+	pendingNotificationsMu sync.Mutex
+)
+
+func checkAndNotifyWorkingStateChange(slug string, resp StreamResponse) {
+	conversationWorkingMu.Lock()
+	defer conversationWorkingMu.Unlock()
+
+	// Determine conversation ID from either ConversationState or Messages
+	var convoID string
+	if resp.ConversationState != nil {
+		convoID = resp.ConversationState.ConversationID
+	} else if len(resp.Messages) > 0 {
+		convoID = resp.Messages[0].ConversationID
+	} else {
+		return // No conversation context
+	}
+
+	// Track agent messages for summary (always, regardless of state)
+	for _, msg := range resp.Messages {
+		if msg.Type == "agent" {
+			if summary := extractAgentSummary(msg); summary != "" {
+				conversationLastAgentMsg[convoID] = summary
+			}
+		}
+	}
+
+	// Check if we have a pending notification and received an agent message
+	// This ensures we capture the final message before sending
+	pendingNotificationsMu.Lock()
+	if pendingTime, hasPending := pendingNotifications[convoID]; hasPending {
+		// If we got an agent message, or enough time has passed (500ms), send the notification
+		hasAgentMsg := false
+		for _, msg := range resp.Messages {
+			if msg.Type == "agent" {
+				hasAgentMsg = true
+				break
+			}
+		}
+		if hasAgentMsg || time.Since(pendingTime) > 500*time.Millisecond {
+			delete(pendingNotifications, convoID)
+			pendingNotificationsMu.Unlock()
+			
+			summary := conversationLastAgentMsg[convoID]
+			if summary == "" {
+				summary = "(no summary available)"
+			}
+			if slug == "" {
+				slug = convoID
+			}
+			sendPushoverNotification(slug, summary)
+			return
+		}
+	}
+	pendingNotificationsMu.Unlock()
+
+	// Only check state transitions if we have state info
+	if resp.ConversationState == nil {
+		return
+	}
+
+	currentWorking := resp.ConversationState.Working
+	prevWorking, exists := conversationWorkingState[convoID]
+	conversationWorkingState[convoID] = currentWorking
+
+	// Detect transition from working=true to working=false
+	if exists && prevWorking && !currentWorking {
+		// Mark as pending - wait for final agent message
+		pendingNotificationsMu.Lock()
+		pendingNotifications[convoID] = time.Now()
+		pendingNotificationsMu.Unlock()
+	}
+}
+
+func extractAgentSummary(msg APIMessage) string {
+	// Try to extract text from LlmData
+	if msg.LlmData == nil {
+		return ""
+	}
+
+	// Parse the LLM message to extract text content
+	var llmMsg llm.Message
+	if err := json.Unmarshal([]byte(*msg.LlmData), &llmMsg); err != nil {
+		return ""
+	}
+
+	// Extract text from content blocks
+	var textParts []string
+	for _, content := range llmMsg.Content {
+		if content.Type == llm.ContentTypeText && content.Text != "" {
+			textParts = append(textParts, content.Text)
+		}
+	}
+
+	if len(textParts) == 0 {
+		return ""
+	}
+
+	// Join text parts (no truncation - Pushover handles length limits)
+	return strings.Join(textParts, " ")
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
+}
+
+func classifySSEEventWithMeta(resp StreamResponse) (eventType string, metadata string) {
+	if resp.Heartbeat {
+		working := false
+		model := ""
+		if resp.ConversationState != nil {
+			working = resp.ConversationState.Working
+			model = resp.ConversationState.Model
+		}
+		return "heartbeat", fmt.Sprintf("working=%v model=%s", working, model)
+	}
+	if resp.ConversationListUpdate != nil {
+		update := resp.ConversationListUpdate
+		convoID := update.ConversationID
+		if update.Conversation != nil {
+			convoID = update.Conversation.ConversationID
+		}
+		return "conversation_list_update", fmt.Sprintf("type=%s conversation_id=%s", update.Type, convoID)
+	}
+	if resp.ConversationState != nil && len(resp.Messages) == 0 {
+		return "state_change", fmt.Sprintf("working=%v model=%s", resp.ConversationState.Working, resp.ConversationState.Model)
+	}
+	if len(resp.Messages) > 0 {
+		// Count message types
+		typeCounts := make(map[string]int)
+		for _, msg := range resp.Messages {
+			typeCounts[msg.Type]++
+		}
+		lastMsg := resp.Messages[len(resp.Messages)-1]
+		return "messages", fmt.Sprintf("count=%d types=%v last_type=%s last_seq=%d context_size=%d",
+			len(resp.Messages), typeCounts, lastMsg.Type, lastMsg.SequenceID, resp.ContextWindowSize)
+	}
+	return "unknown", ""
+}
 
 // handleRead serves files from limited allowed locations via /api/read?path=
 func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
@@ -1083,6 +1355,7 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 			ContextWindowSize: calculateContextWindowSize(apiMessages),
 		}
 		data, _ := json.Marshal(streamData)
+		logSSEEventWithMeta(conversation.Slug, streamData)
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		w.(http.Flusher).Flush()
 	} else {
@@ -1097,6 +1370,7 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 			Heartbeat: true,
 		}
 		data, _ := json.Marshal(streamData)
+		logSSEEventWithMeta(conversation.Slug, streamData)
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		w.(http.Flusher).Flush()
 	}
@@ -1149,6 +1423,7 @@ func (s *Server) handleStreamConversation(w http.ResponseWriter, r *http.Request
 		}
 		// Always forward updates, even if only the conversation changed (e.g., slug added)
 		data, _ := json.Marshal(streamData)
+		logSSEEventWithMeta(conversation.Slug, streamData)
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		w.(http.Flusher).Flush()
 	}
