@@ -91,7 +91,7 @@ func NewVersionChecker() *VersionChecker {
 	skipCheck := os.Getenv("SHELLEY_SKIP_VERSION_CHECK") == "true"
 	return &VersionChecker{
 		skipCheck:   skipCheck,
-		githubOwner: "boldsoftware",
+		githubOwner: "davea",
 		githubRepo:  "shelley",
 	}
 }
