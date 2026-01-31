@@ -95,7 +95,7 @@ type StaticCommitInfo struct {
 const (
 	// staticMetadataURL is the base URL for version metadata on GitHub Pages.
 	// This avoids GitHub API rate limits.
-	staticMetadataURL = "https://boldsoftware.github.io/shelley"
+	staticMetadataURL = "https://davea.github.io/shelley"
 )
 
 // NewVersionChecker creates a new version checker.
@@ -103,7 +103,7 @@ func NewVersionChecker() *VersionChecker {
 	skipCheck := os.Getenv("SHELLEY_SKIP_VERSION_CHECK") == "true"
 	return &VersionChecker{
 		skipCheck:   skipCheck,
-		githubOwner: "boldsoftware",
+		githubOwner: "davea",
 		githubRepo:  "shelley",
 	}
 }
