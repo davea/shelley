@@ -67,7 +67,7 @@ def generate_release_json(output_dir: Path) -> None:
 
     version = latest_tag[1:] if latest_tag.startswith("v") else latest_tag
 
-    base_url = f"https://github.com/boldsoftware/shelley/releases/download/{latest_tag}"
+    base_url = f"https://github.com/davea/shelley/releases/download/{latest_tag}"
 
     release_info = {
         "tag_name": latest_tag,
@@ -108,7 +108,7 @@ def generate_release_json(output_dir: Path) -> None:
 def generate_commits_json(output_dir: Path, count: int = 500) -> None:
     """Generate commits.json with recent commits."""
     output = subprocess.check_output(
-        ["git", "log", f"--pretty=format:%h%x00%s", f"-{count}", "HEAD"],
+        ["git", "log", "--abbrev=6", f"--pretty=format:%h%x00%s", f"-{count}", "HEAD"],
         text=True,
     )
 
@@ -130,7 +130,7 @@ def generate_index_html(output_dir: Path) -> None:
 <html>
 <head><title>Shelley</title></head>
 <body>
-<p><a href="https://github.com/boldsoftware/shelley">github.com/boldsoftware/shelley</a></p>
+<p><a href="https://github.com/davea/shelley">github.com/davea/shelley</a></p>
 <ul>
 <li><a href="release.json">release.json</a></li>
 <li><a href="commits.json">commits.json</a></li>
