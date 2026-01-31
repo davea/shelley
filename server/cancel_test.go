@@ -21,6 +21,7 @@ import (
 // setupTestDB creates a test database
 func setupTestDB(t *testing.T) (*db.DB, func()) {
 	t.Helper()
+	DisablePushover() // Don't send real notifications during tests
 	tmpDir := t.TempDir()
 	database, err := db.New(db.Config{DSN: tmpDir + "/test.db"})
 	if err != nil {
