@@ -47,6 +47,7 @@ type SystemPromptData struct {
 	DefaultPort      int    // For exe.dev, the auto-routed HTTP port, 0 if unknown
 	SkillsXML        string // XML block for available skills
 	UserEmail        string // The exe.dev auth email of the user, if known
+	CurrentDate      string // Current date in human-readable format
 }
 
 // DBPath is the path to the shelley database, set at startup
@@ -655,6 +656,7 @@ func collectSystemData(workingDir string) (*SystemPromptData, error) {
 
 	data := &SystemPromptData{
 		WorkingDirectory: wd,
+		CurrentDate:      time.Now().Format("Monday, January 2, 2006"),
 	}
 
 	// collectGitInfo shells out to `git rev-parse`; resolve it first so the
