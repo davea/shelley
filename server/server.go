@@ -224,6 +224,9 @@ type Server struct {
 	requireHeader       string
 	conversationGroup   singleflight.Group[string, *ConversationManager]
 	versionChecker      *VersionChecker
+
+	// Track previous working state per conversation for detecting transitions
+	prevWorkingState map[string]bool
 }
 
 // NewServer creates a new server instance
@@ -233,6 +236,7 @@ func NewServer(database *db.DB, llmManager LLMProvider, toolSetConfig claudetool
 		llmManager:          llmManager,
 		toolSetConfig:       toolSetConfig,
 		activeConversations: make(map[string]*ConversationManager),
+		prevWorkingState:    make(map[string]bool),
 		logger:              logger,
 		predictableOnly:     predictableOnly,
 		terminalURL:         terminalURL,
@@ -836,7 +840,12 @@ func (s *Server) publishConversationListUpdate(update ConversationListUpdate) {
 // conversation streams. This allows clients to see the working state of other conversations.
 func (s *Server) publishConversationState(state ConversationState) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+
+	// Check for working -> not working transition
+	prevWorking := s.prevWorkingState[state.ConversationID]
+	s.prevWorkingState[state.ConversationID] = state.Working
+	shouldNotify := prevWorking && !state.Working
+	convID := state.ConversationID
 
 	// Broadcast to all active conversation managers
 	for _, manager := range s.activeConversations {
@@ -844,6 +853,12 @@ func (s *Server) publishConversationState(state ConversationState) {
 			ConversationState: &state,
 		}
 		manager.subpub.Broadcast(streamData)
+	}
+	s.mu.Unlock()
+
+	// Send pushover notification when work completes (outside of lock)
+	if shouldNotify {
+		go s.sendWorkCompletedNotification(convID)
 	}
 }
 
@@ -871,6 +886,173 @@ func (s *Server) IsAgentWorking(conversationID string) bool {
 		return false
 	}
 	return manager.IsAgentWorking()
+}
+
+// sendWorkCompletedNotification sends a pushover notification when agent work completes.
+// This is called asynchronously when working state transitions from true to false.
+func (s *Server) sendWorkCompletedNotification(conversationID string) {
+	// Skip entirely if pushover is disabled (e.g., in tests)
+	if pushoverDisabled {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Get conversation to retrieve slug and model
+	var conversation generated.Conversation
+	err := s.db.Queries(ctx, func(q *generated.Queries) error {
+		var err error
+		conversation, err = q.GetConversation(ctx, conversationID)
+		return err
+	})
+	if err != nil {
+		s.logger.Error("failed to get conversation for notification", "error", err, "conversationID", conversationID)
+		return
+	}
+
+	var slug string
+	if conversation.Slug != nil && *conversation.Slug != "" {
+		slug = *conversation.Slug
+	} else {
+		slug = conversationID
+	}
+
+	// Get messages for summary
+	var messages []generated.Message
+	err = s.db.Queries(ctx, func(q *generated.Queries) error {
+		var err error
+		messages, err = q.ListMessages(ctx, conversationID)
+		return err
+	})
+	if err != nil {
+		s.logger.Error("failed to get messages for notification", "error", err, "conversationID", conversationID)
+		return
+	}
+
+	// Find the last agent message with text content
+	lastAgentText := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Type == "agent" && msg.LlmData != nil {
+			if text := extractAgentTextFromLLMData(*msg.LlmData); text != "" {
+				lastAgentText = text
+				break
+			}
+		}
+	}
+
+	// Determine summary: use as-is if 100-200 chars, otherwise generate one
+	var summary string
+	if len(lastAgentText) >= 100 && len(lastAgentText) <= 200 {
+		summary = lastAgentText
+	} else {
+		// Try to generate a summary using the conversation's model
+		summary = s.generateNotificationSummary(ctx, conversation, messages)
+		if summary == "" {
+			if lastAgentText != "" {
+				summary = lastAgentText
+			} else {
+				summary = "(no summary available)"
+			}
+		}
+	}
+
+	sendPushoverNotification(slug, summary)
+}
+
+// generateNotificationSummary uses the LLM to generate a concise summary of recent conversation activity.
+func (s *Server) generateNotificationSummary(ctx context.Context, conversation generated.Conversation, messages []generated.Message) string {
+	// Skip summary generation in predictable-only mode (tests)
+	if s.predictableOnly {
+		return ""
+	}
+
+	// Need a model to generate summary
+	modelID := ""
+	if conversation.Model != nil {
+		modelID = *conversation.Model
+	}
+	if modelID == "" {
+		modelID = s.defaultModel
+	}
+	if modelID == "" {
+		return ""
+	}
+
+	service, err := s.llmManager.GetService(modelID)
+	if err != nil {
+		s.logger.Warn("failed to get LLM service for notification summary", "error", err, "model", modelID)
+		return ""
+	}
+
+	// Build context from recent messages (last 5 user/agent messages)
+	var recentMessages []llm.Message
+	count := 0
+	for i := len(messages) - 1; i >= 0 && count < 5; i-- {
+		msg := messages[i]
+		if msg.LlmData == nil {
+			continue
+		}
+		if msg.Type != "user" && msg.Type != "agent" {
+			continue
+		}
+		var llmMsg llm.Message
+		if err := json.Unmarshal([]byte(*msg.LlmData), &llmMsg); err != nil {
+			continue
+		}
+		recentMessages = append([]llm.Message{llmMsg}, recentMessages...)
+		count++
+	}
+
+	if len(recentMessages) == 0 {
+		return ""
+	}
+
+	// Add summary request
+	recentMessages = append(recentMessages, llm.Message{
+		Role: llm.MessageRoleUser,
+		Content: []llm.Content{{
+			Type: llm.ContentTypeText,
+			Text: "Generate a brief push notification summary (approximately 150 characters) of what was just accomplished in this conversation. Focus on the key outcome or action completed. Be concise and informative. Output only the summary text, nothing else.",
+		}},
+	})
+
+	req := &llm.Request{
+		Messages: recentMessages,
+	}
+
+	resp, err := service.Do(ctx, req)
+	if err != nil {
+		s.logger.Warn("failed to generate notification summary", "error", err)
+		return ""
+	}
+
+	// Extract text from response
+	for _, content := range resp.Content {
+		if content.Type == llm.ContentTypeText && content.Text != "" {
+			return strings.TrimSpace(content.Text)
+		}
+	}
+
+	return ""
+}
+
+// extractAgentTextFromLLMData extracts text content from an LLM message JSON string.
+func extractAgentTextFromLLMData(llmData string) string {
+	var llmMsg llm.Message
+	if err := json.Unmarshal([]byte(llmData), &llmMsg); err != nil {
+		return ""
+	}
+
+	var textParts []string
+	for _, content := range llmMsg.Content {
+		if content.Type == llm.ContentTypeText && content.Text != "" {
+			textParts = append(textParts, content.Text)
+		}
+	}
+
+	return strings.Join(textParts, " ")
 }
 
 // Cleanup removes inactive conversation managers

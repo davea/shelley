@@ -28,6 +28,11 @@ import (
 	"shelley.exe.dev/slug"
 )
 
+func TestMain(m *testing.M) {
+	server.DisablePushover()
+	os.Exit(m.Run())
+}
+
 func TestServerEndToEnd(t *testing.T) {
 	// Create temporary database
 	tempDB := t.TempDir() + "/test.db"
