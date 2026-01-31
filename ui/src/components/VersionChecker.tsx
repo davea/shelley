@@ -99,7 +99,7 @@ function VersionModal({ isOpen, onClose, versionInfo, isLoading }: VersionModalP
   };
 
   const getCommitUrl = (sha: string) => {
-    return `https://github.com/boldsoftware/shelley/commit/${sha}`;
+    return `https://github.com/davea/shelley/commit/${sha}`;
   };
 
   return (
@@ -159,7 +159,7 @@ function VersionModal({ isOpen, onClose, versionInfo, isLoading }: VersionModalP
                 <div className="version-changelog">
                   <h3>
                     <a
-                      href={`https://github.com/boldsoftware/shelley/compare/${versionInfo.current_tag}...${versionInfo.latest_tag}`}
+                      href={`https://github.com/davea/shelley/compare/${versionInfo.current_tag}...${versionInfo.latest_tag}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="changelog-link"
