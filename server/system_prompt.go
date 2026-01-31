@@ -32,6 +32,7 @@ type SystemPromptData struct {
 	ShelleyDBPath    string // Path to the shelley database
 	SkillsXML        string // XML block for available skills
 	UserEmail        string // The exe.dev auth email of the user, if known
+	CurrentDate      string // Current date in human-readable format
 }
 
 // DBPath is the path to the shelley database, set at startup
@@ -127,6 +128,7 @@ func collectSystemData(workingDir string) (*SystemPromptData, error) {
 
 	data := &SystemPromptData{
 		WorkingDirectory: wd,
+		CurrentDate:      time.Now().Format("Monday, January 2, 2006"),
 	}
 
 	// Try to collect git info
