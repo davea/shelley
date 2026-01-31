@@ -31,7 +31,7 @@ def generate_release_json(output_dir: Path) -> None:
         ["git", "show", "-s", "--format=%cI", latest_commit], text=True
     ).strip()
     published_at = subprocess.check_output(
-        ["git", "show", "-s", "--format=%cI", latest_tag], text=True
+        ["git", "show", "-s", "--format=%cI", latest_tag + "^{commit}"], text=True
     ).strip()
 
     version = latest_tag[1:] if latest_tag.startswith("v") else latest_tag
@@ -44,12 +44,12 @@ def generate_release_json(output_dir: Path) -> None:
         "commit_time": latest_commit_time,
         "published_at": published_at,
         "download_urls": {
-            "darwin_amd64": f"https://github.com/boldsoftware/shelley/releases/download/{latest_tag}/shelley_darwin_amd64",
-            "darwin_arm64": f"https://github.com/boldsoftware/shelley/releases/download/{latest_tag}/shelley_darwin_arm64",
-            "linux_amd64": f"https://github.com/boldsoftware/shelley/releases/download/{latest_tag}/shelley_linux_amd64",
-            "linux_arm64": f"https://github.com/boldsoftware/shelley/releases/download/{latest_tag}/shelley_linux_arm64",
+            "darwin_amd64": f"https://github.com/davea/shelley/releases/download/{latest_tag}/shelley_darwin_amd64",
+            "darwin_arm64": f"https://github.com/davea/shelley/releases/download/{latest_tag}/shelley_darwin_arm64",
+            "linux_amd64": f"https://github.com/davea/shelley/releases/download/{latest_tag}/shelley_linux_amd64",
+            "linux_arm64": f"https://github.com/davea/shelley/releases/download/{latest_tag}/shelley_linux_arm64",
         },
-        "checksums_url": f"https://github.com/boldsoftware/shelley/releases/download/{latest_tag}/checksums.txt",
+        "checksums_url": f"https://github.com/davea/shelley/releases/download/{latest_tag}/checksums.txt",
     }
 
     output_path = output_dir / "release.json"
@@ -61,7 +61,7 @@ def generate_release_json(output_dir: Path) -> None:
 def generate_commits_json(output_dir: Path, count: int = 500) -> None:
     """Generate commits.json with recent commits."""
     output = subprocess.check_output(
-        ["git", "log", f"--pretty=format:%h%x00%s", f"-{count}", "HEAD"],
+        ["git", "log", "--abbrev=6", f"--pretty=format:%h%x00%s", f"-{count}", "HEAD"],
         text=True,
     )
 
@@ -83,7 +83,7 @@ def generate_index_html(output_dir: Path) -> None:
 <html>
 <head><title>Shelley</title></head>
 <body>
-<p><a href="https://github.com/boldsoftware/shelley">github.com/boldsoftware/shelley</a></p>
+<p><a href="https://github.com/davea/shelley">github.com/davea/shelley</a></p>
 <ul>
 <li><a href="release.json">release.json</a></li>
 <li><a href="commits.json">commits.json</a></li>
