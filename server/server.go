@@ -99,6 +99,12 @@ type StreamResponse struct {
 	// it to hide a loading spinner, or — for "peek and disconnect" use
 	// cases like notification previews — to close the connection.
 	SnapshotComplete bool `json:"snapshot_complete,omitempty"`
+	// HasMore indicates there are older messages available to load
+	HasMore bool `json:"has_more,omitempty"`
+	// OldestSequenceID is the sequence_id of the oldest message returned (for pagination)
+	OldestSequenceID int64 `json:"oldest_sequence_id,omitempty"`
+	// TotalMessages is the total count of messages in the conversation
+	TotalMessages int64 `json:"total_messages,omitempty"`
 }
 
 // LLMProvider is an interface for getting LLM services
@@ -941,10 +947,12 @@ func (s *Server) recordMessage(ctx context.Context, conversationID string, messa
 	}
 	s.mu.Unlock()
 
-	// Notify subscribers with only the new message - use WithoutCancel because
-	// the HTTP request context may be cancelled after the handler returns, but
-	// we still want the notification to complete so SSE clients see the message immediately
-	go s.notifySubscribersNewMessage(context.WithoutCancel(ctx), conversationID, createdMsg)
+	// Notify subscribers with only the new message - called synchronously to
+	// preserve message ordering (goroutines can race and cause out-of-order
+	// publishes, leading to dropped messages in the subpub).
+	// Use WithoutCancel because the HTTP request context may be cancelled
+	// after the handler returns.
+	s.notifySubscribersNewMessage(context.WithoutCancel(ctx), conversationID, createdMsg)
 
 	return nil
 }
