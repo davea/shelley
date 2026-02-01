@@ -207,8 +207,10 @@ func (b *BashTool) Run(ctx context.Context, m json.RawMessage) llm.ToolOut {
 		}
 	}
 
-	// Add co-author trailer to git commits
-	req.Command = bashkit.AddCoauthorTrailer(req.Command, "Co-authored-by: Shelley <shelley@exe.dev>")
+	// Add co-author trailer to git commits (unless user has configured their own git identity)
+	if !bashkit.GitUserConfigSet() {
+		req.Command = bashkit.AddCoauthorTrailer(req.Command, "Co-authored-by: Shelley <shelley@exe.dev>")
+	}
 
 	timeout := req.timeout(b.Timeouts)
 

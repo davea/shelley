@@ -3,6 +3,7 @@ package bashkit
 import (
 	"bytes"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 
@@ -259,6 +260,20 @@ func hasBlindGitAdd(cmd *syntax.CallExpr) bool {
 		}
 	}
 
+	return false
+}
+
+// GitUserConfigSet returns true if git config user.name or user.email is set
+// at any level (system, global, or local).
+func GitUserConfigSet() bool {
+	// Check user.name
+	if out, err := exec.Command("git", "config", "user.name").Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		return true
+	}
+	// Check user.email
+	if out, err := exec.Command("git", "config", "user.email").Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		return true
+	}
 	return false
 }
 
