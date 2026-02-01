@@ -107,3 +107,9 @@ WHERE slug = ? AND parent_conversation_id = ?;
 UPDATE conversations
 SET model = ?
 WHERE conversation_id = ? AND model IS NULL;
+
+-- name: UpdateConversationQuiet :one
+UPDATE conversations
+SET quiet = ?, updated_at = CURRENT_TIMESTAMP
+WHERE conversation_id = ?
+RETURNING *;

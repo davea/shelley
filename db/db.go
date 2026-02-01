@@ -641,6 +641,21 @@ func (db *DB) UnarchiveConversation(ctx context.Context, conversationID string) 
 	return &conversation, err
 }
 
+// UpdateConversationQuiet updates the quiet flag for a conversation
+func (db *DB) UpdateConversationQuiet(ctx context.Context, conversationID string, quiet bool) (*generated.Conversation, error) {
+	var conversation generated.Conversation
+	err := db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		var err error
+		conversation, err = q.UpdateConversationQuiet(ctx, generated.UpdateConversationQuietParams{
+			Quiet:          quiet,
+			ConversationID: conversationID,
+		})
+		return err
+	})
+	return &conversation, err
+}
+
 // DeleteConversation deletes a conversation and all its messages
 func (db *DB) DeleteConversation(ctx context.Context, conversationID string) error {
 	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
