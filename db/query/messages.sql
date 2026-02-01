@@ -59,3 +59,21 @@ WHERE conversation_id = ? AND type = ?;
 SELECT * FROM messages
 WHERE conversation_id = ? AND sequence_id > ?
 ORDER BY sequence_id ASC;
+
+-- name: ListMessagesLatest :many
+-- Returns the most recent N messages, ordered by sequence_id ASC for display
+SELECT * FROM (
+    SELECT * FROM messages
+    WHERE conversation_id = ?
+    ORDER BY sequence_id DESC
+    LIMIT ?
+) ORDER BY sequence_id ASC;
+
+-- name: ListMessagesBefore :many
+-- Returns N messages before a given sequence_id, ordered by sequence_id ASC
+SELECT * FROM (
+    SELECT * FROM messages
+    WHERE conversation_id = ? AND sequence_id < ?
+    ORDER BY sequence_id DESC
+    LIMIT ?
+) ORDER BY sequence_id ASC;
