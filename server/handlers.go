@@ -700,10 +700,19 @@ func (s *Server) conversationMux() *http.ServeMux {
 	mux.HandleFunc("GET /{id}/subagents", func(w http.ResponseWriter, r *http.Request) {
 		s.handleGetSubagents(w, r, r.PathValue("id"))
 	})
+	// GET /api/conversation/<id>/messages - paginated messages
+	mux.Handle("GET /{id}/messages", gzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.handleGetOlderMessages(w, r, r.PathValue("id"))
+	})))
 	return mux
 }
 
+const defaultMessageLimit = 10
+
 // handleGetConversation handles GET /conversation/<id>
+// Query params:
+//   - limit: max messages to return (default 10, 0 means all)
+//   - all: if "true", return all messages (overrides limit)
 func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request, conversationID string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -711,13 +720,40 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request, c
 	}
 
 	ctx := r.Context()
+
+	// Parse pagination params
+	limit := int64(defaultMessageLimit)
+	if r.URL.Query().Get("all") == "true" {
+		limit = 0 // 0 means all
+	} else if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.ParseInt(limitStr, 10, 64); err == nil && parsed >= 0 {
+			limit = parsed
+		}
+	}
+
 	var (
-		messages     []generated.Message
-		conversation generated.Conversation
+		messages      []generated.Message
+		conversation  generated.Conversation
+		totalMessages int64
 	)
 	err := s.db.Queries(ctx, func(q *generated.Queries) error {
 		var err error
-		messages, err = q.ListMessages(ctx, conversationID)
+
+		// Get total count for has_more calculation
+		totalMessages, err = q.CountMessagesInConversation(ctx, conversationID)
+		if err != nil {
+			return err
+		}
+
+		// Fetch messages - either all or latest N
+		if limit == 0 {
+			messages, err = q.ListMessages(ctx, conversationID)
+		} else {
+			messages, err = q.ListMessagesLatest(ctx, generated.ListMessagesLatestParams{
+				ConversationID: conversationID,
+				Limit:          limit,
+			})
+		}
 		if err != nil {
 			return err
 		}
@@ -736,11 +772,89 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request, c
 
 	w.Header().Set("Content-Type", "application/json")
 	apiMessages := toAPIMessages(messages)
+
+	// Calculate pagination info
+	var oldestSeqID int64
+	hasMore := false
+	if len(messages) > 0 {
+		oldestSeqID = messages[0].SequenceID
+		hasMore = int64(len(messages)) < totalMessages
+	}
+
 	json.NewEncoder(w).Encode(StreamResponse{
-		Messages:     apiMessages,
-		Conversation: conversation,
-		// ConversationState is sent via the streaming endpoint, not on initial load
+		Messages:          apiMessages,
+		Conversation:      conversation,
 		ContextWindowSize: calculateContextWindowSize(apiMessages),
+		HasMore:           hasMore,
+		OldestSequenceID:  oldestSeqID,
+		TotalMessages:     totalMessages,
+	})
+}
+
+// MessagesResponse is the response for the paginated messages endpoint
+type MessagesResponse struct {
+	Messages         []APIMessage `json:"messages"`
+	HasMore          bool         `json:"has_more"`
+	OldestSequenceID int64        `json:"oldest_sequence_id,omitempty"`
+}
+
+// handleGetOlderMessages handles GET /conversation/<id>/messages
+// Query params:
+//   - before: sequence_id to fetch messages before
+//   - limit: max messages to return (default 10)
+func (s *Server) handleGetOlderMessages(w http.ResponseWriter, r *http.Request, conversationID string) {
+	ctx := r.Context()
+
+	// Parse params
+	beforeStr := r.URL.Query().Get("before")
+	if beforeStr == "" {
+		http.Error(w, "'before' parameter is required", http.StatusBadRequest)
+		return
+	}
+	before, err := strconv.ParseInt(beforeStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Invalid 'before' parameter", http.StatusBadRequest)
+		return
+	}
+
+	limit := int64(defaultMessageLimit)
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if parsed, err := strconv.ParseInt(limitStr, 10, 64); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	var messages []generated.Message
+	err = s.db.Queries(ctx, func(q *generated.Queries) error {
+		var err error
+		messages, err = q.ListMessagesBefore(ctx, generated.ListMessagesBeforeParams{
+			ConversationID: conversationID,
+			SequenceID:     before,
+			Limit:          limit,
+		})
+		return err
+	})
+	if err != nil {
+		s.logger.Error("Failed to get older messages", "conversationID", conversationID, "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	apiMessages := toAPIMessages(messages)
+
+	var oldestSeqID int64
+	hasMore := false
+	if len(messages) > 0 {
+		oldestSeqID = messages[0].SequenceID
+		// If we got `limit` messages and the oldest one isn't sequence_id 1, there's probably more
+		hasMore = int64(len(messages)) == limit && oldestSeqID > 1
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(MessagesResponse{
+		Messages:         apiMessages,
+		HasMore:          hasMore,
+		OldestSequenceID: oldestSeqID,
 	})
 }
 
