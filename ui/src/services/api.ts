@@ -8,6 +8,7 @@ import {
   GitFileDiff,
   VersionInfo,
   CommitInfo,
+  MessagesResponse,
 } from "../types";
 
 class ApiService {
@@ -105,10 +106,27 @@ class ApiService {
     return response.json();
   }
 
-  async getConversation(conversationId: string): Promise<StreamResponse> {
-    const response = await fetch(`${this.baseUrl}/conversation/${conversationId}`);
+  async getConversation(conversationId: string, limit?: number): Promise<StreamResponse> {
+    let url = `${this.baseUrl}/conversation/${conversationId}`;
+    if (limit !== undefined) {
+      url += `?limit=${limit}`;
+    }
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to get messages: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async getOlderMessages(
+    conversationId: string,
+    beforeSequenceId: number,
+    limit: number = 10,
+  ): Promise<MessagesResponse> {
+    const url = `${this.baseUrl}/conversation/${conversationId}/messages?before=${beforeSequenceId}&limit=${limit}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to get older messages: ${response.statusText}`);
     }
     return response.json();
   }
