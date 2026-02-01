@@ -65,6 +65,12 @@ type StreamResponse struct {
 	ConversationListUpdate *ConversationListUpdate `json:"conversation_list_update,omitempty"`
 	// Heartbeat indicates this is a heartbeat message (no new data, just keeping connection alive)
 	Heartbeat bool `json:"heartbeat,omitempty"`
+	// HasMore indicates there are older messages available to load
+	HasMore bool `json:"has_more,omitempty"`
+	// OldestSequenceID is the sequence_id of the oldest message returned (for pagination)
+	OldestSequenceID int64 `json:"oldest_sequence_id,omitempty"`
+	// TotalMessages is the total count of messages in the conversation
+	TotalMessages int64 `json:"total_messages,omitempty"`
 }
 
 // LLMProvider is an interface for getting LLM services
