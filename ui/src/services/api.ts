@@ -8,6 +8,7 @@ import {
   GitFileDiff,
   VersionInfo,
   CommitInfo,
+  MessagesResponse,
 } from "../types";
 
 // Extract a useful error message from a failed fetch response. Prefers the
@@ -138,8 +139,13 @@ class ApiService {
       bytesDownloaded: number;
       bytesTotal?: number;
     }) => void,
+    limit?: number,
   ): Promise<StreamResponse> {
-    const response = await fetch(`${this.baseUrl}/conversation/${conversationId}`);
+    let url = `${this.baseUrl}/conversation/${conversationId}`;
+    if (limit !== undefined) {
+      url += `?limit=${limit}`;
+    }
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to get messages: ${response.statusText}`);
     }
@@ -186,6 +192,19 @@ class ApiService {
     } catch {
       throw new Error("Failed to parse conversation response");
     }
+  }
+
+  async getOlderMessages(
+    conversationId: string,
+    beforeSequenceId: number,
+    limit: number = 10,
+  ): Promise<MessagesResponse> {
+    const url = `${this.baseUrl}/conversation/${conversationId}/messages?before=${beforeSequenceId}&limit=${limit}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to get older messages: ${response.statusText}`);
+    }
+    return response.json();
   }
 
   async sendMessage(conversationId: string, request: ChatRequest): Promise<void> {
