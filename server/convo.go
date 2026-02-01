@@ -694,8 +694,9 @@ func (cm *ConversationManager) recordGitStateChange(ctx context.Context, state *
 
 	cm.logger.Debug("Recorded git state change", "state", state.String())
 
-	// Notify subscribers so the UI updates
-	go cm.notifyGitStateChange(context.WithoutCancel(ctx), createdMsg)
+	// Notify subscribers so the UI updates - called synchronously to
+	// preserve message ordering with other publishes.
+	cm.notifyGitStateChange(context.WithoutCancel(ctx), createdMsg)
 }
 
 // notifyGitStateChange publishes a gitinfo message to subscribers.
