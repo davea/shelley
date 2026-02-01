@@ -69,6 +69,12 @@ type StreamResponse struct {
 	Heartbeat bool `json:"heartbeat,omitempty"`
 	// NotificationEvent is set when a notification-worthy event occurs (e.g. agent finished).
 	NotificationEvent *notifications.Event `json:"notification_event,omitempty"`
+	// HasMore indicates there are older messages available to load
+	HasMore bool `json:"has_more,omitempty"`
+	// OldestSequenceID is the sequence_id of the oldest message returned (for pagination)
+	OldestSequenceID int64 `json:"oldest_sequence_id,omitempty"`
+	// TotalMessages is the total count of messages in the conversation
+	TotalMessages int64 `json:"total_messages,omitempty"`
 }
 
 // LLMProvider is an interface for getting LLM services
