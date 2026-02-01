@@ -205,6 +205,56 @@ func (q *Queries) ListMessages(ctx context.Context, conversationID string) ([]Me
 	return items, nil
 }
 
+const listMessagesBefore = `-- name: ListMessagesBefore :many
+SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context FROM (
+    SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context FROM messages
+    WHERE conversation_id = ? AND sequence_id < ?
+    ORDER BY sequence_id DESC
+    LIMIT ?
+) ORDER BY sequence_id ASC
+`
+
+type ListMessagesBeforeParams struct {
+	ConversationID string `json:"conversation_id"`
+	SequenceID     int64  `json:"sequence_id"`
+	Limit          int64  `json:"limit"`
+}
+
+// Returns N messages before a given sequence_id, ordered by sequence_id ASC
+func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBeforeParams) ([]Message, error) {
+	rows, err := q.db.QueryContext(ctx, listMessagesBefore, arg.ConversationID, arg.SequenceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.MessageID,
+			&i.ConversationID,
+			&i.SequenceID,
+			&i.Type,
+			&i.LlmData,
+			&i.UserData,
+			&i.UsageData,
+			&i.CreatedAt,
+			&i.DisplayData,
+			&i.ExcludedFromContext,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessagesByType = `-- name: ListMessagesByType :many
 SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context FROM messages
 WHERE conversation_id = ? AND type = ?
@@ -258,6 +308,55 @@ ORDER BY sequence_id ASC
 
 func (q *Queries) ListMessagesForContext(ctx context.Context, conversationID string) ([]Message, error) {
 	rows, err := q.db.QueryContext(ctx, listMessagesForContext, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.MessageID,
+			&i.ConversationID,
+			&i.SequenceID,
+			&i.Type,
+			&i.LlmData,
+			&i.UserData,
+			&i.UsageData,
+			&i.CreatedAt,
+			&i.DisplayData,
+			&i.ExcludedFromContext,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesLatest = `-- name: ListMessagesLatest :many
+SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context FROM (
+    SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context FROM messages
+    WHERE conversation_id = ?
+    ORDER BY sequence_id DESC
+    LIMIT ?
+) ORDER BY sequence_id ASC
+`
+
+type ListMessagesLatestParams struct {
+	ConversationID string `json:"conversation_id"`
+	Limit          int64  `json:"limit"`
+}
+
+// Returns the most recent N messages, ordered by sequence_id ASC for display
+func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatestParams) ([]Message, error) {
+	rows, err := q.db.QueryContext(ctx, listMessagesLatest, arg.ConversationID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
