@@ -611,6 +611,10 @@ function ChatInterface({
   // Ephemeral terminals are local-only and not persisted to the database
   const [ephemeralTerminals, setEphemeralTerminals] = useState<EphemeralTerminal[]>([]);
   const [terminalInjectedText, setTerminalInjectedText] = useState<string | null>(null);
+  // Pagination state
+  const [hasMore, setHasMore] = useState(false);
+  const [oldestSequenceId, setOldestSequenceId] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -629,12 +633,17 @@ function ChatInterface({
 
     if (conversationId) {
       setAgentWorking(false);
-      loadMessages();
-      setupMessageStream();
+      // Load messages first, then set up stream after we know the last sequence ID
+      // This prevents SSE from re-sending all messages
+      loadMessages().then(() => {
+        setupMessageStream();
+      });
     } else {
       // No conversation yet, show empty state
       setMessages([]);
       setContextWindowSize(0);
+      setHasMore(false);
+      setOldestSequenceId(null);
       setLoading(false);
     }
 
@@ -766,8 +775,18 @@ function ChatInterface({
     try {
       setLoading(true);
       setError(null);
+      // Load initial messages with default limit (paginated)
       const response = await api.getConversation(conversationId);
-      setMessages(response.messages ?? []);
+      const msgs = response.messages ?? [];
+      setMessages(msgs);
+      // Update pagination state
+      setHasMore(response.has_more ?? false);
+      setOldestSequenceId(response.oldest_sequence_id ?? null);
+      // Set lastSequenceIdRef so SSE stream won't re-send these messages
+      if (msgs.length > 0) {
+        const maxSeqId = Math.max(...msgs.map((m) => m.sequence_id));
+        lastSequenceIdRef.current = maxSeqId;
+      }
       // ConversationState is sent via the streaming endpoint, not on initial load
       // We don't update agentWorking here - the stream will provide the current state
       // Always update context window size when loading a conversation.
@@ -782,6 +801,42 @@ function ChatInterface({
     } finally {
       // Always set loading to false, even if other operations fail
       setLoading(false);
+    }
+  };
+
+  // Load older messages (pagination)
+  const loadMoreMessages = async () => {
+    if (!conversationId || !hasMore || oldestSequenceId === null || loadingMore) return;
+    try {
+      setLoadingMore(true);
+      // Capture scroll position to maintain it after prepending
+      const container = messagesContainerRef.current;
+      const scrollHeightBefore = container?.scrollHeight ?? 0;
+      const scrollTopBefore = container?.scrollTop ?? 0;
+
+      const response = await api.getOlderMessages(conversationId, oldestSequenceId);
+      const olderMessages = response.messages ?? [];
+
+      if (olderMessages.length > 0) {
+        // Prepend older messages
+        setMessages((prev) => [...olderMessages, ...prev]);
+        setHasMore(response.has_more);
+        setOldestSequenceId(response.oldest_sequence_id ?? null);
+
+        // Restore scroll position after DOM update
+        requestAnimationFrame(() => {
+          if (container) {
+            const scrollHeightAfter = container.scrollHeight;
+            container.scrollTop = scrollTopBefore + (scrollHeightAfter - scrollHeightBefore);
+          }
+        });
+      } else {
+        setHasMore(false);
+      }
+    } catch (err) {
+      console.error("Failed to load older messages:", err);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -1703,6 +1758,18 @@ function ChatInterface({
             </div>
           ) : (
             <div className="messages-list">
+              {/* Load more button at top */}
+              {hasMore && (
+                <div className="load-more-container">
+                  <button
+                    className="load-more-button"
+                    onClick={loadMoreMessages}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? "Loading..." : "Load older messages"}
+                  </button>
+                </div>
+              )}
               {renderMessages()}
 
               <div ref={messagesEndRef} />
