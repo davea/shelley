@@ -863,6 +863,7 @@ type ChatRequest struct {
 	Message string `json:"message"`
 	Model   string `json:"model,omitempty"`
 	Cwd     string `json:"cwd,omitempty"`
+	Quiet   bool   `json:"quiet,omitempty"`
 }
 
 // handleChatConversation handles POST /conversation/<id>/chat
@@ -988,7 +989,7 @@ func (s *Server) handleNewConversation(w http.ResponseWriter, r *http.Request) {
 	if req.Cwd != "" {
 		cwdPtr = &req.Cwd
 	}
-	conversation, err := s.db.CreateConversation(ctx, nil, true, cwdPtr, &modelID)
+	conversation, err := s.db.CreateConversation(ctx, nil, true, cwdPtr, &modelID, req.Quiet)
 	if err != nil {
 		s.logger.Error("Failed to create conversation", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1124,7 +1125,8 @@ func (s *Server) handleContinueConversation(w http.ResponseWriter, r *http.Reque
 	} else if sourceConv.Cwd != nil {
 		cwdPtr = sourceConv.Cwd
 	}
-	conversation, err := s.db.CreateConversation(ctx, nil, true, cwdPtr, &modelID)
+	// Inherit quiet flag from source conversation
+	conversation, err := s.db.CreateConversation(ctx, nil, true, cwdPtr, &modelID, sourceConv.Quiet)
 	if err != nil {
 		s.logger.Error("Failed to create conversation", "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

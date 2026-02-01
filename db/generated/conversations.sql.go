@@ -57,8 +57,8 @@ func (q *Queries) CountConversations(ctx context.Context) (int64, error) {
 }
 
 const createConversation = `-- name: CreateConversation :one
-INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, model)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, model, quiet)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING conversation_id, slug, user_initiated, created_at, updated_at, cwd, archived, parent_conversation_id, model, quiet
 `
 
@@ -68,6 +68,7 @@ type CreateConversationParams struct {
 	UserInitiated  bool    `json:"user_initiated"`
 	Cwd            *string `json:"cwd"`
 	Model          *string `json:"model"`
+	Quiet          bool    `json:"quiet"`
 }
 
 func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error) {
@@ -77,6 +78,7 @@ func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversation
 		arg.UserInitiated,
 		arg.Cwd,
 		arg.Model,
+		arg.Quiet,
 	)
 	var i Conversation
 	err := row.Scan(
@@ -95,8 +97,8 @@ func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversation
 }
 
 const createSubagentConversation = `-- name: CreateSubagentConversation :one
-INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, parent_conversation_id)
-VALUES (?, ?, FALSE, ?, ?)
+INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, parent_conversation_id, quiet)
+VALUES (?, ?, FALSE, ?, ?, ?)
 RETURNING conversation_id, slug, user_initiated, created_at, updated_at, cwd, archived, parent_conversation_id, model, quiet
 `
 
@@ -105,6 +107,7 @@ type CreateSubagentConversationParams struct {
 	Slug                 *string `json:"slug"`
 	Cwd                  *string `json:"cwd"`
 	ParentConversationID *string `json:"parent_conversation_id"`
+	Quiet                bool    `json:"quiet"`
 }
 
 func (q *Queries) CreateSubagentConversation(ctx context.Context, arg CreateSubagentConversationParams) (Conversation, error) {
@@ -113,6 +116,7 @@ func (q *Queries) CreateSubagentConversation(ctx context.Context, arg CreateSuba
 		arg.Slug,
 		arg.Cwd,
 		arg.ParentConversationID,
+		arg.Quiet,
 	)
 	var i Conversation
 	err := row.Scan(

@@ -1,6 +1,6 @@
 -- name: CreateConversation :one
-INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, model)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, model, quiet)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetConversation :one
@@ -90,8 +90,8 @@ RETURNING *;
 
 
 -- name: CreateSubagentConversation :one
-INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, parent_conversation_id)
-VALUES (?, ?, FALSE, ?, ?)
+INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, parent_conversation_id, quiet)
+VALUES (?, ?, FALSE, ?, ?, ?)
 RETURNING *;
 
 -- name: GetSubagents :many
