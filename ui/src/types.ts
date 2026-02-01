@@ -75,6 +75,17 @@ export interface StreamResponse extends Omit<StreamResponseForTS, "messages"> {
   conversation_list_update?: ConversationListUpdate;
   heartbeat?: boolean;
   notification_event?: NotificationEvent;
+  // Pagination fields
+  has_more?: boolean;
+  oldest_sequence_id?: number;
+  total_messages?: number;
+}
+
+// Response from GET /api/conversation/:id/messages
+export interface MessagesResponse {
+  messages: Message[];
+  has_more: boolean;
+  oldest_sequence_id?: number;
 }
 
 // Link represents a custom link that can be added to the UI
