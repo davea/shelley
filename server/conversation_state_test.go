@@ -49,7 +49,7 @@ func TestConversationStateAfterServerRestart(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a conversation with some messages (simulating previous activity)
-	conv, err := database.CreateConversation(ctx, nil, true, nil, nil)
+	conv, err := database.CreateConversation(ctx, nil, true, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to create conversation: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestModelRestorationAfterServerRestart(t *testing.T) {
 
 	// Create a conversation with a specific model
 	modelID := "claude-sonnet-4-20250514"
-	conv, err := database.CreateConversation(ctx, nil, true, nil, &modelID)
+	conv, err := database.CreateConversation(ctx, nil, true, nil, &modelID, false)
 	if err != nil {
 		t.Fatalf("Failed to create conversation: %v", err)
 	}
