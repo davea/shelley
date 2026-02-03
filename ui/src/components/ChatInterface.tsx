@@ -1035,6 +1035,18 @@ function ChatInterface({
     );
   };
 
+  // Handler to toggle quiet mode for the current conversation
+  const handleToggleQuiet = async () => {
+    if (!conversationId || !currentConversation) return;
+    try {
+      const updated = await api.setQuiet(conversationId, !currentConversation.quiet);
+      onConversationUpdate?.(updated);
+    } catch (err) {
+      console.error("Failed to toggle quiet mode:", err);
+      setError("Failed to update quiet setting.");
+    }
+  };
+
   const getDisplayTitle = () => {
     return currentConversation?.slug || "Shelley";
   };
@@ -1494,6 +1506,44 @@ function ChatInterface({
                     {link.title}
                   </button>
                 ))}
+
+                {/* Quiet mode toggle - only show when there's a conversation */}
+                {currentConversation && (
+                  <>
+                    <div className="overflow-menu-divider" />
+                    <button
+                      onClick={() => {
+                        setShowOverflowMenu(false);
+                        handleToggleQuiet();
+                      }}
+                      className="overflow-menu-item"
+                    >
+                      <svg
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.75rem" }}
+                      >
+                        {currentConversation.quiet ? (
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+                          />
+                        ) : (
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"
+                          />
+                        )}
+                      </svg>
+                      {currentConversation.quiet ? "Enable Notifications" : "Mute Notifications"}
+                    </button>
+                  </>
+                )}
 
                 {/* Version check */}
                 <div className="overflow-menu-divider" />
