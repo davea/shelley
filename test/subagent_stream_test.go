@@ -164,7 +164,7 @@ func TestSubagentNotificationViaStream(t *testing.T) {
 
 	// Create parent conversation
 	parentSlug := "parent-convo"
-	parentConv, err := database.CreateConversation(ctx, &parentSlug, true, nil, nil)
+	parentConv, err := database.CreateConversation(ctx, &parentSlug, true, nil, nil, false)
 	if err != nil {
 		t.Fatalf("Failed to create parent conversation: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestSubagentNotificationViaStream(t *testing.T) {
 
 	// Create a subagent conversation directly in DB (simulating what SubagentTool.Run does)
 	subSlug := "sub-worker"
-	subConv, err := database.CreateSubagentConversation(ctx, subSlug, parentConv.ConversationID, nil)
+	subConv, err := database.CreateSubagentConversation(ctx, subSlug, parentConv.ConversationID, nil, true)
 	if err != nil {
 		t.Fatalf("Failed to create subagent conversation: %v", err)
 	}
