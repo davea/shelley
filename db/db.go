@@ -235,7 +235,7 @@ func WithTxRes[T any](db *DB, ctx context.Context, fn func(*generated.Queries) (
 // Conversation methods (moved from ConversationService)
 
 // CreateConversation creates a new conversation with an optional slug
-func (db *DB) CreateConversation(ctx context.Context, slug *string, userInitiated bool, cwd, model *string) (*generated.Conversation, error) {
+func (db *DB) CreateConversation(ctx context.Context, slug *string, userInitiated bool, cwd, model *string, quiet bool) (*generated.Conversation, error) {
 	conversationID, err := generateConversationID()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate conversation ID: %w", err)
@@ -249,6 +249,7 @@ func (db *DB) CreateConversation(ctx context.Context, slug *string, userInitiate
 			UserInitiated:  userInitiated,
 			Cwd:            cwd,
 			Model:          model,
+			Quiet:          quiet,
 		})
 		return err
 	})
@@ -641,6 +642,21 @@ func (db *DB) UnarchiveConversation(ctx context.Context, conversationID string) 
 	return &conversation, err
 }
 
+// UpdateConversationQuiet updates the quiet flag for a conversation
+func (db *DB) UpdateConversationQuiet(ctx context.Context, conversationID string, quiet bool) (*generated.Conversation, error) {
+	var conversation generated.Conversation
+	err := db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		var err error
+		conversation, err = q.UpdateConversationQuiet(ctx, generated.UpdateConversationQuietParams{
+			Quiet:          quiet,
+			ConversationID: conversationID,
+		})
+		return err
+	})
+	return &conversation, err
+}
+
 // DeleteConversation deletes a conversation and all its messages
 func (db *DB) DeleteConversation(ctx context.Context, conversationID string) error {
 	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
@@ -654,7 +670,7 @@ func (db *DB) DeleteConversation(ctx context.Context, conversationID string) err
 }
 
 // CreateSubagentConversation creates a new subagent conversation with a parent
-func (db *DB) CreateSubagentConversation(ctx context.Context, slug, parentID string, cwd *string) (*generated.Conversation, error) {
+func (db *DB) CreateSubagentConversation(ctx context.Context, slug, parentID string, cwd *string, quiet bool) (*generated.Conversation, error) {
 	conversationID, err := generateConversationID()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate conversation ID: %w", err)
@@ -667,6 +683,7 @@ func (db *DB) CreateSubagentConversation(ctx context.Context, slug, parentID str
 			Slug:                 &slug,
 			Cwd:                  cwd,
 			ParentConversationID: &parentID,
+			Quiet:                quiet,
 		})
 		return err
 	})
@@ -720,11 +737,17 @@ func (a *SubagentDBAdapter) GetOrCreateSubagentConversation(ctx context.Context,
 		return existing.ConversationID, *existing.Slug, nil
 	}
 
+	// Get parent conversation to inherit quiet flag
+	parent, err := a.DB.GetConversationByID(ctx, parentID)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get parent conversation: %w", err)
+	}
+
 	// Try to create new, handling unique constraint violations by appending numbers
 	baseSlug := slug
 	actualSlug := slug
 	for attempt := 0; attempt < 100; attempt++ {
-		conv, err := a.DB.CreateSubagentConversation(ctx, actualSlug, parentID, &cwd)
+		conv, err := a.DB.CreateSubagentConversation(ctx, actualSlug, parentID, &cwd, parent.Quiet)
 		if err == nil {
 			return conv.ConversationID, actualSlug, nil
 		}
