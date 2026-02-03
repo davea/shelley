@@ -962,6 +962,11 @@ func (s *Server) sendWorkCompletedNotification(conversationID string) {
 		return
 	}
 
+	// Skip if conversation is marked as quiet
+	if conversation.Quiet {
+		return
+	}
+
 	var slug string
 	if conversation.Slug != nil && *conversation.Slug != "" {
 		slug = *conversation.Slug
