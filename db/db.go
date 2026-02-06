@@ -737,17 +737,12 @@ func (a *SubagentDBAdapter) GetOrCreateSubagentConversation(ctx context.Context,
 		return existing.ConversationID, *existing.Slug, nil
 	}
 
-	// Get parent conversation to inherit quiet flag
-	parent, err := a.DB.GetConversationByID(ctx, parentID)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get parent conversation: %w", err)
-	}
-
 	// Try to create new, handling unique constraint violations by appending numbers
+	// Subagents are always quiet (no push notifications)
 	baseSlug := slug
 	actualSlug := slug
 	for attempt := 0; attempt < 100; attempt++ {
-		conv, err := a.DB.CreateSubagentConversation(ctx, actualSlug, parentID, &cwd, parent.Quiet)
+		conv, err := a.DB.CreateSubagentConversation(ctx, actualSlug, parentID, &cwd, true)
 		if err == nil {
 			return conv.ConversationID, actualSlug, nil
 		}
