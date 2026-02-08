@@ -61,7 +61,7 @@ def generate_release_json(output_dir: Path) -> None:
 def generate_commits_json(output_dir: Path, count: int = 500) -> None:
     """Generate commits.json with recent commits."""
     output = subprocess.check_output(
-        ["git", "log", f"--pretty=format:%h%x00%s", f"-{count}", "HEAD"],
+        ["git", "log", "--abbrev=6", f"--pretty=format:%h%x00%s", f"-{count}", "HEAD"],
         text=True,
     )
 
