@@ -31,7 +31,7 @@ def generate_release_json(output_dir: Path) -> None:
         ["git", "show", "-s", "--format=%cI", latest_commit], text=True
     ).strip()
     published_at = subprocess.check_output(
-        ["git", "show", "-s", "--format=%cI", latest_tag], text=True
+        ["git", "show", "-s", "--format=%cI", latest_tag + "^{commit}"], text=True
     ).strip()
 
     version = latest_tag[1:] if latest_tag.startswith("v") else latest_tag
