@@ -960,7 +960,8 @@ func (s *Server) publishConversationState(state ConversationState) {
 		payload := notifications.AgentDonePayload{
 			Model: state.Model,
 		}
-		if conv, err := s.db.GetConversationByID(context.Background(), state.ConversationID); err == nil && conv.Slug != nil {
+		conv, convErr := s.db.GetConversationByID(context.Background(), state.ConversationID)
+		if convErr == nil && conv.Slug != nil {
 			payload.ConversationTitle = *conv.Slug
 		}
 		if msg, err := s.db.GetLatestMessage(context.Background(), state.ConversationID); err == nil && msg.Type == string(db.MessageTypeAgent) && msg.LlmData != nil {
@@ -984,7 +985,10 @@ func (s *Server) publishConversationState(state ConversationState) {
 			Timestamp:      time.Now(),
 			Payload:        payload,
 		}
-		s.notifDispatcher.Dispatch(context.Background(), event)
+		// Only dispatch to backend channels if conversation is not quiet and not a subagent.
+		if convErr == nil && !conv.Quiet && conv.UserInitiated {
+			s.notifDispatcher.Dispatch(context.Background(), event)
+		}
 		notifEvent = &event
 	}
 
