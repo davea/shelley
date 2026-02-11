@@ -1691,6 +1691,47 @@ function ChatInterface({
                   </button>
                 </div>
 
+                {/* Per-conversation quiet toggle */}
+                {currentConversation && (
+                  <button
+                    onClick={async () => {
+                      setShowOverflowMenu(false);
+                      const updated = await api.setQuiet(
+                        currentConversation.conversation_id,
+                        !currentConversation.quiet,
+                      );
+                      if (onConversationUpdate) {
+                        onConversationUpdate(updated);
+                      }
+                    }}
+                    className="overflow-menu-item"
+                  >
+                    <svg
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      style={{ width: "1.25rem", height: "1.25rem", marginRight: "0.75rem" }}
+                    >
+                      {currentConversation.quiet ? (
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M5.586 15H4l1.405-1.405A2.032 2.032 0 006 12.158V9a6.002 6.002 0 014-5.659V3a2 2 0 114 0v.341c.588.17 1.14.432 1.636.772M15 17h-6v1a3 3 0 006 0v-1zM18 9a3 3 0 00-3-3M3 3l18 18"
+                        />
+                      ) : (
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                        />
+                      )}
+                    </svg>
+                    {currentConversation.quiet ? "Unmute Notifications" : "Mute Notifications"}
+                  </button>
+                )}
+
                 {/* Browser notifications toggle */}
                 {typeof Notification !== "undefined" && (
                   <>
