@@ -63,6 +63,14 @@ var channelTypeInfo = map[string]ChannelTypeInfo{
 			{Name: "to", Label: "Recipient Email", Type: "string", Required: true, Placeholder: "you@example.com"},
 		},
 	},
+	"pushover": {
+		Type:  "pushover",
+		Label: "Pushover",
+		ConfigFields: []ConfigField{
+			{Name: "user_key", Label: "User Key", Type: "string", Required: true, Placeholder: "your-pushover-user-key"},
+			{Name: "app_key", Label: "App Key", Type: "string", Required: true, Placeholder: "your-pushover-app-key"},
+		},
+	},
 }
 
 func toNotificationChannelAPI(ch generated.NotificationChannel) NotificationChannelAPI {
