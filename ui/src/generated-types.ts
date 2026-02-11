@@ -13,6 +13,7 @@ export interface Conversation {
   archived: boolean;
   parent_conversation_id: string | null;
   model: string | null;
+  quiet: boolean;
 }
 
 export interface Usage {
@@ -70,6 +71,7 @@ export interface ConversationWithStateForTS {
   archived: boolean;
   parent_conversation_id: string | null;
   model: string | null;
+  quiet: boolean;
   working: boolean;
 }
 

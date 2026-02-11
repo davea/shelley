@@ -289,6 +289,18 @@ class ApiService {
     return response.json();
   }
 
+  async setQuiet(conversationId: string, quiet: boolean): Promise<Conversation> {
+    const response = await fetch(`${this.baseUrl}/conversation/${conversationId}/quiet`, {
+      method: "POST",
+      headers: this.postHeaders,
+      body: JSON.stringify({ quiet }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to update quiet setting: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
   async getSubagents(conversationId: string): Promise<Conversation[]> {
     const response = await fetch(`${this.baseUrl}/conversation/${conversationId}/subagents`);
     if (!response.ok) {
