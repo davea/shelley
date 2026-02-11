@@ -293,8 +293,8 @@ func (q *Queries) ListMessages(ctx context.Context, conversationID string) ([]Me
 }
 
 const listMessagesBefore = `-- name: ListMessagesBefore :many
-SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context FROM (
-    SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context FROM messages
+SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context, generation FROM (
+    SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context, generation FROM messages
     WHERE conversation_id = ? AND sequence_id < ?
     ORDER BY sequence_id DESC
     LIMIT ?
@@ -328,6 +328,7 @@ func (q *Queries) ListMessagesBefore(ctx context.Context, arg ListMessagesBefore
 			&i.CreatedAt,
 			&i.DisplayData,
 			&i.ExcludedFromContext,
+			&i.Generation,
 		); err != nil {
 			return nil, err
 		}
@@ -433,8 +434,8 @@ func (q *Queries) ListMessagesForContext(ctx context.Context, conversationID str
 }
 
 const listMessagesLatest = `-- name: ListMessagesLatest :many
-SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context FROM (
-    SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context FROM messages
+SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context, generation FROM (
+    SELECT message_id, conversation_id, sequence_id, type, llm_data, user_data, usage_data, created_at, display_data, excluded_from_context, generation FROM messages
     WHERE conversation_id = ?
     ORDER BY sequence_id DESC
     LIMIT ?
@@ -467,6 +468,7 @@ func (q *Queries) ListMessagesLatest(ctx context.Context, arg ListMessagesLatest
 			&i.CreatedAt,
 			&i.DisplayData,
 			&i.ExcludedFromContext,
+			&i.Generation,
 		); err != nil {
 			return nil, err
 		}
