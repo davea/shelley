@@ -14,6 +14,7 @@ export interface Conversation {
   parent_conversation_id: string | null;
   model: string | null;
   conversation_options: string;
+  quiet: boolean;
 }
 
 export interface Usage {
@@ -72,6 +73,7 @@ export interface ConversationWithStateForTS {
   parent_conversation_id: string | null;
   model: string | null;
   conversation_options: string;
+  quiet: boolean;
   working: boolean;
   git_repo_root?: string;
   git_worktree_root?: string;

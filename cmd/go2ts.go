@@ -107,6 +107,7 @@ type conversationWithStateForTS struct {
 	ParentConversationID *string `json:"parent_conversation_id"`
 	Model                *string `json:"model"`
 	ConversationOptions  string  `json:"conversation_options"`
+	Quiet                bool    `json:"quiet"`
 	Working              bool    `json:"working"`
 	GitRepoRoot          string  `json:"git_repo_root,omitempty"`
 	GitWorktreeRoot      string  `json:"git_worktree_root,omitempty"`

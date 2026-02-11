@@ -19,6 +19,7 @@ type Conversation struct {
 	ParentConversationID *string   `json:"parent_conversation_id"`
 	Model                *string   `json:"model"`
 	ConversationOptions  string    `json:"conversation_options"`
+	Quiet                bool      `json:"quiet"`
 }
 
 type LlmRequest struct {
