@@ -1,7 +1,7 @@
 -- Notification channels table
 -- Stores user-configured notification channels (Discord webhooks, etc.)
 
-CREATE TABLE notification_channels (
+CREATE TABLE IF NOT EXISTS notification_channels (
     channel_id TEXT PRIMARY KEY,
     channel_type TEXT NOT NULL,
     display_name TEXT NOT NULL,
