@@ -197,7 +197,13 @@ func (db *DB) runMigration(ctx context.Context, filename string, migrationNumber
 
 	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
 		if _, err := tx.Exec(string(content)); err != nil {
-			return fmt.Errorf("failed to execute migration %s: %w", filename, err)
+			// Tolerate "duplicate column name" errors from ALTER TABLE ADD COLUMN
+			// to support idempotent migrations (e.g. column already added by a
+			// previous migration that was later renumbered).
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return fmt.Errorf("failed to execute migration %s: %w", filename, err)
+			}
+			slog.Info("migration has duplicate column (already applied), continuing", "file", filename)
 		}
 
 		if _, err := tx.Exec("INSERT INTO migrations (migration_number, migration_name) VALUES (?, ?)", migrationNumber, filename); err != nil {
@@ -647,6 +653,21 @@ func (db *DB) UnarchiveConversation(ctx context.Context, conversationID string) 
 		q := generated.New(tx.Conn())
 		var err error
 		conversation, err = q.UnarchiveConversation(ctx, conversationID)
+		return err
+	})
+	return &conversation, err
+}
+
+// UpdateConversationQuiet sets the quiet flag on a conversation.
+func (db *DB) UpdateConversationQuiet(ctx context.Context, conversationID string, quiet bool) (*generated.Conversation, error) {
+	var conversation generated.Conversation
+	err := db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		var err error
+		conversation, err = q.UpdateConversationQuiet(ctx, generated.UpdateConversationQuietParams{
+			Quiet:          quiet,
+			ConversationID: conversationID,
+		})
 		return err
 	})
 	return &conversation, err
