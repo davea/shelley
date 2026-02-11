@@ -537,6 +537,9 @@ func (s *Server) conversationMux() *http.ServeMux {
 	mux.HandleFunc("POST /{id}/rename", func(w http.ResponseWriter, r *http.Request) {
 		s.handleRenameConversation(w, r, r.PathValue("id"))
 	})
+	mux.HandleFunc("POST /{id}/quiet", func(w http.ResponseWriter, r *http.Request) {
+		s.handleSetQuiet(w, r, r.PathValue("id"))
+	})
 	mux.HandleFunc("GET /{id}/subagents", func(w http.ResponseWriter, r *http.Request) {
 		s.handleGetSubagents(w, r, r.PathValue("id"))
 	})
@@ -1442,6 +1445,32 @@ func (s *Server) handleUnarchiveConversation(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Notify conversation list subscribers
+	go s.publishConversationListUpdate(ConversationListUpdate{
+		Type:         "update",
+		Conversation: conversation,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(conversation)
+}
+
+// handleSetQuiet handles POST /conversation/<id>/quiet
+func (s *Server) handleSetQuiet(w http.ResponseWriter, r *http.Request, conversationID string) {
+	var req struct {
+		Quiet bool `json:"quiet"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	conversation, err := s.db.UpdateConversationQuiet(r.Context(), conversationID, req.Quiet)
+	if err != nil {
+		s.logger.Error("Failed to update conversation quiet setting", "conversationID", conversationID, "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	go s.publishConversationListUpdate(ConversationListUpdate{
 		Type:         "update",
 		Conversation: conversation,
