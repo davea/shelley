@@ -79,6 +79,14 @@ var channelTypeInfo = map[string]ChannelTypeInfo{
 			{Name: "error_priority", Label: "Error Priority", Type: "string", Required: true, Default: "high", Options: []string{"min", "low", "default", "high", "max"}},
 		},
 	},
+	"pushover": {
+		Type:  "pushover",
+		Label: "Pushover",
+		ConfigFields: []ConfigField{
+			{Name: "user_key", Label: "User Key", Type: "string", Required: true, Placeholder: "your-pushover-user-key"},
+			{Name: "app_key", Label: "App Key", Type: "string", Required: true, Placeholder: "your-pushover-app-key"},
+		},
+	},
 }
 
 func toNotificationChannelAPI(ch generated.NotificationChannel) NotificationChannelAPI {
