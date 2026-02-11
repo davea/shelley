@@ -97,8 +97,8 @@ func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversation
 }
 
 const createSubagentConversation = `-- name: CreateSubagentConversation :one
-INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, parent_conversation_id)
-VALUES (?, ?, FALSE, ?, ?)
+INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, parent_conversation_id, conversation_options)
+VALUES (?, ?, FALSE, ?, ?, '{"quiet":true}')
 RETURNING conversation_id, slug, user_initiated, created_at, updated_at, cwd, archived, parent_conversation_id, model, conversation_options
 `
 
@@ -621,6 +621,36 @@ type UpdateConversationModelParams struct {
 func (q *Queries) UpdateConversationModel(ctx context.Context, arg UpdateConversationModelParams) error {
 	_, err := q.db.ExecContext(ctx, updateConversationModel, arg.Model, arg.ConversationID)
 	return err
+}
+
+const updateConversationOptions = `-- name: UpdateConversationOptions :one
+UPDATE conversations
+SET conversation_options = ?, updated_at = CURRENT_TIMESTAMP
+WHERE conversation_id = ?
+RETURNING conversation_id, slug, user_initiated, created_at, updated_at, cwd, archived, parent_conversation_id, model, conversation_options
+`
+
+type UpdateConversationOptionsParams struct {
+	ConversationOptions string `json:"conversation_options"`
+	ConversationID      string `json:"conversation_id"`
+}
+
+func (q *Queries) UpdateConversationOptions(ctx context.Context, arg UpdateConversationOptionsParams) (Conversation, error) {
+	row := q.db.QueryRowContext(ctx, updateConversationOptions, arg.ConversationOptions, arg.ConversationID)
+	var i Conversation
+	err := row.Scan(
+		&i.ConversationID,
+		&i.Slug,
+		&i.UserInitiated,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Cwd,
+		&i.Archived,
+		&i.ParentConversationID,
+		&i.Model,
+		&i.ConversationOptions,
+	)
+	return i, err
 }
 
 const updateConversationSlug = `-- name: UpdateConversationSlug :one
