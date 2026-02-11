@@ -90,8 +90,8 @@ RETURNING *;
 
 
 -- name: CreateSubagentConversation :one
-INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, parent_conversation_id)
-VALUES (?, ?, FALSE, ?, ?)
+INSERT INTO conversations (conversation_id, slug, user_initiated, cwd, parent_conversation_id, conversation_options)
+VALUES (?, ?, FALSE, ?, ?, '{"quiet":true}')
 RETURNING *;
 
 -- name: GetSubagents :many
@@ -117,3 +117,9 @@ WHERE conversation_id = ? AND model IS NULL;
 -- name: GetConversationOptions :one
 SELECT conversation_options FROM conversations
 WHERE conversation_id = ?;
+
+-- name: UpdateConversationOptions :one
+UPDATE conversations
+SET conversation_options = ?, updated_at = CURRENT_TIMESTAMP
+WHERE conversation_id = ?
+RETURNING *;
