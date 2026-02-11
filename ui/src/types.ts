@@ -80,17 +80,33 @@ export interface Model {
   default_reasoning_level?: string;
 }
 
+export interface ConversationOptionsObj {
+  type?: "normal" | "orchestrator";
+  subagent_backend?: "shelley" | "claude-cli" | "codex-cli";
+  tool_overrides?: Record<string, "on" | "off">;
+  disable_all_tools?: boolean;
+  quiet?: boolean;
+}
+
 export interface ChatRequest {
   message: string;
   model?: string;
   cwd?: string;
-  conversation_options?: {
-    tool_overrides?: Record<string, "on" | "off">;
-    disable_all_tools?: boolean;
+<<<<<<< HEAD
+  conversation_options?: ConversationOptionsObj & {
     thinking_level?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
     disable_notifications?: boolean;
   };
   queue?: boolean;
+}
+
+// Parse the conversation_options JSON string from DB into a typed object.
+export function parseConversationOptions(conv: { conversation_options: string }): ConversationOptionsObj {
+  try {
+    return JSON.parse(conv.conversation_options) as ConversationOptionsObj;
+  } catch {
+    return {};
+  }
 }
 // Notification event types
 export type NotificationEventType = "agent_done" | "agent_error";
