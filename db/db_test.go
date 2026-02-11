@@ -600,3 +600,54 @@ func TestCheckpoint(t *testing.T) {
 		t.Fatalf("Checkpoint did not shrink WAL: before=%d after=%d", beforeInfo.Size(), afterInfo.Size())
 	}
 }
+
+func TestDB_Migrate_LegacyNumberKeyed015Collision(t *testing.T) {
+	database := setupDBMigratedThrough(t, 14)
+	defer database.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Simulate a legacy fork DB before migration 028 where migration numbers
+	// are unique and "015" meant a different file.
+	err := database.Pool().Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		if _, err := tx.Exec(`
+			CREATE TABLE notification_channels (
+				channel_id TEXT PRIMARY KEY,
+				channel_type TEXT NOT NULL,
+				display_name TEXT NOT NULL,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				config TEXT NOT NULL DEFAULT '{}',
+				created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			);
+		`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("ALTER TABLE conversations ADD COLUMN quiet BOOLEAN NOT NULL DEFAULT FALSE"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO migrations (migration_number, migration_name) VALUES (15, '015-add-quiet.sql')"); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to set up legacy 015 collision: %v", err)
+	}
+
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate() with legacy 015 collision: %v", err)
+	}
+
+	var got string
+	err = database.Pool().Rx(ctx, func(ctx context.Context, rx *Rx) error {
+		return rx.QueryRow("SELECT migration_name FROM migrations WHERE migration_number = 15").Scan(&got)
+	})
+	if err != nil {
+		t.Fatalf("failed to query migration 15 row: %v", err)
+	}
+	if got != "015-notification-channels.sql" {
+		t.Fatalf("migration 15 row not normalized; got %q", got)
+	}
+}

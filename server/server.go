@@ -1374,7 +1374,8 @@ func (s *Server) publishConversationState(state ConversationState) {
 			Timestamp:      time.Now(),
 			Payload:        payload,
 		}
-		if !isSubagent {
+		// Only dispatch to backend channels if conversation is not quiet and not a subagent.
+		if !isSubagent && convErr == nil && !db.ParseConversationOptions(conv.ConversationOptions).Quiet {
 			s.notifDispatcher.Dispatch(context.Background(), event)
 			for _, hook := range hooks {
 				go s.sendEndOfTurnHook(context.Background(), hook, event)
@@ -1401,7 +1402,6 @@ func (s *Server) publishConversationState(state ConversationState) {
 				}
 			}()
 		}
-		// Still set notifEvent so the SSE stream broadcasts it to the UI.
 		notifEvent = &event
 	}
 
