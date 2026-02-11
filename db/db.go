@@ -197,7 +197,13 @@ func (db *DB) runMigration(ctx context.Context, filename string, migrationNumber
 
 	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
 		if _, err := tx.Exec(string(content)); err != nil {
-			return fmt.Errorf("failed to execute migration %s: %w", filename, err)
+			// Tolerate "duplicate column name" errors from ALTER TABLE ADD COLUMN
+			// to support idempotent migrations (e.g. column already added by a
+			// previous migration that was later renumbered).
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return fmt.Errorf("failed to execute migration %s: %w", filename, err)
+			}
+			slog.Info("migration has duplicate column (already applied), continuing", "file", filename)
 		}
 
 		if _, err := tx.Exec("INSERT INTO migrations (migration_number, migration_name) VALUES (?, ?)", migrationNumber, filename); err != nil {
@@ -247,6 +253,7 @@ type ConversationOptions struct {
 	// DisableAllTools disables every tool by default; ToolOverrides with "on" re-enable individual tools.
 	// Useful for API clients that can't enumerate the tool registry.
 	DisableAllTools bool `json:"disable_all_tools,omitempty"`
+	Quiet           bool `json:"quiet,omitempty"` // suppress push notifications
 	// EndOfTurnHooks are posted to whenever a top-level agent turn ends.
 	EndOfTurnHooks []ConversationHook `json:"end_of_turn_hooks,omitempty"`
 }
@@ -264,21 +271,6 @@ func ParseConversationOptions(s string) ConversationOptions {
 		_ = json.Unmarshal([]byte(s), &opts)
 	}
 	return opts
-}
-
-// UpdateConversationOptions replaces a conversation's stored options JSON.
-func (db *DB) UpdateConversationOptions(ctx context.Context, conversationID string, opts ConversationOptions) error {
-	optsJSON, err := json.Marshal(opts)
-	if err != nil {
-		return fmt.Errorf("failed to marshal conversation options: %w", err)
-	}
-	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
-		q := generated.New(tx.Conn())
-		return q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
-			ConversationID:      conversationID,
-			ConversationOptions: string(optsJSON),
-		})
-	})
 }
 
 // RegisterConversationHook atomically adds hook to conversation options if absent.
@@ -301,10 +293,11 @@ func (db *DB) RegisterConversationHook(ctx context.Context, conversationID strin
 		if err != nil {
 			return fmt.Errorf("failed to marshal conversation options: %w", err)
 		}
-		return q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
+		_, err = q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
 			ConversationID:      conversationID,
 			ConversationOptions: string(optsJSON),
 		})
+		return err
 	})
 	return opts, err
 }
@@ -934,6 +927,25 @@ func (db *DB) UnarchiveConversation(ctx context.Context, conversationID string) 
 		q := generated.New(tx.Conn())
 		var err error
 		conversation, err = q.UnarchiveConversation(ctx, conversationID)
+		return err
+	})
+	return &conversation, err
+}
+
+// UpdateConversationOptions updates the conversation_options JSON for a conversation.
+func (db *DB) UpdateConversationOptions(ctx context.Context, conversationID string, opts ConversationOptions) (*generated.Conversation, error) {
+	optsJSON, err := json.Marshal(opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal conversation options: %w", err)
+	}
+	var conversation generated.Conversation
+	err = db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		var err error
+		conversation, err = q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
+			ConversationOptions: string(optsJSON),
+			ConversationID:      conversationID,
+		})
 		return err
 	})
 	return &conversation, err
