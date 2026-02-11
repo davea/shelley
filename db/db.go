@@ -197,7 +197,13 @@ func (db *DB) runMigration(ctx context.Context, filename string, migrationNumber
 
 	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
 		if _, err := tx.Exec(string(content)); err != nil {
-			return fmt.Errorf("failed to execute migration %s: %w", filename, err)
+			// Tolerate "duplicate column name" errors from ALTER TABLE ADD COLUMN
+			// to support idempotent migrations (e.g. column already added by a
+			// previous migration that was later renumbered).
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return fmt.Errorf("failed to execute migration %s: %w", filename, err)
+			}
+			slog.Info("migration has duplicate column (already applied), continuing", "file", filename)
 		}
 
 		if _, err := tx.Exec("INSERT INTO migrations (migration_number, migration_name) VALUES (?, ?)", migrationNumber, filename); err != nil {
@@ -238,6 +244,7 @@ func WithTxRes[T any](db *DB, ctx context.Context, fn func(*generated.Queries) (
 type ConversationOptions struct {
 	Type            string `json:"type,omitempty"`             // "normal" (default) or "orchestrator"
 	SubagentBackend string `json:"subagent_backend,omitempty"` // "shelley" (default), "claude-cli", "codex-cli"
+	Quiet           bool   `json:"quiet,omitempty"`             // suppress push notifications
 }
 
 // IsOrchestrator returns true if the conversation is in orchestrator mode.
@@ -673,6 +680,25 @@ func (db *DB) UnarchiveConversation(ctx context.Context, conversationID string) 
 		q := generated.New(tx.Conn())
 		var err error
 		conversation, err = q.UnarchiveConversation(ctx, conversationID)
+		return err
+	})
+	return &conversation, err
+}
+
+// UpdateConversationOptions updates the conversation_options JSON for a conversation.
+func (db *DB) UpdateConversationOptions(ctx context.Context, conversationID string, opts ConversationOptions) (*generated.Conversation, error) {
+	optsJSON, err := json.Marshal(opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal conversation options: %w", err)
+	}
+	var conversation generated.Conversation
+	err = db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		var err error
+		conversation, err = q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
+			ConversationOptions: string(optsJSON),
+			ConversationID:      conversationID,
+		})
 		return err
 	})
 	return &conversation, err
