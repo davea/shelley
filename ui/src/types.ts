@@ -56,15 +56,27 @@ export interface Model {
   max_context_tokens?: number;
 }
 
+export interface ConversationOptionsObj {
+  type?: "normal" | "orchestrator";
+  subagent_backend?: "shelley" | "claude-cli" | "codex-cli";
+  quiet?: boolean;
+}
+
 export interface ChatRequest {
   message: string;
   model?: string;
   cwd?: string;
-  conversation_options?: {
-    type?: "normal" | "orchestrator";
-    subagent_backend?: "shelley" | "claude-cli" | "codex-cli";
-  };
+  conversation_options?: ConversationOptionsObj;
   queue?: boolean;
+}
+
+// Parse the conversation_options JSON string from DB into a typed object.
+export function parseConversationOptions(conv: { conversation_options: string }): ConversationOptionsObj {
+  try {
+    return JSON.parse(conv.conversation_options) as ConversationOptionsObj;
+  } catch {
+    return {};
+  }
 }
 // Notification event types
 export type NotificationEventType = "agent_done" | "agent_error";
