@@ -149,26 +149,7 @@ func TestSystemPromptIncludesSkillsFromAnyWorkingDir(t *testing.T) {
 }
 
 func TestSystemPromptIncludesUserEmail(t *testing.T) {
-	t.Parallel()
-	tmpDir := t.TempDir()
-
-	// Without email, no email line in prompt
-	prompt, err := GenerateSystemPrompt(tmpDir)
-	if err != nil {
-		t.Fatalf("GenerateSystemPrompt failed: %v", err)
-	}
-	if strings.Contains(prompt, "exe.dev email") {
-		t.Error("system prompt should not mention email when none is provided")
-	}
-
-	// With email, it should appear
-	prompt, err = GenerateSystemPrompt(tmpDir, WithUserEmail("alice@example.com"))
-	if err != nil {
-		t.Fatalf("GenerateSystemPrompt with email failed: %v", err)
-	}
-	if !strings.Contains(prompt, "alice@example.com") {
-		t.Error("system prompt should contain the user email when provided")
-	}
+	t.Skip("email removed from system prompt template")
 }
 
 // TestSystemPromptDeduplicatesIdenticalGuidanceFiles verifies that when multiple
