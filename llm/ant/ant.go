@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,18 @@ const (
 	DefaultModel = Claude45Sonnet
 	APIKeyEnv    = "ANTHROPIC_API_KEY"
 	DefaultURL   = "https://api.anthropic.com/v1/messages"
+
+	// OAuth token constants
+	oauthTokenPrefix  = "sk-ant-oat"
+	oauthSystemPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
+	oauthBetaFeatures = "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
+	oauthUserAgent    = "claude-cli/2.1.2 (external, cli)"
+
+	// OAuth refresh constants
+	oauthRefreshURL   = "https://platform.claude.com/v1/oauth/token"
+	oauthClientID     = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	oauthScope        = "user:inference user:mcp_servers user:profile user:sessions:claude_code"
+	oauthRefreshAgent = "axios/1.8.4"
 )
 
 const (
@@ -53,6 +66,104 @@ func maxOutputTokens(model string) int {
 		return n
 	}
 	return defaultMaxOutputTokens
+}
+
+// oauthToken represents a parsed OAuth token with refresh capability.
+type oauthToken struct {
+	AccessToken  string
+	ExpiryTime   time.Time
+	RefreshToken string
+}
+
+// parseOAuthToken parses a composite OAuth token string.
+// Format: "<access_token>;<expiry_unix_timestamp>;<refresh_token>"
+// Returns nil if the token is not in OAuth format.
+func parseOAuthToken(token string) *oauthToken {
+	parts := strings.Split(token, ";")
+	if len(parts) != 3 {
+		return nil
+	}
+	if !strings.HasPrefix(parts[0], oauthTokenPrefix) {
+		return nil
+	}
+	expiry, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return nil
+	}
+	return &oauthToken{
+		AccessToken:  parts[0],
+		ExpiryTime:   time.Unix(expiry, 0),
+		RefreshToken: parts[2],
+	}
+}
+
+// String returns the composite token string.
+func (t *oauthToken) String() string {
+	return fmt.Sprintf("%s;%d;%s", t.AccessToken, t.ExpiryTime.Unix(), t.RefreshToken)
+}
+
+// IsExpired reports whether the token has expired.
+func (t *oauthToken) IsExpired() bool {
+	return time.Now().After(t.ExpiryTime)
+}
+
+// oauthRefreshRequest is the request body for token refresh.
+type oauthRefreshRequest struct {
+	ClientID     string `json:"client_id"`
+	GrantType    string `json:"grant_type"`
+	RefreshToken string `json:"refresh_token"`
+	Scope        string `json:"scope"`
+}
+
+// oauthRefreshResponse is the response from token refresh.
+type oauthRefreshResponse struct {
+	AccessToken  string `json:"access_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+// refreshOAuthToken refreshes an expired OAuth token.
+func (s *Service) refreshOAuthToken(ctx context.Context, tok *oauthToken) (*oauthToken, error) {
+	reqBody := oauthRefreshRequest{
+		ClientID:     oauthClientID,
+		GrantType:    "refresh_token",
+		RefreshToken: tok.RefreshToken,
+		Scope:        oauthScope,
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal refresh request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", oauthRefreshURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", oauthRefreshAgent)
+
+	httpc := cmp.Or(s.HTTPC, http.DefaultClient)
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("refresh request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("refresh failed with status %d: %s", resp.StatusCode, body)
+	}
+
+	var refreshResp oauthRefreshResponse
+	if err := json.NewDecoder(resp.Body).Decode(&refreshResp); err != nil {
+		return nil, fmt.Errorf("decode refresh response: %w", err)
+	}
+
+	return &oauthToken{
+		AccessToken:  refreshResp.AccessToken,
+		ExpiryTime:   time.Now().Add(time.Duration(refreshResp.ExpiresIn) * time.Second),
+		RefreshToken: refreshResp.RefreshToken,
+	}, nil
 }
 
 // IsClaudeModel reports whether userName is a user-friendly Claude model.
@@ -106,13 +217,14 @@ func (s *Service) MaxImageDimension() int {
 // Service provides Claude completions.
 // Fields should not be altered concurrently with calling any method on Service.
 type Service struct {
-	HTTPC         *http.Client      // defaults to http.DefaultClient if nil
-	URL           string            // defaults to DefaultURL if empty
-	APIKey        string            // must be non-empty
-	Model         string            // defaults to DefaultModel if empty
-	MaxTokens     int               // 0 means use model-specific limit from modelMaxOutputTokens
-	ThinkingLevel llm.ThinkingLevel // thinking level (ThinkingLevelOff disables, default is ThinkingLevelMedium)
-	Backoff       []time.Duration   // retry backoff durations; defaults to {15s, 30s, 60s} if nil
+	HTTPC          *http.Client      // defaults to http.DefaultClient if nil
+	URL            string            // defaults to DefaultURL if empty
+	APIKey         string            // must be non-empty; for OAuth: "access;expiry;refresh"
+	Model          string            // defaults to DefaultModel if empty
+	MaxTokens      int               // 0 means use model-specific limit from modelMaxOutputTokens
+	ThinkingLevel  llm.ThinkingLevel // thinking level (ThinkingLevelOff disables, default is ThinkingLevelMedium)
+	Backoff        []time.Duration   // retry backoff durations; defaults to {15s, 30s, 60s} if nil
+	OnTokenRefresh func(newToken string) // called after successful OAuth token refresh
 }
 
 var _ llm.Service = (*Service)(nil)
@@ -453,7 +565,7 @@ func fromLLMSystem(s llm.SystemContent) systemContent {
 	}
 }
 
-func (s *Service) fromLLMRequest(r *llm.Request) *request {
+func (s *Service) fromLLMRequest(r *llm.Request, isOAuth bool) *request {
 	model := cmp.Or(s.Model, DefaultModel)
 	maxTokens := cmp.Or(s.MaxTokens, maxOutputTokens(model))
 
@@ -483,13 +595,28 @@ func (s *Service) fromLLMRequest(r *llm.Request) *request {
 			messages = append(messages, msg)
 		}
 	}
+
+	// Build system content, prepending OAuth prefix if needed
+	var system []systemContent
+	if isOAuth {
+		// OAuth requires the Claude Code system prefix
+		system = append(system, systemContent{
+			Type:         "text",
+			Text:         oauthSystemPrefix,
+			CacheControl: json.RawMessage(`{"type":"ephemeral"}`),
+		})
+	}
+	for _, sc := range r.System {
+		system = append(system, fromLLMSystem(sc))
+	}
+
 	req := &request{
 		Model:      model,
 		Messages:   messages,
 		MaxTokens:  maxTokens,
 		ToolChoice: fromLLMToolChoice(r.ToolChoice),
 		Tools:      mapped(r.Tools, fromLLMTool),
-		System:     mapped(r.System, fromLLMSystem),
+		System:     system,
 	}
 
 	// Enable extended thinking if a thinking level is set
@@ -874,7 +1001,23 @@ func parseSSEStream(r io.Reader) (*response, error) {
 // Do sends a streaming request to Anthropic and collects the full response.
 func (s *Service) Do(ctx context.Context, ir *llm.Request) (*llm.Response, error) {
 	startTime := time.Now()
-	request := s.fromLLMRequest(ir)
+
+	// Parse OAuth token and refresh if needed
+	oauthTok := parseOAuthToken(s.APIKey)
+	if oauthTok != nil && oauthTok.IsExpired() {
+		newTok, err := s.refreshOAuthToken(ctx, oauthTok)
+		if err != nil {
+			return nil, fmt.Errorf("oauth token refresh failed: %w", err)
+		}
+		oauthTok = newTok
+		s.APIKey = newTok.String()
+		if s.OnTokenRefresh != nil {
+			s.OnTokenRefresh(s.APIKey)
+		}
+	}
+
+	isOAuth := oauthTok != nil
+	request := s.fromLLMRequest(ir, isOAuth)
 	request.Stream = true
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -920,8 +1063,19 @@ func (s *Service) Do(ctx context.Context, ir *llm.Request) (*llm.Response, error
 		}
 
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-API-Key", s.APIKey)
 		req.Header.Set("Anthropic-Version", "2023-06-01")
+
+		if isOAuth {
+			// OAuth tokens use Bearer auth and require additional headers
+			req.Header.Set("Authorization", "Bearer "+oauthTok.AccessToken)
+			req.Header.Set("anthropic-dangerous-direct-browser-access", "true")
+			req.Header.Set("anthropic-beta", oauthBetaFeatures)
+			req.Header.Set("User-Agent", oauthUserAgent)
+			req.Header.Set("x-app", "cli")
+		} else {
+			// Standard API key auth
+			req.Header.Set("X-API-Key", s.APIKey)
+		}
 
 		resp, err := httpc.Do(req)
 		if err != nil {
