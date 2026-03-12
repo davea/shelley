@@ -12,7 +12,10 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"shelley.exe.dev/llm"
@@ -22,6 +25,18 @@ const (
 	DefaultModel = Claude45Sonnet
 	APIKeyEnv    = "ANTHROPIC_API_KEY"
 	DefaultURL   = "https://api.anthropic.com/v1/messages"
+
+	// OAuth token constants
+	oauthTokenPrefix  = "sk-ant-oat"
+	oauthSystemPrefix = "You are Claude Code, Anthropic's official CLI for Claude."
+	oauthBetaFeatures = "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14"
+	oauthUserAgent    = "claude-cli/2.1.2 (external, cli)"
+
+	// OAuth refresh constants
+	oauthRefreshURL   = "https://platform.claude.com/v1/oauth/token"
+	oauthClientID     = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	oauthScope        = "user:inference user:mcp_servers user:profile user:sessions:claude_code"
+	oauthRefreshAgent = "axios/1.8.4"
 )
 
 const (
@@ -53,6 +68,181 @@ func maxOutputTokens(model string) int {
 		return n
 	}
 	return defaultMaxOutputTokens
+}
+
+// oauthToken represents a parsed OAuth token with refresh capability.
+type oauthToken struct {
+	AccessToken  string
+	ExpiryTime   time.Time
+	RefreshToken string
+}
+
+// parseOAuthToken parses a composite OAuth token string.
+// Format: "<access_token>;<expiry_unix_timestamp>;<refresh_token>"
+// Returns nil if the token is not in OAuth format.
+func parseOAuthToken(token string) *oauthToken {
+	parts := strings.Split(token, ";")
+	if len(parts) != 3 {
+		return nil
+	}
+	if !strings.HasPrefix(parts[0], oauthTokenPrefix) {
+		return nil
+	}
+	expiry, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return nil
+	}
+	return &oauthToken{
+		AccessToken:  parts[0],
+		ExpiryTime:   time.Unix(expiry, 0),
+		RefreshToken: parts[2],
+	}
+}
+
+// String returns the composite token string.
+func (t *oauthToken) String() string {
+	return fmt.Sprintf("%s;%d;%s", t.AccessToken, t.ExpiryTime.Unix(), t.RefreshToken)
+}
+
+// IsExpired reports whether the token has expired.
+func (t *oauthToken) IsExpired() bool {
+	return time.Now().After(t.ExpiryTime)
+}
+
+// isOAuthFilePath reports whether the API key refers to a JSON file on disk.
+func isOAuthFilePath(apiKey string) bool {
+	return strings.HasSuffix(apiKey, ".json")
+}
+
+// readOAuthFromFile reads OAuth token fields from a JSON file.
+// The file must contain claudeAiOauth.{accessToken, expiresAt, refreshToken}.
+// expiresAt is a unix timestamp in milliseconds.
+func readOAuthFromFile(path string) (*oauthToken, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read oauth file %s: %w", path, err)
+	}
+	var file struct {
+		ClaudeAiOauth struct {
+			AccessToken  string `json:"accessToken"`
+			ExpiresAt    int64  `json:"expiresAt"`
+			RefreshToken string `json:"refreshToken"`
+		} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("parse oauth file %s: %w", path, err)
+	}
+	oauth := file.ClaudeAiOauth
+	if oauth.AccessToken == "" || oauth.RefreshToken == "" {
+		return nil, fmt.Errorf("oauth file %s missing accessToken or refreshToken", path)
+	}
+	// expiresAt is in milliseconds
+	return &oauthToken{
+		AccessToken:  oauth.AccessToken,
+		ExpiryTime:   time.Unix(oauth.ExpiresAt/1000, (oauth.ExpiresAt%1000)*int64(time.Millisecond)),
+		RefreshToken: oauth.RefreshToken,
+	}, nil
+}
+
+// writeOAuthToFile updates only the OAuth token fields in a JSON file,
+// preserving all other contents.
+func writeOAuthToFile(path string, tok *oauthToken) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read oauth file for update %s: %w", path, err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("parse oauth file for update %s: %w", path, err)
+	}
+	// Parse the nested claudeAiOauth object, preserving extra fields
+	var oauthRaw map[string]json.RawMessage
+	if existing, ok := raw["claudeAiOauth"]; ok {
+		if err := json.Unmarshal(existing, &oauthRaw); err != nil {
+			return fmt.Errorf("parse claudeAiOauth in %s: %w", path, err)
+		}
+	} else {
+		oauthRaw = make(map[string]json.RawMessage)
+	}
+	// Update only the three token fields
+	oauthRaw["accessToken"], _ = json.Marshal(tok.AccessToken)
+	oauthRaw["expiresAt"], _ = json.Marshal(tok.ExpiryTime.UnixMilli())
+	oauthRaw["refreshToken"], _ = json.Marshal(tok.RefreshToken)
+
+	updatedOAuth, err := json.Marshal(oauthRaw)
+	if err != nil {
+		return fmt.Errorf("marshal claudeAiOauth: %w", err)
+	}
+	raw["claudeAiOauth"] = updatedOAuth
+
+	updatedData, err := json.MarshalIndent(raw, "", "    ")
+	if err != nil {
+		return fmt.Errorf("marshal oauth file: %w", err)
+	}
+	updatedData = append(updatedData, '\n')
+	if err := os.WriteFile(path, updatedData, 0600); err != nil {
+		return fmt.Errorf("write oauth file %s: %w", path, err)
+	}
+	return nil
+}
+
+// oauthRefreshRequest is the request body for token refresh.
+type oauthRefreshRequest struct {
+	ClientID     string `json:"client_id"`
+	GrantType    string `json:"grant_type"`
+	RefreshToken string `json:"refresh_token"`
+	Scope        string `json:"scope"`
+}
+
+// oauthRefreshResponse is the response from token refresh.
+type oauthRefreshResponse struct {
+	AccessToken  string `json:"access_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+// refreshOAuthToken refreshes an expired OAuth token.
+func (s *Service) refreshOAuthToken(ctx context.Context, tok *oauthToken) (*oauthToken, error) {
+	reqBody := oauthRefreshRequest{
+		ClientID:     oauthClientID,
+		GrantType:    "refresh_token",
+		RefreshToken: tok.RefreshToken,
+		Scope:        oauthScope,
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal refresh request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", oauthRefreshURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", oauthRefreshAgent)
+
+	httpc := cmp.Or(s.HTTPC, http.DefaultClient)
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("refresh request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("refresh failed with status %d: %s", resp.StatusCode, body)
+	}
+
+	var refreshResp oauthRefreshResponse
+	if err := json.NewDecoder(resp.Body).Decode(&refreshResp); err != nil {
+		return nil, fmt.Errorf("decode refresh response: %w", err)
+	}
+
+	return &oauthToken{
+		AccessToken:  refreshResp.AccessToken,
+		ExpiryTime:   time.Now().Add(time.Duration(refreshResp.ExpiresIn) * time.Second),
+		RefreshToken: refreshResp.RefreshToken,
+	}, nil
 }
 
 // IsClaudeModel reports whether userName is a user-friendly Claude model.
@@ -106,13 +296,17 @@ func (s *Service) MaxImageDimension() int {
 // Service provides Claude completions.
 // Fields should not be altered concurrently with calling any method on Service.
 type Service struct {
-	HTTPC         *http.Client      // defaults to http.DefaultClient if nil
-	URL           string            // defaults to DefaultURL if empty
-	APIKey        string            // must be non-empty
-	Model         string            // defaults to DefaultModel if empty
-	MaxTokens     int               // 0 means use model-specific limit from modelMaxOutputTokens
-	ThinkingLevel llm.ThinkingLevel // thinking level (ThinkingLevelOff disables, default is ThinkingLevelMedium)
-	Backoff       []time.Duration   // retry backoff durations; defaults to {15s, 30s, 60s} if nil
+	HTTPC          *http.Client      // defaults to http.DefaultClient if nil
+	URL            string            // defaults to DefaultURL if empty
+	APIKey         string            // must be non-empty; for OAuth: "access;expiry;refresh" or path ending in .json
+	Model          string            // defaults to DefaultModel if empty
+	MaxTokens      int               // 0 means use model-specific limit from modelMaxOutputTokens
+	ThinkingLevel  llm.ThinkingLevel // thinking level (ThinkingLevelOff disables, default is ThinkingLevelMedium)
+	Backoff        []time.Duration   // retry backoff durations; defaults to {15s, 30s, 60s} if nil
+	OnTokenRefresh func(newToken string) // called after successful OAuth token refresh (composite token string)
+	OnTokenReload  func() string         // called to re-read the latest API key from source of truth
+
+	oauthMu sync.Mutex // serializes OAuth token operations
 }
 
 var _ llm.Service = (*Service)(nil)
@@ -453,7 +647,7 @@ func fromLLMSystem(s llm.SystemContent) systemContent {
 	}
 }
 
-func (s *Service) fromLLMRequest(r *llm.Request) *request {
+func (s *Service) fromLLMRequest(r *llm.Request, isOAuth bool) *request {
 	model := cmp.Or(s.Model, DefaultModel)
 	maxTokens := cmp.Or(s.MaxTokens, maxOutputTokens(model))
 
@@ -483,13 +677,14 @@ func (s *Service) fromLLMRequest(r *llm.Request) *request {
 			messages = append(messages, msg)
 		}
 	}
+
 	req := &request{
 		Model:      model,
 		Messages:   messages,
 		MaxTokens:  maxTokens,
 		ToolChoice: fromLLMToolChoice(r.ToolChoice),
 		Tools:      mapped(r.Tools, fromLLMTool),
-		System:     mapped(r.System, fromLLMSystem),
+		System:     buildSystemContent(r, isOAuth),
 	}
 
 	// Enable extended thinking if a thinking level is set
@@ -513,10 +708,27 @@ func (s *Service) fromLLMRequest(r *llm.Request) *request {
 	return req
 }
 
+// buildSystemContent builds the system content list, prepending the OAuth
+// prefix when isOAuth is true.
+func buildSystemContent(r *llm.Request, isOAuth bool) []systemContent {
+	var system []systemContent
+	if isOAuth {
+		system = append(system, systemContent{
+			Type:         "text",
+			Text:         oauthSystemPrefix,
+			CacheControl: json.RawMessage(`{"type":"ephemeral"}`),
+		})
+	}
+	for _, sc := range r.System {
+		system = append(system, fromLLMSystem(sc))
+	}
+	return system
+}
+
 // fromLLMRequestStrippingAllThinking is like fromLLMRequest but strips thinking
 // blocks from ALL assistant messages (including the last one). Used as a fallback
 // when the API rejects thinking signatures — e.g. after model version rotation.
-func (s *Service) fromLLMRequestStrippingAllThinking(r *llm.Request) *request {
+func (s *Service) fromLLMRequestStrippingAllThinking(r *llm.Request, isOAuth bool) *request {
 	model := cmp.Or(s.Model, DefaultModel)
 	maxTokens := cmp.Or(s.MaxTokens, maxOutputTokens(model))
 
@@ -536,7 +748,7 @@ func (s *Service) fromLLMRequestStrippingAllThinking(r *llm.Request) *request {
 		MaxTokens:  maxTokens,
 		ToolChoice: fromLLMToolChoice(r.ToolChoice),
 		Tools:      mapped(r.Tools, fromLLMTool),
-		System:     mapped(r.System, fromLLMSystem),
+		System:     buildSystemContent(r, isOAuth),
 	}
 
 	if s.ThinkingLevel != llm.ThinkingLevelOff {
@@ -871,10 +1083,92 @@ func parseSSEStream(r io.Reader) (*response, error) {
 	return resp, nil
 }
 
+// loadOAuthToken reads the current OAuth token from wherever it's stored.
+// Returns nil if the API key is not an OAuth token.
+func (s *Service) loadOAuthToken() (*oauthToken, error) {
+	if isOAuthFilePath(s.APIKey) {
+		return readOAuthFromFile(s.APIKey)
+	}
+	tok := parseOAuthToken(s.APIKey)
+	return tok, nil // nil tok is fine — means not OAuth
+}
+
+// ensureValidOAuthToken loads the OAuth token and refreshes it if expired.
+// Returns the valid token (or nil if not OAuth). Persists refreshed tokens.
+func (s *Service) ensureValidOAuthToken(ctx context.Context) (*oauthToken, error) {
+	s.oauthMu.Lock()
+	defer s.oauthMu.Unlock()
+
+	tok, err := s.loadOAuthToken()
+	if err != nil {
+		return nil, err
+	}
+	if tok == nil {
+		return nil, nil
+	}
+	if !tok.IsExpired() {
+		return tok, nil
+	}
+	return s.refreshAndPersist(ctx, tok)
+}
+
+// reloadAndRefreshOAuthToken re-reads the token from source of truth, and if
+// still expired, refreshes it. Used when the API returns an auth error.
+func (s *Service) reloadAndRefreshOAuthToken(ctx context.Context) (*oauthToken, error) {
+	s.oauthMu.Lock()
+	defer s.oauthMu.Unlock()
+
+	// First, reload the API key from the source of truth (DB) if available
+	if s.OnTokenReload != nil {
+		if reloaded := s.OnTokenReload(); reloaded != "" {
+			s.APIKey = reloaded
+		}
+	}
+
+	tok, err := s.loadOAuthToken()
+	if err != nil {
+		return nil, err
+	}
+	if tok == nil {
+		return nil, nil
+	}
+	if !tok.IsExpired() {
+		return tok, nil
+	}
+	return s.refreshAndPersist(ctx, tok)
+}
+
+// refreshAndPersist refreshes the token and writes it back to its source.
+// Must be called with oauthMu held.
+func (s *Service) refreshAndPersist(ctx context.Context, tok *oauthToken) (*oauthToken, error) {
+	newTok, err := s.refreshOAuthToken(ctx, tok)
+	if err != nil {
+		return nil, fmt.Errorf("oauth token refresh failed: %w", err)
+	}
+	if isOAuthFilePath(s.APIKey) {
+		if err := writeOAuthToFile(s.APIKey, newTok); err != nil {
+			slog.Error("failed to write refreshed OAuth token to file", "path", s.APIKey, "error", err)
+		}
+	} else {
+		s.APIKey = newTok.String()
+		if s.OnTokenRefresh != nil {
+			s.OnTokenRefresh(s.APIKey)
+		}
+	}
+	return newTok, nil
+}
+
 // Do sends a streaming request to Anthropic and collects the full response.
 func (s *Service) Do(ctx context.Context, ir *llm.Request) (*llm.Response, error) {
 	startTime := time.Now()
-	request := s.fromLLMRequest(ir)
+
+	oauthTok, err := s.ensureValidOAuthToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	isOAuth := oauthTok != nil
+	request := s.fromLLMRequest(ir, isOAuth)
 	request.Stream = true
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -885,6 +1179,10 @@ func (s *Service) Do(ctx context.Context, ir *llm.Request) (*llm.Response, error
 	// strippedPayload is built lazily on the first "Invalid signature" error.
 	// It strips ALL thinking blocks from the request as a fallback.
 	var strippedPayload []byte
+
+	// oauthRetried tracks whether we've already attempted a token reload+refresh
+	// in response to an auth error, to avoid infinite retry loops.
+	var oauthRetried bool
 
 	backoff := s.Backoff
 	if backoff == nil {
@@ -920,8 +1218,19 @@ func (s *Service) Do(ctx context.Context, ir *llm.Request) (*llm.Response, error
 		}
 
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-API-Key", s.APIKey)
 		req.Header.Set("Anthropic-Version", "2023-06-01")
+
+		if isOAuth {
+			// OAuth tokens use Bearer auth and require additional headers
+			req.Header.Set("Authorization", "Bearer "+oauthTok.AccessToken)
+			req.Header.Set("anthropic-dangerous-direct-browser-access", "true")
+			req.Header.Set("anthropic-beta", oauthBetaFeatures)
+			req.Header.Set("User-Agent", oauthUserAgent)
+			req.Header.Set("x-app", "cli")
+		} else {
+			// Standard API key auth
+			req.Header.Set("X-API-Key", s.APIKey)
+		}
 
 		resp, err := httpc.Do(req)
 		if err != nil {
@@ -965,6 +1274,24 @@ func (s *Service) Do(ctx context.Context, ir *llm.Request) (*llm.Response, error
 				slog.WarnContext(ctx, "anthropic_request_rate_limited", "response", string(buf), "url", url, "model", s.Model)
 				errs = errors.Join(errs, fmt.Errorf("attempt %d at %s: status %v (url=%s, model=%s): %s", attempts+1, time.Now().Format(time.DateTime), resp.Status, url, cmp.Or(s.Model, DefaultModel), buf))
 				continue
+			case resp.StatusCode == 401 && isOAuth && !oauthRetried:
+				// Auth error with OAuth — reload token from source of truth and retry.
+				// This handles cases where the token was refreshed externally (e.g.,
+				// another process updated the JSON file or DB).
+				oauthRetried = true
+				slog.WarnContext(ctx, "anthropic_oauth_auth_error, reloading token",
+					"response", string(buf), "url", url, "model", s.Model)
+				newTok, refreshErr := s.reloadAndRefreshOAuthToken(ctx)
+				if refreshErr != nil {
+					return nil, errors.Join(errs, fmt.Errorf("attempt %d at %s: status 401, token reload/refresh failed: %w",
+						attempts+1, time.Now().Format(time.DateTime), refreshErr))
+				}
+				if newTok != nil {
+					oauthTok = newTok
+				}
+				errs = errors.Join(errs, fmt.Errorf("attempt %d at %s: status 401, retrying with reloaded token",
+					attempts+1, time.Now().Format(time.DateTime)))
+				continue
 			case resp.StatusCode >= 400 && resp.StatusCode < 500:
 				// Check for "Invalid signature" in thinking blocks — this happens
 				// when the model version rotated and old signatures are no longer valid.
@@ -972,7 +1299,7 @@ func (s *Service) Do(ctx context.Context, ir *llm.Request) (*llm.Response, error
 				if strippedPayload == nil && strings.Contains(string(buf), "Invalid `signature`") {
 					slog.WarnContext(ctx, "anthropic_invalid_thinking_signature, retrying without thinking blocks",
 						"response", string(buf), "url", url, "model", s.Model)
-					strippedReq := s.fromLLMRequestStrippingAllThinking(ir)
+					strippedReq := s.fromLLMRequestStrippingAllThinking(ir, isOAuth)
 					strippedReq.Stream = true
 					strippedPayload, err = json.Marshal(strippedReq)
 					if err != nil {
