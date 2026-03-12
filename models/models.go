@@ -750,13 +750,37 @@ func (m *Manager) GetModelInfo(modelID string) *ModelInfo {
 func (m *Manager) createServiceFromModel(model *generated.Model) llm.Service {
 	switch model.ProviderType {
 	case "anthropic":
-		return &ant.Service{
+		modelID := model.ModelID // capture for closure
+		svc := &ant.Service{
 			APIKey:        model.ApiKey,
 			URL:           model.Endpoint,
 			Model:         model.ModelName,
 			HTTPC:         m.httpc,
 			ThinkingLevel: llm.ThinkingLevelMedium,
 		}
+		// Set callbacks for OAuth token management
+		if m.db != nil {
+			svc.OnTokenRefresh = func(newToken string) {
+				err := m.db.UpdateModelAPIKey(context.Background(), generated.UpdateModelAPIKeyParams{
+					ModelID: modelID,
+					ApiKey:  newToken,
+				})
+				if err != nil && m.logger != nil {
+					m.logger.Error("Failed to persist refreshed OAuth token", "model_id", modelID, "error", err)
+				}
+			}
+			svc.OnTokenReload = func() string {
+				dbModel, err := m.db.GetModel(context.Background(), modelID)
+				if err != nil {
+					if m.logger != nil {
+						m.logger.Error("Failed to reload model API key", "model_id", modelID, "error", err)
+					}
+					return ""
+				}
+				return dbModel.ApiKey
+			}
+		}
+		return svc
 	case "openai":
 		return &oai.Service{
 			APIKey:   model.ApiKey,
