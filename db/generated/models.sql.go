@@ -182,3 +182,17 @@ func (q *Queries) UpdateModel(ctx context.Context, arg UpdateModelParams) (Model
 	)
 	return i, err
 }
+
+const updateModelAPIKey = `-- name: UpdateModelAPIKey :exec
+UPDATE models SET api_key = ?, updated_at = CURRENT_TIMESTAMP WHERE model_id = ?
+`
+
+type UpdateModelAPIKeyParams struct {
+	ApiKey  string `json:"api_key"`
+	ModelID string `json:"model_id"`
+}
+
+func (q *Queries) UpdateModelAPIKey(ctx context.Context, arg UpdateModelAPIKeyParams) error {
+	_, err := q.db.ExecContext(ctx, updateModelAPIKey, arg.ApiKey, arg.ModelID)
+	return err
+}
