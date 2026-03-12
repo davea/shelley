@@ -7,6 +7,7 @@ import {
   ConversationListUpdate,
   isDistillStatusMessage,
   isQueuedMessage,
+  Model,
   parseConversationOptions,
 } from "../types";
 import { api } from "../services/api";
@@ -56,8 +57,9 @@ interface ContextUsageBarProps {
   contextWindowSize: number;
   maxContextTokens: number;
   conversationId?: string | null;
-  modelName?: string;
-  onDistillConversation?: () => void;
+  models: Model[];
+  currentModel: string;
+  onDistillConversation?: (targetModel: string) => void;
   agentWorking?: boolean;
 }
 
@@ -65,12 +67,14 @@ function ContextUsageBar({
   contextWindowSize,
   maxContextTokens,
   conversationId,
-  modelName,
+  models,
+  currentModel,
   onDistillConversation,
   agentWorking,
 }: ContextUsageBarProps) {
   const [showPopup, setShowPopup] = useState(false);
   const [distilling, setDistilling] = useState(false);
+  const [distillModel, setDistillModel] = useState(currentModel);
   const barRef = useRef<HTMLDivElement>(null);
   const hasAutoOpenedRef = useRef<string | null>(null);
 
@@ -142,7 +146,7 @@ function ContextUsageBar({
     if (distilling || !onDistillConversation) return;
     setDistilling(true);
     try {
-      await onDistillConversation();
+      await onDistillConversation(distillModel);
       setShowPopup(false);
     } finally {
       setDistilling(false);
@@ -160,7 +164,19 @@ function ContextUsageBar({
             maxWidth: `calc(100vw - ${popupPosition.right + 8}px)`,
           }}
         >
-          {modelName && <div className="chat-popup-model-name">{modelName}</div>}
+          <div className="chat-popup-model-name">
+            <select
+              className="chat-popup-model-select"
+              value={distillModel}
+              onChange={(e) => setDistillModel(e.target.value)}
+            >
+              {models.filter((m) => m.ready).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.display_name || m.id}
+                </option>
+              ))}
+            </select>
+          </div>
           {formatTokens(contextWindowSize)} / {formatTokens(maxContextTokens)} (
           {percentage.toFixed(1)}%) tokens used
           {showLongConversationWarning && (
@@ -1704,20 +1720,14 @@ function ChatInterface({
   };
 
   // Handler to distill and continue conversation
-  const handleDistillConversation = async () => {
+  const handleDistillConversation = async (targetModel: string) => {
     if (!conversationId || !onDistillConversation) return;
     await onDistillConversation(
       conversationId,
-      selectedModel,
+      targetModel,
       currentConversation?.cwd || selectedCwd || undefined,
     );
   };
-
-  // Get the display name for the selected model
-  const selectedModelDisplayName = (() => {
-    const modelObj = models.find((m) => m.id === selectedModel);
-    return modelObj?.display_name || selectedModel;
-  })();
 
   const handleUnarchive = async () => {
     if (!conversationId) return;
@@ -2042,7 +2052,8 @@ function ChatInterface({
             models.find((m) => m.id === selectedModel)?.max_context_tokens || 200000
           }
           conversationId={conversationId}
-          modelName={selectedModelDisplayName}
+          models={models}
+          currentModel={selectedModel}
           onDistillConversation={onDistillConversation ? handleDistillConversation : undefined}
           agentWorking={agentWorking}
         />
@@ -2169,7 +2180,8 @@ function ChatInterface({
             models.find((m) => m.id === selectedModel)?.max_context_tokens || 200000
           }
           conversationId={conversationId}
-          modelName={selectedModelDisplayName}
+          models={models}
+          currentModel={selectedModel}
           onDistillConversation={onDistillConversation ? handleDistillConversation : undefined}
           agentWorking={agentWorking}
         />
