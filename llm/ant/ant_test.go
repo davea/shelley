@@ -412,7 +412,7 @@ func TestFromLLMRequestSkipsEmptyMessages(t *testing.T) {
 				{Type: llm.ContentTypeText, Text: "hello"},
 			}},
 		},
-	})
+	}, false)
 	if len(req.Messages) != 1 {
 		t.Errorf("expected 1 message after filtering, got %d", len(req.Messages))
 	}
@@ -614,7 +614,7 @@ func TestFromLLMRequestStripsOldThinkingBlocks(t *testing.T) {
 				{Type: llm.ContentTypeToolResult, ToolUseID: "tool1", ToolResult: []llm.Content{{Type: llm.ContentTypeText, Text: "output"}}},
 			}},
 		},
-	})
+	}, false)
 
 	// Should have 7 messages (no messages dropped)
 	if len(req.Messages) != 7 {
@@ -684,7 +684,7 @@ func TestFromLLMRequest(t *testing.T) {
 		},
 	}
 
-	got := s.fromLLMRequest(req)
+	got := s.fromLLMRequest(req, false)
 
 	if got.Model != Claude45Sonnet {
 		t.Errorf("fromLLMRequest().Model = %v, want %v", got.Model, Claude45Sonnet)
@@ -722,7 +722,7 @@ func TestMaxOutputTokensCapping(t *testing.T) {
 
 	// Opus 4.5 has a 64k limit — setting MaxTokens above must be capped
 	s := &Service{Model: Claude45Opus, MaxTokens: 100000, ThinkingLevel: llm.ThinkingLevelMedium}
-	got := s.fromLLMRequest(simpleReq)
+	got := s.fromLLMRequest(simpleReq, false)
 	if got.MaxTokens != 64000 {
 		t.Errorf("Opus 4.5: MaxTokens = %d, want 64000", got.MaxTokens)
 	}
@@ -732,21 +732,21 @@ func TestMaxOutputTokensCapping(t *testing.T) {
 
 	// Opus 4.6 has a 128k limit — 100000 should pass through
 	s2 := &Service{Model: Claude46Opus, MaxTokens: 100000}
-	got2 := s2.fromLLMRequest(simpleReq)
+	got2 := s2.fromLLMRequest(simpleReq, false)
 	if got2.MaxTokens != 100000 {
 		t.Errorf("Opus 4.6: MaxTokens = %d, want 100000", got2.MaxTokens)
 	}
 
 	// Sonnet 4.5 has a 64k limit — 50000 should pass through
 	s3 := &Service{Model: Claude45Sonnet, MaxTokens: 50000}
-	got3 := s3.fromLLMRequest(simpleReq)
+	got3 := s3.fromLLMRequest(simpleReq, false)
 	if got3.MaxTokens != 50000 {
 		t.Errorf("Sonnet 4.5: MaxTokens = %d, want 50000", got3.MaxTokens)
 	}
 
 	// Sonnet 4.5 with MaxTokens above 64k must be capped
 	s4 := &Service{Model: Claude45Sonnet, MaxTokens: 200000}
-	got4 := s4.fromLLMRequest(simpleReq)
+	got4 := s4.fromLLMRequest(simpleReq, false)
 	if got4.MaxTokens != 64000 {
 		t.Errorf("Sonnet 4.5 capped: MaxTokens = %d, want 64000", got4.MaxTokens)
 	}
@@ -2234,5 +2234,159 @@ func TestParseSSEStreamInvalidCharInJSON(t *testing.T) {
 	}
 	if resp.ID != "msg_ok" {
 		t.Errorf("resp.ID = %q, want %q", resp.ID, "msg_ok")
+	}
+}
+
+func TestIsOAuthFilePath(t *testing.T) {
+	if isOAuthFilePath("sk-ant-api-key") {
+		t.Error("expected false for regular API key")
+	}
+	if !isOAuthFilePath("/home/user/.claude/.credentials.json") {
+		t.Error("expected true for .json path")
+	}
+	if !isOAuthFilePath("credentials.json") {
+		t.Error("expected true for relative .json path")
+	}
+}
+
+func TestExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+	if got := expandHome("~/.claude/.credentials.json"); got != home+"/.claude/.credentials.json" {
+		t.Errorf("expandHome(~/.claude/.credentials.json) = %q, want %q", got, home+"/.claude/.credentials.json")
+	}
+	if got := expandHome("/absolute/path.json"); got != "/absolute/path.json" {
+		t.Errorf("expandHome should not modify absolute paths, got %q", got)
+	}
+}
+
+func TestReadWriteOAuthFile(t *testing.T) {
+	// Create a temp file with the expected format
+	tmpDir := t.TempDir()
+	path := tmpDir + "/creds.json"
+
+	original := `{
+    "claudeAiOauth": {
+        "accessToken": "sk-ant-oat01-oldtoken",
+        "refreshToken": "sk-ant-ort01-oldrefresh",
+        "expiresAt": 1773633231069,
+        "scopes": ["user:inference", "user:profile"],
+        "subscriptionType": "pro"
+    },
+    "otherField": "preserved"
+}
+`
+	if err := os.WriteFile(path, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read the token
+	tok, err := readOAuthFromFile(path)
+	if err != nil {
+		t.Fatalf("readOAuthFromFile: %v", err)
+	}
+	if tok.AccessToken != "sk-ant-oat01-oldtoken" {
+		t.Errorf("AccessToken = %q, want %q", tok.AccessToken, "sk-ant-oat01-oldtoken")
+	}
+	if tok.RefreshToken != "sk-ant-ort01-oldrefresh" {
+		t.Errorf("RefreshToken = %q, want %q", tok.RefreshToken, "sk-ant-ort01-oldrefresh")
+	}
+	// 1773633231069 ms = 1773633231 seconds + 69 ms
+	expected := time.Unix(1773633231, 69*int64(time.Millisecond))
+	if !tok.ExpiryTime.Equal(expected) {
+		t.Errorf("ExpiryTime = %v, want %v", tok.ExpiryTime, expected)
+	}
+
+	// Write an updated token
+	newTok := &oauthToken{
+		AccessToken:  "sk-ant-oat01-newtoken",
+		ExpiryTime:   time.Unix(1800000000, 0),
+		RefreshToken: "sk-ant-ort01-newrefresh",
+	}
+	if err := writeOAuthToFile(path, newTok); err != nil {
+		t.Fatalf("writeOAuthToFile: %v", err)
+	}
+
+	// Re-read and verify
+	updated, err := readOAuthFromFile(path)
+	if err != nil {
+		t.Fatalf("readOAuthFromFile after write: %v", err)
+	}
+	if updated.AccessToken != "sk-ant-oat01-newtoken" {
+		t.Errorf("updated AccessToken = %q, want %q", updated.AccessToken, "sk-ant-oat01-newtoken")
+	}
+	if updated.RefreshToken != "sk-ant-ort01-newrefresh" {
+		t.Errorf("updated RefreshToken = %q, want %q", updated.RefreshToken, "sk-ant-ort01-newrefresh")
+	}
+
+	// Verify other fields are preserved
+	data, _ := os.ReadFile(path)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal updated file: %v", err)
+	}
+	if _, ok := raw["otherField"]; !ok {
+		t.Error("otherField was not preserved")
+	}
+	// Verify nested fields like scopes are preserved
+	var oauthRaw map[string]json.RawMessage
+	if err := json.Unmarshal(raw["claudeAiOauth"], &oauthRaw); err != nil {
+		t.Fatalf("unmarshal claudeAiOauth: %v", err)
+	}
+	if _, ok := oauthRaw["scopes"]; !ok {
+		t.Error("scopes was not preserved in claudeAiOauth")
+	}
+	if _, ok := oauthRaw["subscriptionType"]; !ok {
+		t.Error("subscriptionType was not preserved in claudeAiOauth")
+	}
+}
+
+func TestReadOAuthFileMissing(t *testing.T) {
+	_, err := readOAuthFromFile("/nonexistent/path.json")
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestReadOAuthFileInvalid(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := tmpDir + "/bad.json"
+
+	// Missing refreshToken
+	os.WriteFile(path, []byte(`{"claudeAiOauth":{"accessToken":"sk-ant-oat01-x","expiresAt":999}}`), 0600)
+	_, err := readOAuthFromFile(path)
+	if err == nil {
+		t.Error("expected error for missing refreshToken")
+	}
+}
+
+func TestBuildSystemContentOAuth(t *testing.T) {
+	req := &llm.Request{
+		System: []llm.SystemContent{
+			{Type: "text", Text: "Be helpful"},
+		},
+	}
+
+	// Without OAuth
+	sys := buildSystemContent(req, false)
+	if len(sys) != 1 {
+		t.Fatalf("non-oauth system length = %d, want 1", len(sys))
+	}
+	if sys[0].Text != "Be helpful" {
+		t.Errorf("system[0].Text = %q, want %q", sys[0].Text, "Be helpful")
+	}
+
+	// With OAuth
+	sys = buildSystemContent(req, true)
+	if len(sys) != 2 {
+		t.Fatalf("oauth system length = %d, want 2", len(sys))
+	}
+	if sys[0].Text != oauthSystemPrefix {
+		t.Errorf("system[0].Text = %q, want oauth prefix", sys[0].Text)
+	}
+	if sys[1].Text != "Be helpful" {
+		t.Errorf("system[1].Text = %q, want %q", sys[1].Text, "Be helpful")
 	}
 }
