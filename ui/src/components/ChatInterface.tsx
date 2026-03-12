@@ -8,6 +8,7 @@ import {
   ToolProgress,
   isDistillStatusMessage,
   isQueuedMessage,
+  Model,
   parseConversationOptions,
 } from "../types";
 import { api } from "../services/api";
@@ -62,10 +63,11 @@ interface ContextUsageBarProps {
   contextWindowSize: number;
   maxContextTokens: number;
   conversationId?: string | null;
-  modelName?: string;
-  onDistillConversation?: () => void;
-  onDistillReplaceConversation?: () => void;
-  onDistillNewGeneration?: () => void;
+  models: Model[];
+  currentModel: string;
+  onDistillConversation?: (targetModel: string) => void;
+  onDistillReplaceConversation?: (targetModel: string) => void;
+  onDistillNewGeneration?: (targetModel: string) => void;
   onStartNewGeneration?: () => void;
   agentWorking?: boolean;
 }
@@ -74,7 +76,8 @@ function ContextUsageBar({
   contextWindowSize,
   maxContextTokens,
   conversationId,
-  modelName,
+  models,
+  currentModel,
   onDistillConversation,
   onDistillReplaceConversation,
   onDistillNewGeneration,
@@ -83,6 +86,7 @@ function ContextUsageBar({
 }: ContextUsageBarProps) {
   const [showPopup, setShowPopup] = useState(false);
   const [distilling, setDistilling] = useState(false);
+  const [distillModel, setDistillModel] = useState(currentModel);
   const barRef = useRef<HTMLDivElement>(null);
   const hasAutoOpenedRef = useRef<string | null>(null);
 
@@ -157,7 +161,7 @@ function ContextUsageBar({
     if (distilling || !onDistillConversation) return;
     setDistilling(true);
     try {
-      await onDistillConversation();
+      await onDistillConversation(distillModel);
       setShowPopup(false);
     } finally {
       setDistilling(false);
@@ -168,7 +172,7 @@ function ContextUsageBar({
     if (distilling || !onDistillReplaceConversation) return;
     setDistilling(true);
     try {
-      await onDistillReplaceConversation();
+      await onDistillReplaceConversation(distillModel);
       setShowPopup(false);
     } finally {
       setDistilling(false);
@@ -179,7 +183,7 @@ function ContextUsageBar({
     if (distilling || !onDistillNewGeneration) return;
     setDistilling(true);
     try {
-      await onDistillNewGeneration();
+      await onDistillNewGeneration(distillModel);
       setShowPopup(false);
     } finally {
       setDistilling(false);
@@ -208,7 +212,19 @@ function ContextUsageBar({
             maxWidth: `calc(100vw - ${popupPosition.right + 8}px)`,
           }}
         >
-          {modelName && <div className="chat-popup-model-name">{modelName}</div>}
+          <div className="chat-popup-model-name">
+            <select
+              className="chat-popup-model-select"
+              value={distillModel}
+              onChange={(e) => setDistillModel(e.target.value)}
+            >
+              {models.filter((m) => m.ready).map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.display_name || m.id}
+                </option>
+              ))}
+            </select>
+          </div>
           {formatTokens(contextWindowSize)} / {formatTokens(maxContextTokens)} (
           {percentage.toFixed(1)}%) tokens used
           {showLongConversationWarning && (
@@ -1978,30 +1994,30 @@ function ChatInterface({
   };
 
   // Handler to distill and continue conversation
-  const handleDistillConversation = async () => {
+  const handleDistillConversation = async (targetModel: string) => {
     if (!conversationId || !onDistillConversation) return;
     await onDistillConversation(
       conversationId,
-      selectedModel,
+      targetModel,
       currentConversation?.cwd || selectedCwd || undefined,
     );
   };
 
   // Handler to distill and replace conversation in place
-  const handleDistillReplaceConversation = async () => {
+  const handleDistillReplaceConversation = async (targetModel: string) => {
     if (!conversationId || !onDistillReplaceConversation) return;
     await onDistillReplaceConversation(
       conversationId,
-      selectedModel,
+      targetModel,
       currentConversation?.cwd || selectedCwd || undefined,
     );
   };
 
-  const handleDistillNewGeneration = async () => {
+  const handleDistillNewGeneration = async (targetModel: string) => {
     if (!conversationId || !onDistillNewGeneration) return;
     await onDistillNewGeneration(
       conversationId,
-      selectedModel,
+      targetModel,
       currentConversation?.cwd || selectedCwd || undefined,
     );
   };
@@ -2011,12 +2027,6 @@ function ChatInterface({
     const conversation = await api.startNewGeneration(conversationId);
     onConversationUpdate?.(conversation);
   };
-
-  // Get the display name for the selected model
-  const selectedModelDisplayName = (() => {
-    const modelObj = models.find((m) => m.id === selectedModel);
-    return modelObj?.display_name || selectedModel;
-  })();
 
   const handleUnarchive = async () => {
     if (!conversationId) return;
@@ -2052,7 +2062,6 @@ function ChatInterface({
         endTime: string | null;
       }
     > = {};
-    const displayDataMap: Record<string, unknown> = {};
 
     // First pass: collect all tool results and their display data from llm_data
     messages.forEach((message) => {
@@ -2474,7 +2483,8 @@ function ChatInterface({
             models.find((m) => m.id === selectedModel)?.max_context_tokens || 200000
           }
           conversationId={conversationId}
-          modelName={selectedModelDisplayName}
+          models={models}
+          currentModel={selectedModel}
           onDistillConversation={onDistillConversation ? handleDistillConversation : undefined}
           onDistillReplaceConversation={
             onDistillReplaceConversation ? handleDistillReplaceConversation : undefined
@@ -2650,7 +2660,8 @@ function ChatInterface({
             models.find((m) => m.id === selectedModel)?.max_context_tokens || 200000
           }
           conversationId={conversationId}
-          modelName={selectedModelDisplayName}
+          models={models}
+          currentModel={selectedModel}
           onDistillConversation={onDistillConversation ? handleDistillConversation : undefined}
           onDistillReplaceConversation={
             onDistillReplaceConversation ? handleDistillReplaceConversation : undefined
