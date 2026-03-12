@@ -24,3 +24,6 @@ RETURNING *;
 
 -- name: DeleteModel :exec
 DELETE FROM models WHERE model_id = ?;
+
+-- name: UpdateModelAPIKey :exec
+UPDATE models SET api_key = ?, updated_at = CURRENT_TIMESTAMP WHERE model_id = ?;
