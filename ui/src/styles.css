@@ -7330,6 +7330,23 @@ kbd {
   margin-bottom: 4px;
 }
 
+.chat-popup-model-select {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.chat-popup-model-select:focus {
+  outline: none;
+  border-color: var(--blue-text);
+}
+
 .chat-popup-warning {
   margin-top: 6px;
   color: var(--warning-text, #f59e0b);
