@@ -1120,6 +1120,14 @@ func (db *DB) DeleteModel(ctx context.Context, modelID string) error {
 	})
 }
 
+// UpdateModelAPIKey updates just the API key for a model (used for OAuth token refresh)
+func (db *DB) UpdateModelAPIKey(ctx context.Context, params generated.UpdateModelAPIKeyParams) error {
+	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		return q.UpdateModelAPIKey(ctx, params)
+	})
+}
+
 func (db *DB) GetNotificationChannels(ctx context.Context) ([]generated.NotificationChannel, error) {
 	var channels []generated.NotificationChannel
 	err := db.pool.Rx(ctx, func(ctx context.Context, rx *Rx) error {
