@@ -112,7 +112,11 @@ func runSkill(args []string) {
 	case "ls":
 		all := skills.ListAll(wd, "")
 		for _, s := range all {
-			fmt.Printf("%s\t%s\n", s.Name, s.Description)
+			desc := s.Description
+			if s.When != "" {
+				desc = "[when: " + s.When + "] " + desc
+			}
+			fmt.Printf("%s\t%s\n", s.Name, desc)
 		}
 
 	case "new":

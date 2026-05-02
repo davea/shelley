@@ -367,7 +367,7 @@ func collectSystemData(workingDir string) (*SystemPromptData, error) {
 	if gitInfo != nil {
 		gitRoot = gitInfo.Root
 	}
-	data.SkillsXML = collectSkills(wd, gitRoot)
+	data.SkillsXML = collectSkills(wd, gitRoot, skills.Env{ExeDev: data.IsExeDev})
 
 	return data, nil
 }
@@ -555,8 +555,9 @@ func isExeDev() bool {
 
 // collectSkills discovers skills from default directories, project .skills dirs,
 // the project tree, and built-in skills. See skills.ListAll for precedence rules.
-func collectSkills(workingDir, gitRoot string) string {
-	return skills.ToPromptXML(skills.ListAll(workingDir, gitRoot))
+// Skills with a `when:` clause are filtered against env.
+func collectSkills(workingDir, gitRoot string, env skills.Env) string {
+	return skills.ToPromptXML(skills.Filter(skills.ListAll(workingDir, gitRoot), env))
 }
 
 // resolveAndNormalize returns a canonical lowercase path for dedup.
