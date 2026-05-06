@@ -36,6 +36,8 @@ body {
   --bg-hover: #f3f4f6;
   --border: #e5e7eb;
   --code-bg: #eceef2;
+  --user-rail: #3b82f6;
+  --agent-rail: #10b981;
   --text-primary: #111827;
   --text-secondary: #6b7280;
   --text-tertiary: #9ca3af;
@@ -73,6 +75,8 @@ body {
   --bg-hover: #374151;
   --border: #374151;
   --code-bg: #414a59;
+  --user-rail: #60a5fa;
+  --agent-rail: #34d399;
   --text-primary: #f9fafb;
   --text-secondary: #9ca3af;
   --text-tertiary: #6b7280;
@@ -735,9 +739,18 @@ button {
   margin-left: auto;
   max-width: 80%;
   color: var(--text-primary);
+  border-right: 3px solid var(--user-rail);
+  padding-right: 0.75rem;
 }
 
-.message-agent .message-content,
+.message-agent .message-content {
+  margin-right: auto;
+  max-width: 100%;
+  color: var(--text-primary);
+  border-left: 3px solid var(--agent-rail);
+  padding-left: 0.75rem;
+}
+
 .message-tool .message-content {
   margin-right: auto;
   max-width: 100%;
