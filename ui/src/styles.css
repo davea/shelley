@@ -24,8 +24,8 @@ body {
 /* CSS Variables */
 :root {
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial,
+    sans-serif;
   --font-mono:
     "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace;
   --primary: #2563eb;
@@ -711,7 +711,7 @@ button {
 .messages-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.25rem;
 }
 
 .messages-list > * {

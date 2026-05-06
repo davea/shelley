@@ -95,13 +95,7 @@ function linkifyPlain(text: string): React.ReactNode {
   return parts.map((p, i) => {
     if (p.type === "link") {
       return (
-        <a
-          key={i}
-          href={p.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-link"
-        >
+        <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="text-link">
           {p.content}
         </a>
       );

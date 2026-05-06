@@ -51,4 +51,3 @@ export function parseLinks(text: string): LinkifyResult[] {
 
   return results;
 }
-
