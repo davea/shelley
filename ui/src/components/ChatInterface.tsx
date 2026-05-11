@@ -2042,6 +2042,7 @@ function ChatInterface({
         endTime: string | null;
       }
     > = {};
+    const displayDataMap: Record<string, unknown> = {};
 
     // First pass: collect all tool results and their display data from llm_data
     messages.forEach((message) => {
