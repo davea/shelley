@@ -113,6 +113,30 @@ async function build() {
       plugins: [monacoExternalPlugin()],
     });
 
+    // /static/excalidraw/skill.js: self-contained Excalidraw + React +
+    // skill helper bundle. The host React app fetches it same-origin and
+    // streams it into the sandboxed `output_iframe` iframe via
+    // postMessage; the iframe wraps it in a Blob and import()s it from
+    // its own opaque origin, sidestepping CORS.
+    log('Building /static/excalidraw bundle...');
+    fs.mkdirSync('dist/static/excalidraw', { recursive: true });
+    await esbuild.build({
+      entryPoints: ['src/excalidraw-skill.js'],
+      bundle: true,
+      outfile: 'dist/static/excalidraw/skill.js',
+      format: 'esm',
+      minify: isProd,
+      sourcemap: false,
+      define: { 'process.env.NODE_ENV': '"production"' },
+      // Inline the stylesheet and any referenced font/icon assets as data
+      // URLs so the resulting module is fully self-contained.
+      loader: {
+        '.css': 'text',
+        '.woff': 'dataurl', '.woff2': 'dataurl', '.ttf': 'dataurl',
+        '.png': 'dataurl', '.svg': 'dataurl',
+      },
+    });
+
     // Copy static files
     fs.copyFileSync('src/index.html', 'dist/index.html');
     fs.copyFileSync('src/styles.css', 'dist/styles.css');
@@ -160,7 +184,11 @@ async function build() {
     // Generate gzip versions of large files and remove originals to reduce binary size
     // The server will decompress on-the-fly for the rare clients that don't support gzip
     log('\nGenerating gzip compressed files...');
-    const filesToCompress = ['monaco-editor.js', 'editor.worker.js', 'diffs-worker.js', 'main.js', 'monaco-editor.css', 'styles.css', 'main.css'];
+    const filesToCompress = [
+      'monaco-editor.js', 'editor.worker.js', 'diffs-worker.js', 'main.js',
+      'monaco-editor.css', 'styles.css', 'main.css',
+      'static/excalidraw/skill.js',
+    ];
     const checksums = {};
     let totalOrigSize = 0;
     let totalGzSize = 0;

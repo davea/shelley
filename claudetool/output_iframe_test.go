@@ -203,6 +203,66 @@ func TestOutputIframeRun(t *testing.T) {
 	}
 }
 
+func TestOutputIframeLibraries(t *testing.T) {
+	tmpDir := t.TempDir()
+	htmlFile := filepath.Join(tmpDir, "test.html")
+	if err := os.WriteFile(htmlFile, []byte("<html><head></head><body></body></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd := &MutableWorkingDir{}
+	wd.Set(tmpDir)
+	tool := &OutputIframeTool{WorkingDir: wd}
+
+	t.Run("valid library is recorded", func(t *testing.T) {
+		in, _ := json.Marshal(map[string]any{
+			"path":      "test.html",
+			"libraries": []string{"excalidraw"},
+		})
+		res := tool.Tool().Run(context.Background(), in)
+		if res.Error != nil {
+			t.Fatalf("unexpected error: %v", res.Error)
+		}
+		disp, ok := res.Display.(OutputIframeDisplay)
+		if !ok {
+			t.Fatalf("bad display type %T", res.Display)
+		}
+		if len(disp.Libraries) != 1 || disp.Libraries[0] != "excalidraw" {
+			t.Errorf("expected libraries=[excalidraw], got %v", disp.Libraries)
+		}
+		// The bundle bytes must NOT have been read into the display —
+		// that's the whole point of the libraries channel.
+		if strings.Contains(disp.HTML, "window.__FILES__[\"skill.js\"]") {
+			t.Errorf("library bytes leaked into HTML")
+		}
+	})
+
+	t.Run("unknown library rejected", func(t *testing.T) {
+		in, _ := json.Marshal(map[string]any{
+			"path":      "test.html",
+			"libraries": []string{"not-a-real-lib"},
+		})
+		res := tool.Tool().Run(context.Background(), in)
+		if res.Error == nil {
+			t.Errorf("expected error for unknown library, got none")
+		}
+	})
+
+	t.Run("duplicates collapsed", func(t *testing.T) {
+		in, _ := json.Marshal(map[string]any{
+			"path":      "test.html",
+			"libraries": []string{"excalidraw", "excalidraw"},
+		})
+		res := tool.Tool().Run(context.Background(), in)
+		if res.Error != nil {
+			t.Fatalf("unexpected error: %v", res.Error)
+		}
+		disp := res.Display.(OutputIframeDisplay)
+		if len(disp.Libraries) != 1 {
+			t.Errorf("expected dedupe to 1, got %v", disp.Libraries)
+		}
+	})
+}
+
 func TestDetectFileType(t *testing.T) {
 	tests := []struct {
 		filename string
@@ -237,6 +297,15 @@ func TestEscapeJSString(t *testing.T) {
 		{`say "hi"`, `say \"hi\"`},
 		{"back\\slash", "back\\\\slash"},
 		{"tab\there", "tab\\there"},
+		// HTML script-tag escapes: `</`, `<!--`, and `</script>` substrings
+		// inside the literal must not allow the host <script> to close early
+		// or trip HTML5's script-data-double-escape state.
+		{"</script>", "<\\/script>"},
+		{"x<!--y", "x<\\!--y"},
+		{"a<b", "a<b"},
+		// U+2028 / U+2029 are valid JSON but terminate JS string literals.
+		{"a\u2028b", "a\\u2028b"},
+		{"a\u2029b", "a\\u2029b"},
 	}
 
 	for _, tt := range tests {
@@ -279,12 +348,12 @@ func TestInjectFiles(t *testing.T) {
 			contains: []string{"<style data-file=\"styles.css\">", "body { color: red; }"},
 		},
 		{
-			name: "inject js file",
+			name: "inject js file as raw string in __FILES__",
 			html: "<html><head></head><body></body></html>",
 			files: []EmbeddedFile{
 				{Name: "app.js", Content: "console.log('hi');", Type: "js"},
 			},
-			contains: []string{"<script data-file=\"app.js\">", "console.log('hi');"},
+			contains: []string{"window.__FILES__[\"app.js\"]", "console.log('hi');"},
 		},
 		{
 			name: "html without head tag",
@@ -337,5 +406,43 @@ func TestOutputIframeToolSchema(t *testing.T) {
 	// Verify schema contains files property
 	if !strings.Contains(string(llmTool.InputSchema), "files") {
 		t.Error("expected InputSchema to contain 'files' property")
+	}
+}
+
+// TestLibraryPathsInSync guards against the LIBRARY_PATHS map in
+// ui/src/components/OutputIframeTool.tsx drifting from allowedLibraries.
+// If they fall out of sync, the Go tool will accept a name the UI can't
+// fetch, leaving window.__LIBS__ unresolved.
+func TestLibraryPathsInSync(t *testing.T) {
+	data, err := os.ReadFile("../ui/src/components/OutputIframeTool.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	start := strings.Index(src, "const LIBRARY_PATHS")
+	if start < 0 {
+		t.Fatal("LIBRARY_PATHS not found in OutputIframeTool.tsx")
+	}
+	end := strings.Index(src[start:], "};")
+	if end < 0 {
+		t.Fatal("LIBRARY_PATHS terminator not found")
+	}
+	block := src[start : start+end]
+	for name, path := range allowedLibraries {
+		needle := name + ": \"" + path + "\""
+		if !strings.Contains(block, needle) {
+			t.Errorf("LIBRARY_PATHS missing entry for %q -> %q\nblock: %s", name, path, block)
+		}
+	}
+	// Also sanity-check there are no extra TSX entries by counting commas+entries.
+	lines := strings.Split(block, "\n")
+	entries := 0
+	for _, ln := range lines {
+		if strings.Contains(ln, ":") && strings.Contains(ln, "/static/") {
+			entries++
+		}
+	}
+	if entries != len(allowedLibraries) {
+		t.Errorf("LIBRARY_PATHS has %d entries, allowedLibraries has %d", entries, len(allowedLibraries))
 	}
 }

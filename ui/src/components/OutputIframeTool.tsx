@@ -57,6 +57,14 @@ const HEIGHT_REPORTER_SCRIPT = `
 const MIN_HEIGHT = 100;
 const MAX_HEIGHT = 600;
 
+// /static/ paths the parent fetches for each named library. Keep in sync
+// with allowedLibraries in shelley/claudetool/output_iframe.go — if the Go
+// allowlist accepts a name not listed here, the bundle will never reach the
+// iframe and window.__LIBS__ will resolve without that entry.
+const LIBRARY_PATHS: Record<string, string> = {
+  excalidraw: "/static/excalidraw/skill.js",
+};
+
 // Remove injected scripts/styles from HTML to get the original version for download
 function getOriginalHtml(html: string): string {
   // Remove the window.__FILES__ script block
@@ -64,6 +72,8 @@ function getOriginalHtml(html: string): string {
     /<script>\s*window\.__FILES__\s*=\s*window\.__FILES__\s*\|\|\s*\{\};[\s\S]*?<\/script>\s*/g,
     "",
   );
+  // Remove the __LIBS__ bootstrap (both postMessage and base64-inline variants).
+  result = result.replace(/<script data-libs-bootstrap="[^"]*">[\s\S]*?<\/script>\s*/g, "");
   // Remove injected style tags
   result = result.replace(/<style data-file="[^"]*">[\s\S]*?<\/style>\s*/g, "");
   // Remove injected script tags
@@ -117,6 +127,7 @@ function OutputIframeTool({
     title?: string;
     filename?: string;
     files?: EmbeddedFile[];
+    libraries?: string[];
   } => {
     // First try display prop (from tool result)
     if (display && typeof display === "object" && display !== null) {
@@ -125,12 +136,14 @@ function OutputIframeTool({
         title?: string;
         filename?: string;
         files?: EmbeddedFile[];
+        libraries?: string[];
       };
       return {
         html: typeof d.html === "string" ? d.html : undefined,
         title: typeof d.title === "string" ? d.title : undefined,
         filename: typeof d.filename === "string" ? d.filename : undefined,
         files: Array.isArray(d.files) ? d.files : undefined,
+        libraries: Array.isArray(d.libraries) ? d.libraries : undefined,
       };
     }
     // Fall back to toolInput
@@ -145,13 +158,64 @@ function OutputIframeTool({
   const html = displayData.html;
   const filename = displayData.filename || "output.html";
   const files = displayData.files || [];
+  const libraries = displayData.libraries || [];
   const hasMultipleFiles = files.length > 0;
+  // Libraries live outside the conversation; for download / open-in-new-tab
+  // we inline them as base64 in inlineLibrariesIntoHtml so the standalone
+  // artifact still resolves window.__LIBS__ without the host page.
+  const usesLibraries = libraries.length > 0;
 
-  // Inject height reporter script into HTML
+  // Bootstrap: define window.__LIBS__ as a Promise that resolves once the
+  // parent postMessages the library source in. The skill page can do:
+  //   const { render } = (await window.__LIBS__).excalidraw;
+  // Each library source is wrapped in a Blob (so the import stays inside
+  // the iframe's own opaque origin — no cross-origin module load) and
+  // import()ed. The actual bytes never appear in the conversation; the
+  // parent fetches them from same-origin /static/ where its session cookie
+  // works, and forwards them via postMessage.
+  const libsBootstrapScript = libraries.length
+    ? `<script data-libs-bootstrap="postmessage">
+(function(){
+  var resolveLibs, rejectLibs;
+  window.__LIBS__ = new Promise(function(res, rej){ resolveLibs = res; rejectLibs = rej; });
+  async function onMessage(ev){
+    // Only accept library bytes from the embedder. The sandbox prevents
+    // other frames from scripting us, but the source check is the standard
+    // defense and cheap.
+    if (ev.source !== window.parent) return;
+    if (!ev.data || ev.data.type !== 'shelley-libs') return;
+    window.removeEventListener('message', onMessage);
+    var out = {};
+    try {
+      for (var name in ev.data.libs) {
+        var src = ev.data.libs[name];
+        var url = URL.createObjectURL(new Blob([src], {type: 'text/javascript'}));
+        try { out[name] = await import(url); }
+        finally { URL.revokeObjectURL(url); }
+      }
+      resolveLibs(out);
+    } catch (e) { rejectLibs(e); }
+  }
+  window.addEventListener('message', onMessage);
+})();
+</script>`
+    : "";
   const htmlWithHeightReporter = html
-    ? html.includes("</body>")
-      ? html.replace("</body>", HEIGHT_REPORTER_SCRIPT + "</body>")
-      : html + HEIGHT_REPORTER_SCRIPT
+    ? (() => {
+        let out = html;
+        const headInject = libsBootstrapScript;
+        if (out.includes("<head>")) {
+          out = out.replace("<head>", "<head>" + headInject);
+        } else {
+          out = headInject + out;
+        }
+        if (out.includes("</body>")) {
+          out = out.replace("</body>", HEIGHT_REPORTER_SCRIPT + "</body>");
+        } else {
+          out = out + HEIGHT_REPORTER_SCRIPT;
+        }
+        return out;
+      })()
     : undefined;
 
   // Listen for height messages from iframe
@@ -175,6 +239,34 @@ function OutputIframeTool({
     return () => window.removeEventListener("message", handleMessage);
   }, [handleMessage]);
 
+  // After the iframe loads, fetch each requested library from same-origin
+  // /static/ (where our session cookie works) and forward the source text
+  // into the iframe via postMessage. The bootstrap script in the iframe
+  // resolves window.__LIBS__ with a {name: module} map.
+  const libsKey = libraries.join(",");
+  const handleIframeLoad = useCallback(() => {
+    if (!libraries.length || !iframeRef.current) return;
+    const win = iframeRef.current.contentWindow;
+    if (!win) return;
+    (async () => {
+      const libs: Record<string, string> = {};
+      for (const name of libraries) {
+        const path = LIBRARY_PATHS[name];
+        if (!path) continue;
+        try {
+          const resp = await fetch(path, { credentials: "same-origin" });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          libs[name] = await resp.text();
+        } catch (e) {
+          console.error(`output_iframe: failed to fetch library ${name}`, e);
+        }
+      }
+      win.postMessage({ type: "shelley-libs", libs }, "*");
+    })();
+    // libraries identity changes on each render; depend on its stable string
+    // form via libsKey so we don't refetch unnecessarily.
+  }, [libsKey]);
+
   // Escape HTML special characters for safe embedding
   const escapeHtml = (str: string): string => {
     return str
@@ -185,14 +277,75 @@ function OutputIframeTool({
       .replace(/'/g, "&#39;");
   };
 
-  // Open HTML in new tab with sandbox protection
-  const handleOpenInNewTab = (e: React.MouseEvent) => {
+  // Fetch each requested library and produce a self-contained HTML payload
+  // by inlining the library sources into a synchronous bootstrap script.
+  // Without this, downloaded/opened-in-tab pages would hang on a
+  // never-resolved `window.__LIBS__` (no parent React app to feed them).
+  //
+  // The libs are still loaded via `import()` of a blob: URL so modules
+  // resolve inside the page's own origin — just like the runtime path.
+  const inlineLibrariesIntoHtml = async (baseHtml: string): Promise<string> => {
+    if (!usesLibraries) return baseHtml;
+    // Encode each library to base64 and decode at runtime. Naively inlining
+    // the JS source via JSON.stringify breaks for bundles containing
+    // U+2028/U+2029 (valid in JSON, syntax errors in JS string literals) or
+    // other Unicode edge cases. Base64 sidesteps all of it; we lose ~33%
+    // size in the produced artifact, but that artifact is downloaded on
+    // demand, not stored anywhere persistent.
+    const enc = new TextEncoder();
+    const libsB64: Record<string, string> = {};
+    for (const name of libraries) {
+      const path = LIBRARY_PATHS[name];
+      if (!path) continue;
+      const resp = await fetch(path, { credentials: "same-origin" });
+      if (!resp.ok) throw new Error(`fetch ${path}: HTTP ${resp.status}`);
+      const text = await resp.text();
+      // btoa requires latin-1; use a binary string built from UTF-8 bytes.
+      const bytes = enc.encode(text);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      libsB64[name] = btoa(bin);
+    }
+    const serialized = JSON.stringify(libsB64);
+    const bootstrap = `<script data-libs-bootstrap="inline">
+(function(){
+  var libsB64 = ${serialized};
+  var dec = new TextDecoder();
+  window.__LIBS__ = (async function(){
+    var out = {};
+    for (var name in libsB64) {
+      var bin = atob(libsB64[name]);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var src = dec.decode(bytes);
+      var url = URL.createObjectURL(new Blob([src], {type:'text/javascript'}));
+      try { out[name] = await import(url); }
+      finally { URL.revokeObjectURL(url); }
+    }
+    return out;
+  })();
+})();
+</script>`;
+    if (baseHtml.includes("<head>")) {
+      return baseHtml.replace("<head>", "<head>" + bootstrap);
+    }
+    return bootstrap + baseHtml;
+  };
+
+  // Open HTML in new tab with sandbox protection.
+  // Pop the window open SYNCHRONOUSLY (before any await) so the click's
+  // transient user activation is still valid — otherwise the popup blocker
+  // silently nukes window.open(). We then write into the about:blank doc
+  // once the library bytes (if any) have been fetched.
+  const handleOpenInNewTab = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!html) return;
 
-    // Create a wrapper HTML page that embeds the content in a sandboxed iframe
-    // This preserves security even when opened in a new tab
-    const escapedHtml = escapeHtml(html);
+    const win = window.open("", "_blank");
+    if (!win) return; // popup blocked despite the synchronous open
+
+    const standalone = await inlineLibrariesIntoHtml(html);
+    const escapedHtml = escapeHtml(standalone);
     const escapedTitle = escapeHtml(title);
 
     const wrapperHtml = `<!DOCTYPE html>
@@ -212,13 +365,13 @@ function OutputIframeTool({
   </style>
 </head>
 <body>
-  <iframe sandbox="allow-scripts" srcdoc="${escapedHtml}"></iframe>
+  <iframe sandbox="allow-scripts allow-downloads" allow="clipboard-write" srcdoc="${escapedHtml}"></iframe>
 </body>
 </html>`;
 
     const blob = new Blob([wrapperHtml], { type: "text/html" });
     const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
+    win.location.href = url;
     // Clean up the URL after a delay
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -228,12 +381,14 @@ function OutputIframeTool({
     e.stopPropagation();
     if (!html) return;
 
+    const standalone = await inlineLibrariesIntoHtml(html);
+
     if (hasMultipleFiles) {
       // Create a zip file with all files
       const zip = new JSZip();
 
       // Add the original HTML (without injected content)
-      const originalHtml = getOriginalHtml(html);
+      const originalHtml = getOriginalHtml(standalone);
       zip.file(filename, originalHtml);
 
       // Add all embedded files
@@ -255,7 +410,7 @@ function OutputIframeTool({
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } else {
       // Single file download
-      const blob = new Blob([html], { type: "text/html" });
+      const blob = new Blob([standalone], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -374,9 +529,20 @@ function OutputIframeTool({
                 <iframe
                   ref={iframeRef}
                   srcDoc={htmlWithHeightReporter}
-                  sandbox="allow-scripts"
+                  // allow-scripts: skills run JS.
+                  // allow-downloads: skills offer file downloads (e.g.
+                  // excalidraw "Download .excalidraw"); without this the
+                  // anchor-click trigger is silently blocked.
+                  // No allow-same-origin: the iframe stays cross-origin
+                  // so it cannot read host cookies or DOM.
+                  sandbox="allow-scripts allow-downloads"
+                  // Permissions Policy: enable clipboard writes for
+                  // skill "Copy SVG" / "Copy JSON" buttons. Cross-origin
+                  // iframes need an explicit `allow` to use clipboard APIs.
+                  allow="clipboard-write"
                   title={title}
                   className="output-iframe-wrapper"
+                  onLoad={handleIframeLoad}
                   style={{
                     height: `${iframeHeight}px`,
                   }}
