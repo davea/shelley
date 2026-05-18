@@ -189,8 +189,17 @@ function GitInfoMessage({
           <>
             {" "}
             <a
-              href="#"
+              href={(() => {
+                const params = new URLSearchParams();
+                params.set("diff", commitHash!);
+                if (worktree) params.set("cwd", worktree);
+                return `${window.location.pathname}?${params.toString()}`;
+              })()}
               onClick={(e) => {
+                // Respect modifier/middle-click so users can open in a new tab.
+                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+                  return;
+                }
                 e.preventDefault();
                 handleDiffClick();
               }}

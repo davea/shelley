@@ -1030,6 +1030,27 @@ function ChatInterface({
     setShowDiffViewer(true);
   }, []);
 
+  // If the URL contains `?diff=<hash>` (e.g. from cmd+clicking "Open diff"
+  // in the git graph in a new tab), open the diff viewer for that commit
+  // once on mount and strip the params from the URL.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const commit = params.get("diff");
+    if (!commit) return;
+    const cwdParam = params.get("cwd") || undefined;
+    setDiffViewerInitialCommit(commit);
+    setDiffViewerCwd(cwdParam);
+    setShowDiffViewer(true);
+    params.delete("diff");
+    params.delete("cwd");
+    const qs = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`,
+    );
+  }, []);
+
   // Navigate to next/previous user message when trigger changes
   useEffect(() => {
     if (!navigateUserMessageTrigger || !messagesContainerRef.current) return;

@@ -8829,11 +8829,15 @@ kbd {
   padding: 0.3rem 0.7rem;
   font-size: 0.78rem;
   cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
 }
 
-.git-graph-open-diff:disabled {
+.git-graph-open-diff:disabled,
+.git-graph-open-diff-disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .git-graph-github-link {

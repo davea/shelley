@@ -984,13 +984,27 @@ export default function GitGraphViewer({
                 )}
 
                 <div className="git-graph-detail-actions">
-                  <button
-                    className="git-graph-open-diff"
-                    disabled={!onOpenDiff}
-                    onClick={() => onOpenDiff && onOpenDiff(selectedCommit.hash, cwd)}
+                  <a
+                    className={`git-graph-open-diff${!onOpenDiff ? " git-graph-open-diff-disabled" : ""}`}
+                    href={(() => {
+                      const params = new URLSearchParams();
+                      params.set("diff", selectedCommit.hash);
+                      if (cwd) params.set("cwd", cwd);
+                      return `${window.location.pathname}?${params.toString()}`;
+                    })()}
+                    aria-disabled={!onOpenDiff}
+                    onClick={(e) => {
+                      // Let the browser handle modifier/middle-click so users
+                      // can open the diff in a new tab/window.
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+                        return;
+                      }
+                      e.preventDefault();
+                      if (onOpenDiff) onOpenDiff(selectedCommit.hash, cwd);
+                    }}
                   >
                     Open diff →
-                  </button>
+                  </a>
                   {data?.githubBase && (
                     <a
                       className="git-graph-github-link"
