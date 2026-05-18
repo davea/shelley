@@ -1234,6 +1234,7 @@ func (s *Server) publishConversationState(state ConversationState) {
 			for _, hook := range hooks {
 				go s.sendEndOfTurnHook(context.Background(), hook, event)
 			}
+			go s.maybeGenerateEndOfTurnTLDR(context.Background(), state.ConversationID)
 			go RunEndOfTurnHook(EndOfTurnHookInput{
 				Type:            "end_of_turn",
 				ConversationID:  event.ConversationID,
