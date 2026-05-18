@@ -49,6 +49,11 @@ type ConversationManager struct {
 
 	subpub *subpub.SubPub[StreamResponse]
 
+	// hydrateMu serializes Hydrate so concurrent callers don't race on the
+	// fields it populates (cwd, modelID, conversationOptions, toolSetConfig,
+	// hasConversationEvents, agentWorking) between the initial unlocked
+	// hydrated-check and the final write under cm.mu.
+	hydrateMu             sync.Mutex
 	hydrated              bool
 	hasConversationEvents bool
 	cwd                   string // working directory for tools
@@ -222,6 +227,20 @@ func (cm *ConversationManager) GetModel() string {
 // ensureLoop reads messages fresh from the DB when creating a loop so that
 // any messages added asynchronously (e.g. distillation) are always included.
 func (cm *ConversationManager) Hydrate(ctx context.Context) error {
+	cm.mu.Lock()
+	if cm.hydrated {
+		cm.lastActivity = time.Now()
+		cm.mu.Unlock()
+		return nil
+	}
+	cm.mu.Unlock()
+
+	// Serialize Hydrate across concurrent callers. Without this, two goroutines
+	// can both observe hydrated=false above, fall through, and race on the
+	// non-cm.mu-guarded writes below (cwd, conversationOptions, toolSetConfig).
+	// Re-check hydrated after acquiring so we don't redo work.
+	cm.hydrateMu.Lock()
+	defer cm.hydrateMu.Unlock()
 	cm.mu.Lock()
 	if cm.hydrated {
 		cm.lastActivity = time.Now()
