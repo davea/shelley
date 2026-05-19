@@ -12,6 +12,16 @@ import (
 	"golang.org/x/image/draw"
 )
 
+// DecodeDimensions returns the pixel width and height of the image encoded in
+// data. It reads only the image header (no full decode), so it is cheap.
+func DecodeDimensions(data []byte) (width, height int, err error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return 0, 0, fmt.Errorf("decode image config: %w", err)
+	}
+	return cfg.Width, cfg.Height, nil
+}
+
 // ResizeImage resizes an image if any dimension exceeds maxDimension.
 // Returns the resized image bytes and the format ("png" or "jpeg").
 // If no resize is needed, returns the original data unchanged.

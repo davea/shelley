@@ -593,6 +593,7 @@ func (b *BrowseTools) screenshotRun(ctx context.Context, input screenshotInput) 
 
 	base64Data := base64.StdEncoding.EncodeToString(imageData)
 	mediaType := "image/" + format
+	widthPx, heightPx, _ := imageutil.DecodeDimensions(imageData)
 
 	display := map[string]any{
 		"type":     "screenshot",
@@ -613,9 +614,11 @@ func (b *BrowseTools) screenshotRun(ctx context.Context, input screenshotInput) 
 			Text: description,
 		},
 		{
-			Type:      llm.ContentTypeText,
-			MediaType: mediaType,
-			Data:      base64Data,
+			Type:          llm.ContentTypeText,
+			MediaType:     mediaType,
+			Data:          base64Data,
+			DisplayWidth:  widthPx,
+			DisplayHeight: heightPx,
 		},
 	}, Display: display}
 }
@@ -912,6 +915,7 @@ func (b *BrowseTools) readImageRun(ctx context.Context, input readImageInput) ll
 
 	base64Data := base64.StdEncoding.EncodeToString(imageData)
 	mediaType := "image/" + format
+	widthPx, heightPx, _ := imageutil.DecodeDimensions(imageData)
 
 	description := fmt.Sprintf("Image from %s (type: %s)", input.Path, mediaType)
 	if converted {
@@ -927,9 +931,11 @@ func (b *BrowseTools) readImageRun(ctx context.Context, input readImageInput) ll
 			Text: description,
 		},
 		{
-			Type:      llm.ContentTypeText,
-			MediaType: mediaType,
-			Data:      base64Data,
+			Type:          llm.ContentTypeText,
+			MediaType:     mediaType,
+			Data:          base64Data,
+			DisplayWidth:  widthPx,
+			DisplayHeight: heightPx,
 		},
 	}}
 }

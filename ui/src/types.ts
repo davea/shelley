@@ -38,6 +38,8 @@ export interface LLMContent {
   // Other fields from Go struct
   MediaType?: string;
   DisplayImageURL?: string;
+  DisplayWidth?: number;
+  DisplayHeight?: number;
   Thinking?: string;
   Data?: string;
   Signature?: string;

@@ -150,3 +150,30 @@ func TestResizeImageNoResizeNeeded(t *testing.T) {
 		t.Error("Expected original data when no resize needed")
 	}
 }
+
+func TestDecodeDimensions(t *testing.T) {
+	png := createTestPNG(t, 137, 91)
+	w, h, err := DecodeDimensions(png)
+	if err != nil {
+		t.Fatalf("DecodeDimensions(png) error: %v", err)
+	}
+	if w != 137 || h != 91 {
+		t.Errorf("DecodeDimensions(png) = (%d, %d), want (137, 91)", w, h)
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, image.NewNRGBA(image.Rect(0, 0, 64, 48)), nil); err != nil {
+		t.Fatalf("jpeg.Encode: %v", err)
+	}
+	w, h, err = DecodeDimensions(buf.Bytes())
+	if err != nil {
+		t.Fatalf("DecodeDimensions(jpeg) error: %v", err)
+	}
+	if w != 64 || h != 48 {
+		t.Errorf("DecodeDimensions(jpeg) = (%d, %d), want (64, 48)", w, h)
+	}
+
+	if _, _, err := DecodeDimensions([]byte("not an image")); err == nil {
+		t.Errorf("DecodeDimensions(garbage) succeeded; want error")
+	}
+}

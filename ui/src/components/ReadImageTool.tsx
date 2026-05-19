@@ -47,8 +47,10 @@ function ReadImageTool({
 
   // Build image URL from the tool result's image content.
   // The server replaces inline base64 data with a URL to /api/message/{id}/image/...
-  const imageUrl =
-    toolResult && toolResult.length >= 2 ? toolResult[1]?.DisplayImageURL : undefined;
+  const imageContent = toolResult && toolResult.length >= 2 ? toolResult[1] : undefined;
+  const imageUrl = imageContent?.DisplayImageURL;
+  const imageWidth = imageContent?.DisplayWidth;
+  const imageHeight = imageContent?.DisplayHeight;
 
   const isComplete = !isRunning && toolResult !== undefined;
 
@@ -106,6 +108,8 @@ function ReadImageTool({
                     src={imageUrl}
                     alt={`Image: ${filename}`}
                     className="tool-image-responsive"
+                    width={imageWidth || undefined}
+                    height={imageHeight || undefined}
                   />
                 </a>
               </div>

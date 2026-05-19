@@ -220,6 +220,13 @@ type Content struct {
 	// It replaces the base64 Data with a URL to the image endpoint.
 	DisplayImageURL string
 
+	// DisplayWidth and DisplayHeight are the intrinsic pixel dimensions of
+	// an image (when MediaType is set). Populated at the time the image
+	// content is created so the UI can reserve layout space without having
+	// to download the bytes first. Not sent to the LLM.
+	DisplayWidth  int `json:",omitempty"`
+	DisplayHeight int `json:",omitempty"`
+
 	Cache bool
 }
 
