@@ -167,6 +167,7 @@ func cmdChat(cc *clientConfig, args []string) {
 	convID := fs.String("c", "", "Conversation ID to continue (creates new if omitted)")
 	model := fs.String("model", "", "Model to use (server default if empty)")
 	cwd := fs.String("cwd", "", "Working directory for the conversation")
+	ephemeral := fs.Bool("ephemeral", false, "Wait for end of turn, then archive the conversation (for cron-style cleanup)")
 	fs.Parse(args)
 
 	if *prompt == "" {
@@ -253,6 +254,82 @@ func cmdChat(cc *clientConfig, args []string) {
 	}
 
 	json.NewEncoder(os.Stdout).Encode(output)
+
+	if *ephemeral {
+		cidStr, ok := cid.(string)
+		if !ok || cidStr == "" {
+			fmt.Fprintf(os.Stderr, "Error: -ephemeral could not determine conversation ID\n")
+			os.Exit(1)
+		}
+		waitForEndOfTurn(cc, client, baseURL, cidStr)
+		archiveConversation(cc, client, baseURL, cidStr)
+	}
+}
+
+// waitForEndOfTurn streams the conversation until the agent's turn ends.
+// Stream events are discarded; only end-of-turn detection is performed.
+func waitForEndOfTurn(cc *clientConfig, client *http.Client, baseURL, conversationID string) {
+	req, err := cc.newRequest("GET", baseURL+"/api/conversation/"+conversationID+"/stream", nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating request: %v\n", err)
+		os.Exit(1)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: HTTP %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var sr streamResponseWire
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &sr); err != nil {
+			continue
+		}
+		if sr.Heartbeat {
+			continue
+		}
+		for _, msg := range sr.Messages {
+			if (msg.Type == "agent" || msg.Type == "error") && msg.EndOfTurn != nil && *msg.EndOfTurn {
+				return
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading stream: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func archiveConversation(cc *clientConfig, client *http.Client, baseURL, conversationID string) {
+	req, err := cc.newRequest("POST", baseURL+"/api/conversation/"+conversationID+"/archive", nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating archive request: %v\n", err)
+		os.Exit(1)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error archiving: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error archiving: HTTP %d\n", resp.StatusCode)
+		os.Exit(1)
+	}
 }
 
 // streamEvent is the simplified output format for read.
@@ -624,9 +701,12 @@ Flags:
   -H HEADER    Extra HTTP header "Name: Value" (can be repeated)
 
 Subcommands:
-  chat -p PROMPT [-c CONVERSATION_ID] [-model MODEL] [-cwd DIR]
+  chat -p PROMPT [-c CONVERSATION_ID] [-model MODEL] [-cwd DIR] [-ephemeral]
       Send a message. Creates a new conversation unless -c is given.
       Prints JSON with conversation_id to stdout.
+      With -ephemeral, waits for the agent turn to end and then archives
+      the conversation (useful for cron-style invocations that clean up
+      after themselves).
 
   read [-wait] CONVERSATION_ID
       Read all messages in a conversation as JSON lines.
