@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
+
 	"shelley.exe.dev/claudetool"
 	"shelley.exe.dev/claudetool/browse"
 	"shelley.exe.dev/db"
@@ -418,6 +420,80 @@ func isSPARoute(path string) bool {
 // acceptsGzip reports whether r accepts gzip encoding.
 func acceptsGzip(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+}
+
+// pickStreamEncoding chooses an encoding for SSE responses. Prefers zstd
+// then gzip, then identity. Honours Accept-Encoding q-values per RFC 9110
+// §12.5.3: an entry with q=0 means the client refuses that encoding.
+//
+// Returns ("zstd"|"gzip"|"", acceptable). The second return is false only
+// when the client accepts no encoding we can produce — e.g. explicit
+// `identity;q=0` with neither gzip nor zstd offered — in which case the
+// caller should reply 406 Not Acceptable.
+func pickStreamEncoding(r *http.Request) (string, bool) {
+	ae := r.Header.Get("Accept-Encoding")
+	if strings.TrimSpace(ae) == "" {
+		// Absent header: any encoding is acceptable, default to identity.
+		return "", true
+	}
+	prefs := parseAcceptEncoding(ae)
+	// `*` is a catch-all that applies to any coding not explicitly listed.
+	codingAcceptable := func(name string) bool {
+		if q, ok := prefs[name]; ok {
+			return q > 0
+		}
+		if q, ok := prefs["*"]; ok {
+			return q > 0
+		}
+		return false
+	}
+	if codingAcceptable("zstd") {
+		return "zstd", true
+	}
+	if codingAcceptable("gzip") {
+		return "gzip", true
+	}
+	// Neither compressed encoding is acceptable. Identity is acceptable
+	// unless explicitly refused via `identity;q=0` or a catch-all `*;q=0`
+	// (with no overriding `identity;q>0`).
+	if q, ok := prefs["identity"]; ok {
+		return "", q > 0
+	}
+	if q, ok := prefs["*"]; ok && q == 0 {
+		return "", false
+	}
+	return "", true
+}
+
+// parseAcceptEncoding parses an Accept-Encoding header into a coding->q map.
+// Unknown parameters are ignored; entries without an explicit q default to 1.
+// Lower-cases coding names. Returns an empty map for an empty header.
+func parseAcceptEncoding(h string) map[string]float64 {
+	out := map[string]float64{}
+	for _, part := range strings.Split(h, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		coding, params, _ := strings.Cut(part, ";")
+		coding = strings.ToLower(strings.TrimSpace(coding))
+		if coding == "" {
+			continue
+		}
+		q := 1.0
+		for _, p := range strings.Split(params, ";") {
+			p = strings.TrimSpace(p)
+			name, val, ok := strings.Cut(p, "=")
+			if !ok || strings.ToLower(strings.TrimSpace(name)) != "q" {
+				continue
+			}
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(val), 64); err == nil {
+				q = parsed
+			}
+		}
+		out[coding] = q
+	}
+	return out
 }
 
 // etagMatches checks if the client's If-None-Match header matches the given ETag.
@@ -840,9 +916,9 @@ func (s *Server) conversationMux() *http.ServeMux {
 	mux.Handle("GET /{id}", gzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.handleGetConversation(w, r, r.PathValue("id"))
 	})))
-	// GET /api/conversation/<id>/stream - legacy SSE stream (do NOT compress)
-	// TODO: Consider gzip for SSE in the future. Would reduce bandwidth
-	// for large tool outputs, but needs flush after each event.
+	// GET /api/conversation/<id>/stream - legacy SSE stream. Compression is
+	// negotiated inside the handler (zstd/gzip per Accept-Encoding) with a
+	// compressor flush after every event so messages stream promptly.
 	mux.HandleFunc("GET /{id}/stream", func(w http.ResponseWriter, r *http.Request) {
 		s.handleStreamConversation(w, r, r.PathValue("id"))
 	})
@@ -1309,19 +1385,100 @@ func (s *Server) runStream(w http.ResponseWriter, r *http.Request, conversationI
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Compress SSE stream when the client accepts gzip or zstd. We keep a
+	// single gzip/zstd stream for the lifetime of the response and Flush()
+	// after every SSE record so the message is on the wire immediately.
+	//
+	// Using a single stream (rather than one independent gzip/zstd frame per
+	// message) avoids a subtle decoder issue: Go's net/http transparently
+	// gunzips gzip responses with multistream enabled, which means it won't
+	// surface the bytes of frame N until it has at least started reading
+	// frame N+1's header — fine for batch downloads, fatal for SSE.
+	//
+	// Critically, we set Content-Encoding and instantiate the compressor
+	// lazily, only when we're about to write the first frame. Code below
+	// can still fail (DB lookups, conversation hydration) and reply with a
+	// plain http.Error; if we'd already set Content-Encoding the client
+	// would try to gunzip that plain-text error body and choke.
+	encoding, acceptable := pickStreamEncoding(r)
+	if !acceptable {
+		http.Error(w, "no acceptable encoding", http.StatusNotAcceptable)
+		return
+	}
+	var (
+		compressedSink  io.Writer = w
+		flushCompressor           = func() error { return nil }
+		closeCompressor           = func() error { return nil }
+		streamStarted   bool
+	)
+	defer func() {
+		if err := closeCompressor(); err != nil {
+			s.logger.Debug("conversation stream compressor close failed", "error", err)
+		}
+	}()
+	initCompression := func() bool {
+		if streamStarted {
+			return true
+		}
+		switch encoding {
+		case "zstd":
+			// NewWriter only fails on invalid options, all of which are
+			// hardcoded here, so treat any error as a server bug.
+			zw, err := zstd.NewWriter(w, zstd.WithEncoderLevel(zstd.SpeedDefault))
+			if err != nil {
+				s.logger.Error("zstd writer init failed", "error", err)
+				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				return false
+			}
+			compressedSink = zw
+			flushCompressor = zw.Flush
+			closeCompressor = zw.Close
+			w.Header().Set("Content-Encoding", "zstd")
+		case "gzip":
+			gz := gzip.NewWriter(w)
+			compressedSink = gz
+			flushCompressor = gz.Flush
+			closeCompressor = gz.Close
+			w.Header().Set("Content-Encoding", "gzip")
+		}
+		streamStarted = true
+		return true
+	}
 
 	writeStreamData := func(streamData StreamResponse) bool {
+		if !initCompression() {
+			return false
+		}
 		data, err := json.Marshal(streamData)
 		if err != nil {
 			s.logger.Debug("failed to marshal stream response", "error", err)
 			return false
 		}
-		if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		if _, err := fmt.Fprintf(compressedSink, "data: %s\n\n", data); err != nil {
 			s.logger.Debug("conversation stream write failed", "error", err)
+			return false
+		}
+		if err := flushCompressor(); err != nil {
+			s.logger.Debug("conversation stream compressor flush failed", "error", err)
 			return false
 		}
 		flusher.Flush()
 		return true
+	}
+
+	// errAfterStreamStart abandons the stream after a fatal post-write error.
+	// Once any SSE frame has been written, the response is committed and we
+	// must not call http.Error (which would inject uncompressed bytes into the
+	// gzip/zstd body). Simply return; the client treats the closed connection
+	// as a transient drop and reconnects via last_sequence_id.
+	errAfterStreamStart := func(w http.ResponseWriter, msg string) {
+		if streamStarted {
+			s.logger.Debug("abandoning compressed SSE stream after error", "msg", msg)
+			return
+		}
+		http.Error(w, msg, http.StatusInternalServerError)
 	}
 
 	for _, event := range listInitial {
@@ -1408,7 +1565,7 @@ func (s *Server) runStream(w http.ResponseWriter, r *http.Request, conversationI
 		})
 		if err != nil {
 			s.logger.Error("Failed to get conversation data", "conversationID", conversationID, "error", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			errAfterStreamStart(w, "Internal server error")
 			return
 		}
 		if len(messages) > 0 {
@@ -1429,7 +1586,7 @@ func (s *Server) runStream(w http.ResponseWriter, r *http.Request, conversationI
 		})
 		if err != nil {
 			s.logger.Error("Failed to get conversation data", "conversationID", conversationID, "error", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			errAfterStreamStart(w, "Internal server error")
 			return
 		}
 		if len(messages) > 0 {
@@ -1440,7 +1597,7 @@ func (s *Server) runStream(w http.ResponseWriter, r *http.Request, conversationI
 	manager, err := s.getOrCreateConversationManager(ctx, conversationID, "")
 	if err != nil {
 		s.logger.Error("Failed to get conversation manager", "conversationID", conversationID, "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		errAfterStreamStart(w, "Internal server error")
 		return
 	}
 
