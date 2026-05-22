@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+type CacheSession struct {
+	TokenHash  string    `json:"token_hash"`
+	UserID     string    `json:"user_id"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
 type Conversation struct {
 	ConversationID       string    `json:"conversation_id"`
 	Slug                 *string   `json:"slug"`

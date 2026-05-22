@@ -10,35 +10,107 @@
 // message puts, so concurrent writers (other tabs / store instances) cannot
 // lose `max_sequence_id_local`.
 //
-// DB schema v3:
-//   messages          — keyPath [conversation_id, sequence_id], one row per
-//                       message. Range queries by conversation use a keyed
-//                       bound on the compound key — no secondary index.
-//   conversation_meta — keyPath conversation_id, metadata + sequence bookmarks.
+// At-rest encryption (v4): the sensitive payload of each row is AES-GCM
+// encrypted with a per-browser key derived server-side from a long-lived
+// secret + a session cookie (see services/cryptoKey.ts + server/cache_key.go).
+// On open we fetch the key; if the server returns a different key_id than
+// the one stored in `meta`, the DB is wiped before use (treats unrelated
+// cipher-text as garbage). If the server refuses to release the key (auth
+// lost), IDB persistence silently degrades to a no-op — the in-memory hot
+// map and the live SSE stream still work; we just don't have offline cache
+// until re-auth.
+//
+// DB schema v4:
+//   messages          — keyPath [conversation_id, sequence_id]. Row =
+//                       { conversation_id, sequence_id, message_id, iv, ct }.
+//                       conversation_id, sequence_id, message_id stay
+//                       plaintext (they are keys / indexed). The Message
+//                       JSON lives inside ct.
+//   conversation_meta — keyPath conversation_id. Row = { conversation_id,
+//                       updated_at, iv, ct }. The rest of the meta
+//                       (Conversation, sequence bookmarks, …) lives in ct.
+//                       updated_at stays plaintext so pruneStale can scan.
+//   keys_meta         — singleton row keyed by "current" holding { key_id }.
+//                       Server key_id mismatch triggers a full wipe.
 
-import { openDB, IDBPDatabase, DBSchema, OpenDBCallbacks } from "idb";
+import { openDB, IDBPDatabase, IDBPObjectStore, DBSchema, OpenDBCallbacks } from "idb";
 import type { Message, Conversation, StreamResponse, ToolProgress } from "../types";
+import {
+  CacheKeyHolder,
+  HttpCacheKeyFetcher,
+  wrapJSON,
+  unwrapJSON,
+  rowAAD,
+  type CacheKeyMaterial,
+} from "./cryptoKey";
+
+// Cross-tab notification channel for key rotation. When one tab runs
+// wipeAndRotateKey() the others must drop their cached CryptoKey and
+// reopen the DB so they don't keep writing old-key ciphertext into a
+// store that's been re-keyed under them. Optional chaining for
+// environments without BroadcastChannel (older Safari / tests).
+const ROTATE_CHANNEL = "shelley-cache-rotate";
+type RotateMsg = { type: "rotated" };
 
 const DEFAULT_DB_NAME = "shelley-messages";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 // ─── IDB schema ─────────────────────────────────────────────────────────────
+//
+// Persisted rows are encrypted-at-rest. Plaintext fields are limited to
+// what we need for indexing / range queries / pruning.
 
-/** One row per message in the `messages` store. Identical shape to Message. */
-type MessageRow = Message;
+/** One row per message in the `messages` store. */
+interface MessageRow {
+  conversation_id: string;
+  sequence_id: number;
+  message_id: string;
+  iv: Uint8Array;
+  ct: Uint8Array;
+}
 
-/** One row per conversation in the `conversation_meta` store. */
+/** Encrypted plaintext payload stored in MessageRow.ct. Just the Message. */
+type MessagePayload = Message;
+
+/**
+ * One row per conversation in the `conversation_meta` store.
+ *
+ * Plaintext-on-disk fields are limited to bookkeeping integers + the
+ * timestamp pruneStale needs. The sensitive payload (Conversation,
+ * context_window_size) lives in `ct`.
+ *
+ * Why bookkeeping is plaintext: the original design uses a single RW
+ * transaction to RMW these fields with Math.max so concurrent writers
+ * don't regress them. IDB transactions auto-commit when control yields
+ * to a non-IDB promise, and AES-GCM via crypto.subtle returns promises.
+ * Decrypting/encrypting inside the tx would race the auto-commit. Keeping
+ * the ratchet fields out of `ct` preserves the atomic-RMW property
+ * without forcing us to decrypt the existing row inside the tx.
+ */
 interface ConvMetaRow {
   conversation_id: string;
-  conversation: Conversation | null;
-  context_window_size: number;
+  /** Kept plaintext so pruneStale can scan without decrypting. */
+  updated_at: number;
   /** Server-reported maximum sequence_id (from stream or list response). */
   max_sequence_id_known: number;
   /** Highest sequence_id we have locally cached. */
   max_sequence_id_local: number;
   /** True once a full REST GET has been merged in successfully. */
   has_full_history: boolean;
-  updated_at: number;
+  iv: Uint8Array;
+  ct: Uint8Array;
+}
+
+/** Encrypted payload stored in ConvMetaRow.ct. */
+interface ConvMetaPayload {
+  conversation: Conversation | null;
+  context_window_size: number;
+}
+
+/** Singleton row in keys_meta. */
+interface KeyMetaRow {
+  id: "current";
+  key_id: string;
 }
 
 interface ShelleyDB extends DBSchema {
@@ -53,6 +125,26 @@ interface ShelleyDB extends DBSchema {
     key: string;
     value: ConvMetaRow;
   };
+  keys_meta: {
+    key: string;
+    value: KeyMetaRow;
+  };
+}
+
+/**
+ * Narrow type for the keys_meta object store handle passed to
+ * verifyKeyInTx. We accept any tx variant (the tx may include other
+ * stores) so the helper can be reused from every write path.
+ */
+type IDBPObjectStoreForVerify = IDBPObjectStore<
+  ShelleyDB,
+  ("messages" | "conversation_meta" | "keys_meta")[],
+  "keys_meta",
+  "readwrite"
+>;
+
+function emptyPayload(): ConvMetaPayload {
+  return { conversation: null, context_window_size: 0 };
 }
 
 // ─── Public in-memory aggregate shape ────────────────────────────────────────
@@ -114,11 +206,17 @@ export interface MessageStoreOptions {
    * this; production callers shouldn't need to.
    */
   factory?: IDBFactory;
+  /**
+   * Crypto key provider. Defaults to the production HTTP fetcher hitting
+   * /api/cache-key. Tests inject a deterministic in-memory holder.
+   */
+  keyHolder?: CacheKeyHolder;
 }
 
 export class MessageStore {
   private readonly dbName: string;
   private readonly factory: IDBFactory | undefined;
+  private readonly keyHolder: CacheKeyHolder;
   private dbPromise: Promise<IDBPDatabase<ShelleyDB>> | null = null;
   private hot = new Map<string, ConversationCacheRecord>();
   private transient = new Map<string, TransientState>();
@@ -128,10 +226,42 @@ export class MessageStore {
   private allListeners = new Set<Listener>();
   /** Pending write-behind operations. `settle()` awaits these. */
   private inflight = new Set<Promise<unknown>>();
+  /** Cross-tab rotation channel; null when BroadcastChannel is unavailable. */
+  private rotateChannel: BroadcastChannel | null = null;
 
   constructor(opts: MessageStoreOptions = {}) {
     this.dbName = opts.dbName ?? DEFAULT_DB_NAME;
     this.factory = opts.factory ?? (typeof indexedDB !== "undefined" ? indexedDB : undefined);
+    this.keyHolder = opts.keyHolder ?? new CacheKeyHolder(new HttpCacheKeyFetcher());
+    if (typeof BroadcastChannel !== "undefined") {
+      this.rotateChannel = new BroadcastChannel(ROTATE_CHANNEL);
+      // Node implements BroadcastChannel via libuv and keeps the event
+      // loop alive while a channel is open. Tests that forget to call
+      // close() (and CI itself, which runs many test files in one node
+      // invocation) would hang at exit. Browsers don't have unref() but
+      // also don't have a notion of "keep process alive".
+      const ch = this.rotateChannel as BroadcastChannel & { unref?: () => void };
+      if (typeof ch.unref === "function") ch.unref();
+      this.rotateChannel.onmessage = (ev: MessageEvent<RotateMsg>) => {
+        if (ev.data?.type !== "rotated") return;
+        // Another tab rotated the server key. Drop our cached CryptoKey
+        // and our DB handle so the next op re-fetches a fresh key and
+        // re-opens the DB (which will then run wipe-on-mismatch via
+        // openAndSyncKey if our keys_meta is stale). Don't pre-emptively
+        // wipe IDB here: the rotating tab's own clear() already did.
+        this.keyHolder.forget();
+        if (this.dbPromise) {
+          this.dbPromise.then((db) => db.close()).catch(() => {});
+          this.dbPromise = null;
+        }
+        this.hydrated.clear();
+      };
+    }
+  }
+
+  /** Get the current cache key, or null if the server won't release it. */
+  private async getKey(): Promise<CacheKeyMaterial | null> {
+    return this.keyHolder.ensure();
   }
 
   // ── DB open ────────────────────────────────────────────────────────────────
@@ -139,12 +269,52 @@ export class MessageStore {
   private db(): Promise<IDBPDatabase<ShelleyDB>> {
     if (!this.factory) return Promise.reject(new Error("indexedDB unavailable"));
     if (!this.dbPromise) {
-      this.dbPromise = this.openWithFactory().catch((err) => {
+      this.dbPromise = this.openAndSyncKey().catch((err) => {
         this.dbPromise = null;
         throw err;
       });
     }
     return this.dbPromise;
+  }
+
+  /**
+   * Open the DB, then reconcile its stored key_id against the server's
+   * current one. Mismatch → wipe before returning (the prior cipher-text
+   * is unreadable). If the server refuses to give us a key, the open
+   * fails so callers fall back to memory-only.
+   */
+  private async openAndSyncKey(): Promise<IDBPDatabase<ShelleyDB>> {
+    const material = await this.getKey();
+    if (!material) throw new Error("messageStore: cache key unavailable");
+    const db = await this.openWithFactory();
+    try {
+      const tx = db.transaction(["keys_meta", "messages", "conversation_meta"], "readwrite");
+      const km = tx.objectStore("keys_meta");
+      const existing = await km.get("current");
+      if (!existing) {
+        // No recorded key. Defensive: if there are pre-existing rows
+        // (from a process that crashed mid-rotation, a stale upgrade,
+        // or a malicious write), they cannot belong to the current key
+        // — wipe before claiming ownership. Otherwise just record.
+        const msgsCount = await tx.objectStore("messages").count();
+        const metaCount = await tx.objectStore("conversation_meta").count();
+        if (msgsCount > 0 || metaCount > 0) {
+          await tx.objectStore("messages").clear();
+          await tx.objectStore("conversation_meta").clear();
+        }
+        await km.put({ id: "current", key_id: material.keyId });
+      } else if (existing.key_id !== material.keyId) {
+        // Server rotated; old rows are useless. Wipe.
+        await tx.objectStore("messages").clear();
+        await tx.objectStore("conversation_meta").clear();
+        await km.put({ id: "current", key_id: material.keyId });
+      }
+      await tx.done;
+    } catch (err) {
+      db.close();
+      throw err;
+    }
+    return db;
   }
 
   private async openWithFactory(): Promise<IDBPDatabase<ShelleyDB>> {
@@ -154,20 +324,23 @@ export class MessageStore {
         if (db.objectStoreNames.contains("conversations" as never)) {
           db.deleteObjectStore("conversations" as never);
         }
-        // v2 introduced the messages + conversation_meta layout but with a
-        // redundant `by_conv` index. v3 drops that index by recreating the
-        // store (cache only — no data loss). Always create the v3 layout.
+        // v2/v3 had plaintext rows. v4 changes the row shape to { iv, ct }.
+        // Drop both stores wholesale so we don't try to decrypt plaintext.
         if (db.objectStoreNames.contains("messages")) {
           db.deleteObjectStore("messages");
+        }
+        if (db.objectStoreNames.contains("conversation_meta")) {
+          db.deleteObjectStore("conversation_meta");
         }
         const msgStore = db.createObjectStore("messages", {
           keyPath: ["conversation_id", "sequence_id"],
         });
         msgStore.createIndex("by_message_id", "message_id", { unique: true });
-        if (!db.objectStoreNames.contains("conversation_meta")) {
-          db.createObjectStore("conversation_meta", {
-            keyPath: "conversation_id",
-          });
+        db.createObjectStore("conversation_meta", {
+          keyPath: "conversation_id",
+        });
+        if (!db.objectStoreNames.contains("keys_meta")) {
+          db.createObjectStore("keys_meta", { keyPath: "id" });
         }
         void oldVersion;
       },
@@ -195,9 +368,15 @@ export class MessageStore {
     }
   }
 
-  /** Close (and forget) the underlying connection. Tests use this. */
+  /** Close (and forget) the underlying connection. Tests use this; also
+   * releases the BroadcastChannel so per-test stores don't leak channel
+   * subscriptions across tests. */
   async close(): Promise<void> {
     await this.settle();
+    if (this.rotateChannel) {
+      this.rotateChannel.close();
+      this.rotateChannel = null;
+    }
     if (!this.dbPromise) return;
     try {
       const db = await this.dbPromise;
@@ -227,6 +406,95 @@ export class MessageStore {
     return p;
   }
 
+  // ── Encrypted row helpers ──────────────────────────────────────────────
+  //
+  // wrapXxx is sync-ish (awaits subtle.encrypt); unwrapXxx never throws
+  // — a decrypt failure (wrong key / corrupt) is logged and treated as
+  // if the row didn't exist. That makes us robust against partial-wipe
+  // scenarios where keys_meta says one key but a stray row was written
+  // under another (shouldn't happen, but defensive).
+
+  /**
+   * AAD bound into every encrypted message row. Authenticates (but does
+   * not encrypt) the plaintext key fields so an attacker with IDB write
+   * access cannot splice a valid {iv,ct} blob from one row onto another
+   * row's keys. Decrypt will fail closed if any of these don't match.
+   */
+  private messageAAD(m: { conversation_id: string; sequence_id: number; message_id: string }) {
+    return rowAAD({
+      kind: "msg",
+      conversation_id: m.conversation_id,
+      sequence_id: m.sequence_id,
+      message_id: m.message_id,
+    });
+  }
+
+  /** AAD for a conversation_meta row. */
+  private metaAAD(conversation_id: string) {
+    return rowAAD({ kind: "meta", conversation_id });
+  }
+
+  private async encryptMessageRow(key: CryptoKey, m: Message): Promise<MessageRow> {
+    const { iv, ct } = await wrapJSON(key, m, this.messageAAD(m));
+    return {
+      conversation_id: m.conversation_id,
+      sequence_id: m.sequence_id,
+      message_id: m.message_id,
+      iv,
+      ct,
+    };
+  }
+
+  private async decryptMessageRow(key: CryptoKey, row: MessageRow): Promise<Message | null> {
+    try {
+      return await unwrapJSON<MessagePayload>(key, row.iv, row.ct, this.messageAAD(row));
+    } catch (err) {
+      console.warn("messageStore: undecryptable message row", row.message_id, err);
+      return null;
+    }
+  }
+
+  private async decryptMetaRow(key: CryptoKey, row: ConvMetaRow): Promise<ConvMetaPayload | null> {
+    try {
+      return await unwrapJSON<ConvMetaPayload>(
+        key,
+        row.iv,
+        row.ct,
+        this.metaAAD(row.conversation_id),
+      );
+    } catch (err) {
+      console.warn("messageStore: undecryptable meta row", row.conversation_id, err);
+      return null;
+    }
+  }
+
+  /**
+   * Re-check inside an open write tx that the keys_meta singleton still
+   * names the same key_id our caller is about to write under. Other tabs
+   * may have rotated the key between the time we encrypted (outside any
+   * tx, since subtle.encrypt would auto-commit) and the time the tx
+   * actually runs. If we wrote anyway the new-key store would acquire
+   * old-key ciphertext that survives wipe-on-mismatch (because keys_meta
+   * already names the new key). Returns true if it's safe to proceed.
+   *
+   * Must be called from inside a tx that includes the "keys_meta" store.
+   */
+  private async verifyKeyInTx(
+    km: IDBPObjectStoreForVerify,
+    expectedKeyId: string,
+  ): Promise<boolean> {
+    const cur = await km.get("current");
+    if (!cur || cur.key_id !== expectedKeyId) {
+      // Key was rotated under us. Drop the in-memory key so the next op
+      // re-fetches from the server.
+      this.keyHolder.forget();
+      this.dbPromise?.then((db) => db.close()).catch(() => {});
+      this.dbPromise = null;
+      return false;
+    }
+    return true;
+  }
+
   // ── Hydrate ────────────────────────────────────────────────────────────────
 
   /** Load a conversation from IDB into the hot cache if not already loaded. */
@@ -236,25 +504,38 @@ export class MessageStore {
     }
     let rec: ConversationCacheRecord | null = null;
     try {
+      const material = await this.getKey();
+      if (!material) {
+        this.hydrated.add(id);
+        return null;
+      }
       const db = await this.db();
       const meta = await db.get("conversation_meta", id);
       if (meta) {
-        // getAll on the compound key range returns rows in ascending
-        // (conv, seq) order — no JS sort needed.
-        const rows = await db.getAll("messages", convRange(id));
-        const minSeq = rows.length > 0 ? rows[0].sequence_id : 0;
-        const maxSeq = rows.length > 0 ? rows[rows.length - 1].sequence_id : -1;
-        rec = {
-          conversation_id: id,
-          messages: rows,
-          conversation: meta.conversation,
-          contextWindowSize: meta.context_window_size,
-          minSequenceId: minSeq,
-          maxSequenceId: maxSeq,
-          maxSequenceIdKnown: meta.max_sequence_id_known,
-          hasFullHistory: meta.has_full_history,
-          updatedAt: meta.updated_at,
-        };
+        const payload = await this.decryptMetaRow(material.key, meta);
+        if (payload) {
+          // getAll on the compound key range returns rows in ascending
+          // (conv, seq) order — no JS sort needed.
+          const rows = await db.getAll("messages", convRange(id));
+          const decrypted: Message[] = [];
+          for (const r of rows) {
+            const m = await this.decryptMessageRow(material.key, r);
+            if (m) decrypted.push(m);
+          }
+          const minSeq = decrypted.length > 0 ? decrypted[0].sequence_id : 0;
+          const maxSeq = decrypted.length > 0 ? decrypted[decrypted.length - 1].sequence_id : -1;
+          rec = {
+            conversation_id: id,
+            messages: decrypted,
+            conversation: payload.conversation,
+            contextWindowSize: payload.context_window_size,
+            minSequenceId: minSeq,
+            maxSequenceId: maxSeq,
+            maxSequenceIdKnown: meta.max_sequence_id_known,
+            hasFullHistory: meta.has_full_history,
+            updatedAt: meta.updated_at,
+          };
+        }
       }
     } catch (err) {
       console.warn("messageStore.hydrate: IDB read failed:", err);
@@ -335,32 +616,59 @@ export class MessageStore {
     convHint: Conversation | null,
     ctxHint: number,
   ): Promise<void> {
+    const material = await this.getKey();
+    if (!material) return;
+    // Encrypt OUTSIDE the IDB tx — crypto.subtle returns promises and
+    // awaiting non-IDB promises inside a tx invalidates it. The encrypted
+    // payload for the meta row depends on the *existing* row; we read it
+    // in its own RX tx first (snapshot), encrypt, then do a single RW tx
+    // that does the true RMW of the plaintext ratchet fields.
+    const encRows: MessageRow[] = [];
+    for (const m of incoming) {
+      encRows.push(await this.encryptMessageRow(material.key, m));
+    }
     const db = await this.db();
-    const tx = db.transaction(["messages", "conversation_meta"], "readwrite");
+    // Snapshot existing meta payload for `conversation` and
+    // `context_window_size` defaults. These are not ratcheted; if a
+    // concurrent writer landed something fresher, our overwrite of the
+    // payload is acceptable (same loose semantics as v3).
+    const existingRow = await db.get("conversation_meta", id);
+    const existingPayload = existingRow
+      ? await this.decryptMetaRow(material.key, existingRow)
+      : null;
+    const payload: ConvMetaPayload = {
+      conversation: convHint ?? existingPayload?.conversation ?? null,
+      context_window_size:
+        existingPayload?.context_window_size && existingPayload.context_window_size > 0
+          ? existingPayload.context_window_size
+          : ctxHint,
+    };
+    const { iv, ct } = await wrapJSON(material.key, payload, this.metaAAD(id));
+
+    // Now a single RW tx — no non-IDB awaits inside.
+    const tx = db.transaction(["messages", "conversation_meta", "keys_meta"], "readwrite");
+    if (!(await this.verifyKeyInTx(tx.objectStore("keys_meta"), material.keyId))) {
+      tx.abort();
+      return;
+    }
     const msgs = tx.objectStore("messages");
     const metaStore = tx.objectStore("conversation_meta");
     const existing = await metaStore.get(id);
     let maxLocal = existing?.max_sequence_id_local ?? -1;
     const idIdx = msgs.index("by_message_id");
-    for (const m of incoming) {
-      // A regenerated turn keeps the same message_id but moves to a new
-      // sequence_id. The unique by_message_id index would otherwise reject
-      // the put, so explicitly delete any prior row for this message_id
-      // at a different seq before writing.
+    for (let i = 0; i < encRows.length; i++) {
+      const row = encRows[i];
+      const m = incoming[i];
       const priorKey = await idIdx.getKey(m.message_id);
       if (priorKey && (priorKey[0] !== m.conversation_id || priorKey[1] !== m.sequence_id)) {
         await msgs.delete(priorKey);
       }
-      await msgs.put(m);
+      await msgs.put(row);
       if (m.sequence_id > maxLocal) maxLocal = m.sequence_id;
     }
-    const row: ConvMetaRow = {
+    const metaRow: ConvMetaRow = {
       conversation_id: id,
-      conversation: convHint ?? existing?.conversation ?? null,
-      context_window_size:
-        existing?.context_window_size && existing.context_window_size > 0
-          ? existing.context_window_size
-          : ctxHint,
+      updated_at: Date.now(),
       max_sequence_id_known: Math.max(
         existing?.max_sequence_id_known ?? 0,
         knownHint,
@@ -368,9 +676,10 @@ export class MessageStore {
       ),
       max_sequence_id_local: maxLocal,
       has_full_history: existing?.has_full_history ?? false,
-      updated_at: Date.now(),
+      iv,
+      ct,
     };
-    await metaStore.put(row);
+    await metaStore.put(metaRow);
     await tx.done;
   }
 
@@ -412,28 +721,46 @@ export class MessageStore {
   }
 
   private async _persistFullHistory(id: string, rec: ConversationCacheRecord): Promise<void> {
+    const material = await this.getKey();
+    if (!material) return;
+    // Encrypt all message rows + the meta payload OUTSIDE the IDB tx.
+    const encMsgs: MessageRow[] = [];
+    for (const m of rec.messages) {
+      encMsgs.push(await this.encryptMessageRow(material.key, m));
+    }
     const db = await this.db();
-    const tx = db.transaction(["messages", "conversation_meta"], "readwrite");
+    const existingRow = await db.get("conversation_meta", id);
+    const existingPayload = existingRow
+      ? await this.decryptMetaRow(material.key, existingRow)
+      : null;
+    const payload: ConvMetaPayload = {
+      conversation: rec.conversation ?? existingPayload?.conversation ?? null,
+      context_window_size: rec.contextWindowSize,
+    };
+    const { iv, ct } = await wrapJSON(material.key, payload, this.metaAAD(id));
+
+    const tx = db.transaction(["messages", "conversation_meta", "keys_meta"], "readwrite");
+    if (!(await this.verifyKeyInTx(tx.objectStore("keys_meta"), material.keyId))) {
+      tx.abort();
+      return;
+    }
     const msgs = tx.objectStore("messages");
     const metaStore = tx.objectStore("conversation_meta");
     const existing = await metaStore.get(id);
     // Replace semantics: drop everything for this conversation, then bulk put.
     await msgs.delete(convRange(id));
-    for (const m of rec.messages) {
-      await msgs.put(m);
+    for (const r of encMsgs) {
+      await msgs.put(r);
     }
     const row: ConvMetaRow = {
       conversation_id: id,
-      conversation: rec.conversation ?? existing?.conversation ?? null,
-      context_window_size: rec.contextWindowSize,
+      updated_at: Date.now(),
       max_sequence_id_known: Math.max(existing?.max_sequence_id_known ?? 0, rec.maxSequenceIdKnown),
       // Ratchet against any concurrent writer that pushed local higher.
-      // Messages were just replaced with rec.messages, so disk content
-      // matches rec.maxSequenceId; but the bookkeeping field tracks the
-      // high-water mark across writers (other tabs streaming live events).
       max_sequence_id_local: Math.max(existing?.max_sequence_id_local ?? -1, rec.maxSequenceId),
       has_full_history: true,
-      updated_at: Date.now(),
+      iv,
+      ct,
     };
     await metaStore.put(row);
     await tx.done;
@@ -493,45 +820,108 @@ export class MessageStore {
    * Read-modify-write patch of a conversation_meta row. Ratcheting fields
    * (max_sequence_id_known, max_sequence_id_local) use Math.max against the
    * persisted value so a concurrent writer cannot regress them.
+   *
+   * Two paths:
+   *   - Patches touching only plaintext bookkeeping (max_sequence_id_*,
+   *     has_full_history): the existing row's iv+ct are reused inside the
+   *     tx, so the whole RMW is atomic vs other writers. This is what
+   *     setMaxSequenceIdKnown and markAllStale hit — they are the only
+   *     paths that fire on every stream event so they must stay atomic.
+   *   - Patches touching the encrypted payload (conversation,
+   *     context_window_size): we snapshot+decrypt+re-encrypt outside the
+   *     tx (because crypto.subtle awaits would auto-commit the tx).
+   *     setConversation / setContextWindowSize fire at most once per
+   *     server-pushed conversation update, so last-write-wins between
+   *     concurrent payload patches is acceptable.
    */
   private async _patchMeta(
     id: string,
-    patch: Partial<
-      Pick<
-        ConvMetaRow,
-        | "conversation"
-        | "context_window_size"
-        | "max_sequence_id_known"
-        | "max_sequence_id_local"
-        | "has_full_history"
-      >
-    >,
+    patch: {
+      conversation?: Conversation | null;
+      context_window_size?: number;
+      max_sequence_id_known?: number;
+      max_sequence_id_local?: number;
+      has_full_history?: boolean;
+    },
   ): Promise<void> {
+    const material = await this.getKey();
+    if (!material) return;
+    const touchesPayload =
+      patch.conversation !== undefined || patch.context_window_size !== undefined;
     const db = await this.db();
-    const tx = db.transaction("conversation_meta", "readwrite");
-    const store = tx.store;
+
+    // For payload-touching patches: snapshot the existing payload, merge,
+    // and pre-encrypt outside the tx (subtle.encrypt awaits would
+    // auto-commit a readwrite tx). For bookkeeping-only patches: skip
+    // the snapshot so the tx body is pure-IDB and atomic vs concurrent
+    // RMWs from other tabs. We always pre-encrypt an empty payload as a
+    // fallback in case `existing` is null inside the tx.
+    let payloadCipher: { iv: Uint8Array; ct: Uint8Array } | null = null;
+    if (touchesPayload) {
+      const existingRow = await db.get("conversation_meta", id);
+      const existingPayload = existingRow
+        ? await this.decryptMetaRow(material.key, existingRow)
+        : null;
+      const basePayload: ConvMetaPayload = existingPayload ?? emptyPayload();
+      const newPayload: ConvMetaPayload = {
+        conversation:
+          patch.conversation !== undefined ? patch.conversation : basePayload.conversation,
+        context_window_size:
+          patch.context_window_size !== undefined
+            ? patch.context_window_size
+            : basePayload.context_window_size,
+      };
+      payloadCipher = await wrapJSON(material.key, newPayload, this.metaAAD(id));
+    }
+    // Cheap empty-payload cipher in case the row doesn't exist yet and
+    // we're a bookkeeping-only patch; cached neither (different IV per
+    // call) so paths that don't need it pay nothing extra.
+    const emptyCipher = touchesPayload
+      ? null
+      : await wrapJSON(material.key, emptyPayload(), this.metaAAD(id));
+
+    const tx = db.transaction(["conversation_meta", "keys_meta"], "readwrite");
+    if (!(await this.verifyKeyInTx(tx.objectStore("keys_meta"), material.keyId))) {
+      tx.abort();
+      return;
+    }
+    const store = tx.objectStore("conversation_meta");
     const existing = await store.get(id);
-    const base: ConvMetaRow = existing ?? {
-      conversation_id: id,
-      conversation: null,
-      context_window_size: 0,
+    let iv: Uint8Array;
+    let ct: Uint8Array;
+    if (payloadCipher) {
+      ({ iv, ct } = payloadCipher);
+    } else if (existing) {
+      // Bookkeeping-only patch on an existing row: reuse iv+ct verbatim.
+      // Whole RMW is inside this single tx — atomic vs other writers.
+      iv = existing.iv;
+      ct = existing.ct;
+    } else {
+      // Bookkeeping-only patch on a never-seen conv (e.g.
+      // setMaxSequenceIdKnown from a list patch before backfill). Use
+      // the pre-encrypted empty payload.
+      ({ iv, ct } = emptyCipher!);
+    }
+    const baseMeta = existing ?? {
       max_sequence_id_known: 0,
       max_sequence_id_local: -1,
       has_full_history: false,
-      updated_at: 0,
     };
     const row: ConvMetaRow = {
-      ...base,
-      ...patch,
+      conversation_id: id,
+      updated_at: Date.now(),
       max_sequence_id_known:
         patch.max_sequence_id_known !== undefined
-          ? Math.max(base.max_sequence_id_known, patch.max_sequence_id_known)
-          : base.max_sequence_id_known,
+          ? Math.max(baseMeta.max_sequence_id_known, patch.max_sequence_id_known)
+          : baseMeta.max_sequence_id_known,
       max_sequence_id_local:
         patch.max_sequence_id_local !== undefined
-          ? Math.max(base.max_sequence_id_local, patch.max_sequence_id_local)
-          : base.max_sequence_id_local,
-      updated_at: Date.now(),
+          ? Math.max(baseMeta.max_sequence_id_local, patch.max_sequence_id_local)
+          : baseMeta.max_sequence_id_local,
+      has_full_history:
+        patch.has_full_history !== undefined ? patch.has_full_history : baseMeta.has_full_history,
+      iv,
+      ct,
     };
     await store.put(row);
     await tx.done;
@@ -711,9 +1101,10 @@ export class MessageStore {
     this.hydrated.clear();
     try {
       const db = await this.db();
-      const tx = db.transaction(["messages", "conversation_meta"], "readwrite");
+      const tx = db.transaction(["messages", "conversation_meta", "keys_meta"], "readwrite");
       await tx.objectStore("messages").clear();
       await tx.objectStore("conversation_meta").clear();
+      await tx.objectStore("keys_meta").clear();
       await tx.done;
     } catch (err) {
       console.warn("messageStore.clear: IDB clear failed:", err);
@@ -722,6 +1113,46 @@ export class MessageStore {
       for (const cb of cbs) cb();
     }
     for (const cb of this.allListeners) cb();
+  }
+
+  /**
+   * Tell the server to invalidate the cache session, drop our in-memory
+   * key, and wipe IDB. Use on explicit logout / "clear local cache". The
+   * next operation will fetch a fresh key and a fresh empty DB.
+   *
+   * Drains in-flight write-behind tasks BEFORE touching the key/cache so
+   * we cannot leave behind rows that were encrypted under the old key but
+   * land in IDB *after* the wipe (which would then be undecryptable
+   * garbage that survives until the next rotation — they look fresh to
+   * the next-key keys_meta and bypass the wipe-on-mismatch path).
+   */
+  async wipeAndRotateKey(): Promise<void> {
+    await this.settle();
+    try {
+      await this.keyHolder.clear();
+    } catch (err) {
+      // Server clear() failed (e.g. 500 / network). Don't blow away IDB
+      // locally: the user thinks the cache is wiped, but the next
+      // GET /api/cache-key would still hand back the old key_id and
+      // our wipe-on-mismatch path wouldn't fire, leaving a tab that
+      // *thinks* it rotated but didn't. Surface the failure to the
+      // caller (CommandPalette currently reloads on success only via
+      // its .then; this rejects the promise so .then is skipped).
+      console.warn("messageStore.wipeAndRotateKey: clear server session failed:", err);
+      throw err;
+    }
+    await this.clear();
+    // Force the next db() call to re-open and pick up the new key_id.
+    if (this.dbPromise) {
+      try {
+        (await this.dbPromise).close();
+      } catch {
+        /* ignore */
+      }
+      this.dbPromise = null;
+    }
+    // Tell sibling tabs to drop their cached keys + db handles.
+    this.rotateChannel?.postMessage({ type: "rotated" } satisfies RotateMsg);
   }
 
   // ── Subscribe ──────────────────────────────────────────────────────────────

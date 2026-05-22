@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { ConversationWithState } from "../types";
 import { api } from "../services/api";
+import { messageStore } from "../services/messageStore";
 import { useMarkdown } from "../contexts/MarkdownContext";
 import { useI18n, type Locale } from "../i18n";
 
@@ -715,6 +716,58 @@ function CommandPalette({
         />
       </svg>
     );
+    // Clear the IndexedDB cache. Calls /api/cache-session/clear which
+    // rotates the server's cookie/key_id, then wipes IDB locally. Next
+    // page op re-fetches a fresh key and starts with an empty cache.
+    items.push({
+      id: "clear-local-cache",
+      type: "action",
+      title: "Clear local cache",
+      subtitle: "Wipe cached conversations from this browser and rotate the encryption key",
+      icon: (
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a2 2 0 012-2h2a2 2 0 012 2v3"
+          />
+        </svg>
+      ),
+      action: () => {
+        void messageStore.wipeAndRotateKey().then(
+          () => {
+            // Hard reload so React state, EventSource, and any closures
+            // holding references to the old (now-stale) cache rehydrate
+            // cleanly against the freshly-keyed empty IDB.
+            window.location.reload();
+          },
+          (err) => {
+            // Server-side rotation failed (e.g. /api/cache-session/clear
+            // returned non-2xx). Don't reload — the cache key is still
+            // valid server-side and a reload would be a no-op that
+            // misleads the user. Surface so they can retry.
+            console.warn("clear-local-cache: rotation failed", err);
+            window.alert(
+              "Failed to clear local cache. Please check your connection and try again.",
+            );
+          },
+        );
+        onClose();
+      },
+      keywords: [
+        "clear",
+        "cache",
+        "wipe",
+        "logout",
+        "forget",
+        "reset",
+        "local",
+        "privacy",
+        "encrypt",
+      ],
+    });
+
     for (const opt of languageOptions) {
       if (opt.loc === locale) continue;
       items.push({

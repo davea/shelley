@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"shelley.exe.dev/db/generated"
@@ -1475,4 +1476,68 @@ func (db *DB) GetAllSettings(ctx context.Context) (map[string]string, error) {
 		settings[row.Key] = row.Value
 	}
 	return settings, nil
+}
+
+// ── Cache sessions (browser IDB encryption keys) ─────────────────────────────
+
+// ErrNoCacheSession is returned by GetCacheSession when no row exists.
+var ErrNoCacheSession = errors.New("cache session not found")
+
+// CacheSession is the public projection of a cache_sessions row.
+type CacheSession struct {
+	TokenHash  string
+	UserID     string
+	CreatedAt  string
+	LastSeenAt string
+}
+
+// GetCacheSession returns the row keyed by token_hash, or ErrNoCacheSession.
+func (db *DB) GetCacheSession(ctx context.Context, tokenHash string) (CacheSession, error) {
+	var out CacheSession
+	err := db.pool.Rx(ctx, func(ctx context.Context, rx *Rx) error {
+		q := generated.New(rx.Conn())
+		row, err := q.GetCacheSession(ctx, tokenHash)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNoCacheSession
+			}
+			return err
+		}
+		out = CacheSession{
+			TokenHash:  row.TokenHash,
+			UserID:     row.UserID,
+			CreatedAt:  row.CreatedAt.Format(time.RFC3339),
+			LastSeenAt: row.LastSeenAt.Format(time.RFC3339),
+		}
+		return nil
+	})
+	return out, err
+}
+
+// UpsertCacheSession creates or updates the row (refreshing last_seen_at).
+func (db *DB) UpsertCacheSession(ctx context.Context, tokenHash, userID string) error {
+	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		return q.UpsertCacheSession(ctx, generated.UpsertCacheSessionParams{
+			TokenHash: tokenHash,
+			UserID:    userID,
+		})
+	})
+}
+
+// TouchCacheSession bumps last_seen_at. No error if the row is missing.
+func (db *DB) TouchCacheSession(ctx context.Context, tokenHash string) error {
+	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		return q.TouchCacheSession(ctx, tokenHash)
+	})
+}
+
+// DeleteCacheSession removes the row, effectively logging that browser out
+// of the IDB cache.
+func (db *DB) DeleteCacheSession(ctx context.Context, tokenHash string) error {
+	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		return q.DeleteCacheSession(ctx, tokenHash)
+	})
 }

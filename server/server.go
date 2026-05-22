@@ -304,6 +304,12 @@ type Server struct {
 	// temp dir to avoid racing on $HOME with other parallel tests
 	// that invoke hooks via the server.
 	hooksDir string
+
+	// IndexedDB cache encryption master secret — see cache_key.go.
+	// Lives on the Server (not a package-global) so tests with
+	// independent DBs don't share state.
+	cacheMasterSecretMu    sync.Mutex
+	cacheMasterSecretCache []byte
 }
 
 // NewServer creates a new server instance
@@ -425,6 +431,11 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /exit", http.HandlerFunc(s.handleExit))
 	mux.Handle("GET /settings", http.HandlerFunc(s.handleGetSettings))
 	mux.Handle("POST /settings", http.HandlerFunc(s.handleSetSetting))
+
+	// IndexedDB cache encryption: hand out a per-browser AES-GCM key
+	// derived from a server master secret + per-browser session cookie.
+	mux.Handle("GET /api/cache-key", http.HandlerFunc(s.handleCacheKey))
+	mux.Handle("POST /api/cache-session/clear", http.HandlerFunc(s.handleCacheSessionClear))
 
 	// Debug endpoints
 	mux.Handle("GET /debug/conversations", http.HandlerFunc(s.handleDebugConversationsPage))
