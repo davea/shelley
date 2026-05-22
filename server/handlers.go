@@ -184,6 +184,16 @@ func (s *Server) handleWriteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If the file lives in the dedicated user AGENTS.md repo, record this
+	// edit as a new git commit. We intentionally don't surface git history in
+	// the UI; it exists purely so users can recover old versions on disk.
+	if isUserAgentsMdFile(clean) {
+		if err := commitUserAgentsMd("edit via web ui"); err != nil {
+			// Log-ish: don't fail the write if the commit fails.
+			fmt.Fprintf(os.Stderr, "warning: commit AGENTS.md edit: %v\n", err)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
