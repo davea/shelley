@@ -191,7 +191,7 @@ func (b *BrowseTools) GetBrowserContext() (context.Context, error) {
 	if err := chromedp.Run(browserCtx); err != nil {
 		allocCancel()
 		killCapturedGroup()
-		return nil, fmt.Errorf("failed to start browser (please apt get chromium or equivalent): %w", err)
+		return nil, fmt.Errorf("failed to start browser (please apt install chromium or equivalent): %w", err)
 	}
 
 	// Set default viewport size to 1280x720 (16:9 widescreen)
