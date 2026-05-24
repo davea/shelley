@@ -881,15 +881,20 @@ func TestAddCoauthorTrailer_NoDuplicates(t *testing.T) {
 	const trailer = "Co-authored-by: Shelley <shelley@exe.dev>"
 
 	dir := t.TempDir()
+	// Isolate from any host git config (e.g. a global core.hooksPath
+	// that enforces commit-message policy on agent-driven commits).
+	testEnv := append(
+		os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+	)
 	runGit := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(
-			os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e",
-		)
+		cmd.Env = testEnv
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
@@ -918,11 +923,7 @@ func TestAddCoauthorTrailer_NoDuplicates(t *testing.T) {
 
 	cmd := exec.Command("bash", "-c", rewritten)
 	cmd.Dir = dir
-	cmd.Env = append(
-		os.Environ(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e",
-	)
+	cmd.Env = testEnv
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("running %q failed: %v\n%s", rewritten, err, out)
 	}

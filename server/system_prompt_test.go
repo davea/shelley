@@ -82,14 +82,23 @@ func TestSystemPromptDetectsGitInWorkingDir(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Initialize a git repo in the temp dir
+	// Initialize a git repo in the temp dir. Set explicit author/committer
+	// identity so the test does not depend on host git config (CI machines
+	// often lack a default user.email and git refuses to auto-detect one).
+	gitEnv := append(
+		os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e",
+	)
 	cmd := exec.Command("git", "init")
 	cmd.Dir = tmpDir
+	cmd.Env = gitEnv
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init failed: %v\n%s", err, out)
 	}
 	cmd = exec.Command("git", "commit", "--allow-empty", "--no-verify", "-m", "initial")
 	cmd.Dir = tmpDir
+	cmd.Env = gitEnv
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git commit failed: %v\n%s", err, out)
 	}
