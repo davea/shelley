@@ -365,6 +365,18 @@ func fromLLMCache(c bool) json.RawMessage {
 	return json.RawMessage(`{"type":"ephemeral"}`)
 }
 
+// nonNullRawMessage returns nil if m is empty or the JSON literal `null`.
+// json.RawMessage fields persisted through encoding/json may come back as
+// the 4-byte slice []byte("null") rather than nil. Anthropic's API rejects
+// fields like `caller: null` on server_tool_use blocks, which wedges the
+// conversation forever.
+func nonNullRawMessage(m json.RawMessage) json.RawMessage {
+	if len(m) == 0 || string(m) == "null" {
+		return nil
+	}
+	return m
+}
+
 func fromLLMContent(c llm.Content) content {
 	var toolResult []content
 	if len(c.ToolResult) > 0 {
@@ -422,7 +434,7 @@ func fromLLMContent(c llm.Content) content {
 		d.ID = c.ID
 		d.ToolName = c.ToolName
 		d.ToolInput = c.ToolInput
-		d.Caller = c.Caller
+		d.Caller = nonNullRawMessage(c.Caller)
 	case llm.ContentTypeWebSearchToolResult:
 		d.ToolUseID = c.ToolUseID
 		d.ToolResult = toolResult
@@ -435,8 +447,10 @@ func fromLLMContent(c llm.Content) content {
 	}
 
 	// Citations live on text blocks (per Anthropic's wire format).
-	if c.Type == llm.ContentTypeText && len(c.Citations) > 0 {
-		d.Citations = c.Citations
+	if c.Type == llm.ContentTypeText {
+		if cit := nonNullRawMessage(c.Citations); len(cit) > 0 {
+			d.Citations = cit
+		}
 	}
 
 	return d

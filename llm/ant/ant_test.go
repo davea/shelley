@@ -2289,6 +2289,36 @@ func TestServerToolUseContentRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFromLLMContentDropsNullRawMessages(t *testing.T) {
+	// Persisted conversations may round-trip through encoding/json with
+	// json.RawMessage fields that hold the literal bytes "null" (instead of
+	// being nil). Without care, those propagate to the Anthropic wire format
+	// as `"caller": null` / `"citations": null`, which the API rejects with
+	// e.g. `server_tool_use.caller: Input should be an object`. That wedges
+	// the conversation: every retry resends the same bad payload.
+	llmContent := llm.Content{
+		Type:      llm.ContentTypeServerToolUse,
+		ID:        "srvtoolu_x",
+		ToolName:  "web_search",
+		ToolInput: json.RawMessage(`{"query":"x"}`),
+		Caller:    json.RawMessage(`null`),
+	}
+	got := fromLLMContent(llmContent)
+	if got.Caller != nil {
+		t.Errorf("fromLLMContent().Caller = %s, want nil for literal-null input", got.Caller)
+	}
+
+	textContent := llm.Content{
+		Type:      llm.ContentTypeText,
+		Text:      "hi",
+		Citations: json.RawMessage(`null`),
+	}
+	got = fromLLMContent(textContent)
+	if got.Citations != nil {
+		t.Errorf("fromLLMContent().Citations = %s, want nil for literal-null input", got.Citations)
+	}
+}
+
 func TestWebSearchToolResultContentRoundTrip(t *testing.T) {
 	// Test that web_search_tool_result content round-trips
 	original := content{
