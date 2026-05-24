@@ -1151,9 +1151,17 @@ function ChatInterface({
 
     const focusedId = conversationId;
 
-    // Reset transient streaming state on switch.
+    // Reset per-session transient streaming state on switch (toolProgress,
+    // streamingText). agentWorking, however, mirrors the server's persistent
+    // `conversations.agent_working` flag — we must NOT wipe it on focus
+    // change, or a working agent looks idle until the next state-change
+    // event (and on reload-while-working, no such event ever arrives,
+    // leaving the indicator dark for the rest of the run). resetTransient
+    // now preserves agentWorking and seeds it from the cached conversation
+    // row when available; mirror that into local React state here.
     messageStore.resetTransient(focusedId);
-    setAgentWorking(false);
+    const initialTransient = messageStore.getTransient(focusedId);
+    setAgentWorking(initialTransient.agentWorking);
     setToolProgress({});
     setStreamingText("");
 

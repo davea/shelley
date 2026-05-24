@@ -143,6 +143,16 @@ export function connectGlobalStream({
       if (maxSeq > 0) messageStore.setMaxSequenceIdKnown(convId, maxSeq);
     }
     if (data.conversation) {
+      // NB: we deliberately do NOT mirror data.conversation.agent_working
+      // into the transient store here. Per-conversation Conversation rows
+      // arrive embedded in unrelated stream events (new-message broadcast,
+      // git-state change, cwd change, etc.) and can carry a stale snapshot
+      // taken before an in-flight SetConversationAgentWorking commit.
+      // Authoritative agent_working sync happens via (a) conversation_state
+      // events fired synchronously from SetAgentWorking, and (b) the
+      // conversation_list_patch stream, whose updates are driven by the DB
+      // commit hook and therefore strictly trail the matching write —
+      // handled in App.handleConversationListPatch.
       messageStore.setConversation(convId, data.conversation);
     }
     if (typeof data.context_window_size === "number") {

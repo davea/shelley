@@ -13,7 +13,7 @@ import { IDBFactory } from "fake-indexeddb";
 import { webcrypto } from "node:crypto";
 import { MessageStore } from "./messageStore";
 import type { ConversationCacheRecord } from "./messageStore";
-import type { Message, StreamResponse } from "../types";
+import type { Conversation, Message, StreamResponse } from "../types";
 import { CacheKeyHolder, type CacheKeyFetcher, type CacheKeyMaterial } from "./cryptoKey";
 
 // Node 20 lacks a global `crypto.subtle`; expose webcrypto so messageStore's
@@ -101,6 +101,23 @@ function storeFor(fixture: {
 }
 function freshStore(): MessageStore {
   return storeFor(freshFactory());
+}
+
+function conv(convId: string, agentWorking: boolean): Conversation {
+  return {
+    conversation_id: convId,
+    slug: convId,
+    user_initiated: true,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+    cwd: null,
+    archived: false,
+    parent_conversation_id: null,
+    model: null,
+    conversation_options: "{}",
+    current_generation: 0,
+    agent_working: agentWorking,
+  };
 }
 
 function msg(convId: string, sequence_id: number, msgId?: string): Message {
@@ -920,6 +937,54 @@ async function main(): Promise<void> {
       threw = true;
     }
     assert(threw, "wipeAndRotateKey should reject on server clear failure");
+  });
+
+  await run(
+    "resetTransient preserves agentWorking from a previously-received conversation_state",
+    async () => {
+      const s = freshStore();
+      const id = "c-reset-state";
+      // conversation_state{true} arrives over the global stream before the
+      // focus effect runs resetTransient(id).
+      s.setAgentWorking(id, true);
+      s.resetTransient(id);
+      assert(
+        s.getTransient(id).agentWorking === true,
+        "resetTransient must not clobber a live agentWorking=true",
+      );
+    },
+  );
+
+  await run(
+    "resetTransient does not trust agent_working from a cached conversation row",
+    async () => {
+      // Embedded Conversation snapshots in unrelated stream events can lag
+      // the latest SetConversationAgentWorking by a DB write, so the focus
+      // reset must NOT seed agentWorking from rec.conversation. Sync to
+      // the persistent flag happens through the authoritative
+      // conversation_state / conversation_list_patch paths.
+      const s = freshStore();
+      const id = "c-reset-row";
+      s.setConversation(id, conv(id, true));
+      s.resetTransient(id);
+      assert(
+        s.getTransient(id).agentWorking === false,
+        "resetTransient should not seed agentWorking from the cached Conversation row",
+      );
+    },
+  );
+
+  await run("resetTransient clears toolProgress and streamingText", async () => {
+    const s = freshStore();
+    const id = "c-reset-ephemera";
+    s.setToolProgress(id, { tool_use_id: "tool-1", tool_name: "shell", output: "x" });
+    s.appendStreamDelta(id, "hello");
+    s.setAgentWorking(id, true);
+    s.resetTransient(id);
+    const t = s.getTransient(id);
+    assert(t.agentWorking === true, "agentWorking should still be preserved");
+    assert(Object.keys(t.toolProgress).length === 0, "toolProgress should be wiped on reset");
+    assert(t.streamingText === "", "streamingText should be wiped on reset");
   });
 
   console.log("\nmessageStore tests passed");

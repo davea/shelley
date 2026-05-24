@@ -973,7 +973,31 @@ export class MessageStore {
   }
 
   resetTransient(id: string): void {
-    this.transient.set(id, emptyTransient());
+    // Don't blow away agentWorking — it mirrors the persistent server flag
+    // (conversations.agent_working) and is authoritative across the
+    // lifetime of the conversation, not per-session transient.
+    //
+    // toolProgress and streamingText, on the other hand, are stream-only
+    // ephemera that don't survive a tab switch / refresh and would be
+    // misleading if carried across a focus change.
+    //
+    // Seed agentWorking from the cached conversation row when available so
+    // switching into a working conversation immediately reflects the
+    // indicator, even if no live conversation_state event has been seen
+    // since this tab was loaded.
+    // Preserve the live transient flag: conversation_state and
+    // conversation_list_patch events update agentWorking out of band and
+    // may have arrived before this focus switch (for a brand-new
+    // conversation the server emits conversation_state{working:true}
+    // before ChatInterface re-runs its focus effect). We do NOT seed from
+    // the cached Conversation row: embedded Conversation snapshots in
+    // unrelated stream events can lag the latest agent_working transition
+    // by one DB write, so trusting the row could re-introduce the dark
+    // indicator bug. The list-patch stream is the authoritative source
+    // for the persistent flag and already pumps it into transient.
+    const prev = this.transient.get(id);
+    const working = !!prev?.agentWorking;
+    this.transient.set(id, { ...emptyTransient(), agentWorking: working });
     this.notifyTransient(id);
   }
 
