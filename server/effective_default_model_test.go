@@ -89,3 +89,33 @@ func TestEffectiveDefaultModelNoReadyReturnsEmpty(t *testing.T) {
 		t.Errorf("got %q, want empty", got)
 	}
 }
+
+func TestMarkDefaultModel(t *testing.T) {
+	list := []ModelInfo{
+		{ID: "a", Ready: true},
+		{ID: "b", Ready: true},
+	}
+	markDefaultModel(list, "b")
+	if list[0].IsDefault {
+		t.Error("a should not be default")
+	}
+	if !list[1].IsDefault {
+		t.Error("b should be default")
+	}
+}
+
+func TestMarkDefaultModelEmptyID(t *testing.T) {
+	list := []ModelInfo{{ID: "a", Ready: true}}
+	markDefaultModel(list, "")
+	if list[0].IsDefault {
+		t.Error("no model should be marked default when defaultID is empty")
+	}
+}
+
+func TestMarkDefaultModelUnknownID(t *testing.T) {
+	list := []ModelInfo{{ID: "a", Ready: true}}
+	markDefaultModel(list, "z")
+	if list[0].IsDefault {
+		t.Error("no model should be marked default when defaultID is unknown")
+	}
+}

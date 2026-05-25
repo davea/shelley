@@ -673,6 +673,7 @@ func (s *Server) serveIndexWithInit(w http.ResponseWriter, r *http.Request, fs h
 	// Build initialization data
 	modelList := s.getModelList()
 	defaultModel := s.effectiveDefaultModel(modelList)
+	markDefaultModel(modelList, defaultModel)
 
 	// Get hostname (add .exe.xyz suffix if no dots, matching system_prompt.go)
 	hostname := "localhost"
@@ -1862,6 +1863,7 @@ type ModelInfo struct {
 	Source           string `json:"source,omitempty"` // Human-readable source (e.g., "exe.dev gateway", "$ANTHROPIC_API_KEY")
 	Ready            bool   `json:"ready"`
 	MaxContextTokens int    `json:"max_context_tokens,omitempty"`
+	IsDefault        bool   `json:"is_default,omitempty"`
 }
 
 // getModelList returns the list of available models
@@ -1928,8 +1930,23 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	modelList := s.getModelList()
+	markDefaultModel(modelList, s.effectiveDefaultModel(modelList))
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.getModelList())
+	json.NewEncoder(w).Encode(modelList)
+}
+
+// markDefaultModel sets IsDefault=true on the entry matching defaultID.
+func markDefaultModel(modelList []ModelInfo, defaultID string) {
+	if defaultID == "" {
+		return
+	}
+	for i := range modelList {
+		if modelList[i].ID == defaultID {
+			modelList[i].IsDefault = true
+			return
+		}
+	}
 }
 
 // handleTools returns the list of tools available to conversations.
