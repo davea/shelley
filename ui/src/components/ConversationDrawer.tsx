@@ -18,6 +18,19 @@ type GroupBy = "none" | "cwd" | "git_repo";
 const NEW_DRAFT_STORAGE_KEY = "shelley_draft_new-conversation";
 const NEW_DRAFT_UPDATED_AT_KEY = NEW_DRAFT_STORAGE_KEY + "_updated_at";
 
+// Parses the JSON-encoded tags field on a Conversation. Tolerates the empty
+// string and malformed JSON (treated as no tags) so we never crash the
+// drawer on a stale or partial conversation object.
+function parseTags(conversation: Conversation): string[] {
+  if (!conversation.tags) return [];
+  try {
+    const parsed = JSON.parse(conversation.tags);
+    return Array.isArray(parsed) ? parsed.filter((t) => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 // Sentinel conversation_id for the synthetic 'draft' row pinned at the top of
 // the list. We splice a fake ConversationWithState into the displayed list so
 // it flows through renderConversationItem exactly like a real conversation
@@ -138,6 +151,13 @@ function ConversationDrawer({
   const searchSeqRef = React.useRef(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingSlug, setEditingSlug] = useState("");
+  // ID of the conversation whose tag editor popover is open. Only one row's
+  // popover may be open at a time; clicking the tag button on another row
+  // (or anywhere outside) closes it.
+  const [tagEditorId, setTagEditorId] = useState<string | null>(null);
+  const [tagInput, setTagInput] = useState("");
+  const tagEditorRef = React.useRef<HTMLDivElement>(null);
+  const tagInputRef = React.useRef<HTMLInputElement>(null);
   // Draft text for the not-yet-created conversation. Mirrors the value
   // MessageInput persists under shelley_draft_new-conversation. We subscribe
   // to the same-tab 'shelley-draft-changed' event (MessageInput dispatches
@@ -433,6 +453,68 @@ function ConversationDrawer({
       .replace(/-$/g, "");
   };
 
+  // Close the tag editor when the user clicks outside it. We attach the
+  // listener only while a popover is open to avoid global mousedown overhead.
+  useEffect(() => {
+    if (!tagEditorId) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (tagEditorRef.current && !tagEditorRef.current.contains(e.target as Node)) {
+        setTagEditorId(null);
+        setTagInput("");
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, [tagEditorId]);
+
+  const handleOpenTagEditor = (e: React.MouseEvent, conversationId: string) => {
+    e.stopPropagation();
+    setTagEditorId((prev) => (prev === conversationId ? null : conversationId));
+    setTagInput("");
+    setTimeout(() => tagInputRef.current?.focus(), 0);
+  };
+
+  // Persist a new tags array for a conversation, trimming/deduping locally so
+  // the UI reflects the same normalization the server applies.
+  const saveTags = async (conversationId: string, tags: string[]) => {
+    const normalized: string[] = [];
+    const seen = new Set<string>();
+    for (const t of tags) {
+      const trimmed = t.trim();
+      if (!trimmed || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      normalized.push(trimmed);
+    }
+    try {
+      const updated = await api.updateConversationTags(conversationId, normalized);
+      onConversationRenamed?.(updated);
+    } catch (err) {
+      console.error("Failed to update tags:", err);
+    }
+  };
+
+  const handleAddTag = async (conversation: Conversation) => {
+    // Tags render with a leading '#'. Accept '#wip' typed verbatim by
+    // stripping any leading hashes so we don't end up storing '##wip'.
+    const value = tagInput.trim().replace(/^#+/, "");
+    if (!value) return;
+    const current = parseTags(conversation);
+    if (current.includes(value)) {
+      setTagInput("");
+      return;
+    }
+    setTagInput("");
+    await saveTags(conversation.conversation_id, [...current, value]);
+  };
+
+  const handleRemoveTag = async (conversation: Conversation, tag: string) => {
+    const current = parseTags(conversation);
+    await saveTags(
+      conversation.conversation_id,
+      current.filter((t) => t !== tag),
+    );
+  };
+
   const handleStartRename = (e: React.MouseEvent, conversation: Conversation) => {
     e.stopPropagation();
     setEditingId(conversation.conversation_id);
@@ -566,6 +648,7 @@ function ConversationDrawer({
       conversation_options: "",
       current_generation: 0,
       agent_working: false,
+      tags: "[]",
       working: false,
       subagent_count: 0,
       max_sequence_id: 0,
@@ -672,6 +755,7 @@ function ConversationDrawer({
     // seen" so we don't animate the entire list on initial mount. The draft
     // row also never animates — it appears as soon as you hit the new view.
     const isNew = !isDraft && seenIds !== null && !seenIds.has(conversation.conversation_id);
+    const conversationTags = isDraft ? [] : parseTags(conversation);
     return (
       <React.Fragment key={conversation.conversation_id}>
         <div
@@ -715,6 +799,66 @@ function ConversationDrawer({
                 />
               )}
             </div>
+            {(() => {
+              const editing = !isDraft && tagEditorId === conversation.conversation_id;
+              if (!editing && conversationTags.length === 0) return null;
+              return (
+                <div
+                  className={`conversation-tags${editing ? " conversation-tags-editing" : ""}`}
+                  onClick={editing ? (e) => e.stopPropagation() : undefined}
+                  ref={editing ? tagEditorRef : undefined}
+                >
+                  {conversationTags.map((tag) =>
+                    editing ? (
+                      <span key={tag} className="conversation-tag conversation-tag-removable">
+                        <span className="conversation-tag-hash">#</span>
+                        {tag}
+                        <button
+                          type="button"
+                          className="conversation-tag-remove"
+                          aria-label={`${t("removeTag")} ${tag}`}
+                          title={t("removeTag")}
+                          onClick={() => handleRemoveTag(conversation, tag)}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ) : (
+                      <span key={tag} className="conversation-tag" title={`#${tag}`}>
+                        <span className="conversation-tag-hash">#</span>
+                        {tag}
+                      </span>
+                    ),
+                  )}
+                  {editing && (
+                    <form
+                      className="conversation-tag-inline-form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleAddTag(conversation);
+                      }}
+                    >
+                      <span className="conversation-tag-hash">#</span>
+                      <input
+                        ref={tagInputRef}
+                        type="text"
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        placeholder={t("addTagPlaceholder")}
+                        className="conversation-tag-inline-input"
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            setTagEditorId(null);
+                            setTagInput("");
+                          }
+                        }}
+                      />
+                    </form>
+                  )}
+                </div>
+              );
+            })()}
             {convState.search_snippet ? (
               <div
                 className="conversation-preview conversation-snippet"
@@ -780,6 +924,26 @@ function ConversationDrawer({
                         strokeLinejoin="round"
                         strokeWidth={2}
                         d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={(e) => handleOpenTagEditor(e, conversation.conversation_id)}
+                    className="btn-icon-sm"
+                    title={t("editTags")}
+                    aria-label={t("editTags")}
+                  >
+                    <svg
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      className="drawer-icon-size"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z"
                       />
                     </svg>
                   </button>

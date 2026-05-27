@@ -196,3 +196,11 @@ JOIN messages_fts ON messages_fts.rowid = m.rowid
 WHERE messages_fts MATCH @fts_match
   AND m.conversation_id IN (sqlc.slice('conv_ids'))
 ORDER BY messages_fts.rank;
+
+-- name: UpdateConversationTags :one
+-- Tagging is a metadata-only edit; deliberately does not bump updated_at
+-- so retagging old conversations doesn't reorder the list.
+UPDATE conversations
+SET tags = ?
+WHERE conversation_id = ?
+RETURNING *;

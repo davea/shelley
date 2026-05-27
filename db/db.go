@@ -563,6 +563,30 @@ func (db *DB) UpdateConversationSlug(ctx context.Context, conversationID, slug s
 	return &conversation, err
 }
 
+// UpdateConversationTags replaces a conversation's tag list. Tags are stored
+// as a JSON array of strings; callers are responsible for normalizing/
+// deduplicating entries.
+func (db *DB) UpdateConversationTags(ctx context.Context, conversationID string, tags []string) (*generated.Conversation, error) {
+	if tags == nil {
+		tags = []string{}
+	}
+	tagsJSON, err := json.Marshal(tags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tags: %w", err)
+	}
+	var conversation generated.Conversation
+	err = db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		var err error
+		conversation, err = q.UpdateConversationTags(ctx, generated.UpdateConversationTagsParams{
+			Tags:           string(tagsJSON),
+			ConversationID: conversationID,
+		})
+		return err
+	})
+	return &conversation, err
+}
+
 // ClearConversationSlug removes the slug from a conversation.
 func (db *DB) ClearConversationSlug(ctx context.Context, conversationID string) (*generated.Conversation, error) {
 	var conversation generated.Conversation

@@ -28,6 +28,7 @@ type Conversation struct {
 	ConversationOptions  string    `json:"conversation_options"`
 	CurrentGeneration    int64     `json:"current_generation"`
 	AgentWorking         bool      `json:"agent_working"`
+	Tags                 string    `json:"tags"`
 }
 
 type Message struct {

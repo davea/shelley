@@ -15,6 +15,7 @@ function conv(id: string, slug: string, working = false): ConversationWithState 
     conversation_options: "{}",
     current_generation: 0,
     agent_working: working,
+    tags: "[]",
     working,
     subagent_count: 0,
     max_sequence_id: 0,

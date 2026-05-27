@@ -85,6 +85,10 @@ export interface TranslationKeys {
   backToConversations: string;
   viewArchived: string;
   rename: string;
+  editTags: string;
+  addTagPlaceholder: string;
+  removeTag: string;
+  addTag: string;
   archive: string;
   restore: string;
   deletePermanently: string;

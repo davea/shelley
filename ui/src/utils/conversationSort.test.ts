@@ -21,6 +21,7 @@ function conv(id: string, updatedAt: string): ConversationWithState {
     conversation_options: "{}",
     current_generation: 0,
     agent_working: false,
+    tags: "[]",
     working: false,
     subagent_count: 0,
     max_sequence_id: 0,
