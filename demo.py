@@ -7,16 +7,23 @@ The tmux session is named 'shelley-demo-<port>'.
 Each demo gets its own empty database at /tmp/shelley-demo/<port>.db.
 Use --db to point at a different database (e.g. the main Shelley db for real data).
 
+If --banner is not given, demo.py picks a sensible default: the slug of
+the active Shelley conversation (looked up from $SHELLEY_CONVERSATION_ID
+in the main shelley.db), falling back to the subject of git HEAD. Pass
+--banner '' (empty string) to suppress the banner.
+
 Usage:
     shelley/demo.py              # build + (re)start (empty demo db)
     shelley/demo.py --db ~/.config/shelley/shelley.db   # use main db
     shelley/demo.py --banner "new feature X"            # show a banner at top of UI
+    shelley/demo.py --banner ""                          # suppress the banner
     shelley/demo.py stop         # kill the tmux session
     shelley/demo.py status       # show whether it's running + URL
     shelley/demo.py port         # just print the port
 """
 import hashlib
 import os
+import sqlite3
 import subprocess
 import sys
 import time
@@ -67,6 +74,39 @@ def health_check(port: int, timeout: float = 5.0) -> bool:
     return False
 
 
+MAIN_DB = Path.home() / ".config" / "shelley" / "shelley.db"
+
+
+def default_banner() -> str:
+    """Pick a default banner: active conversation slug, or git HEAD subject.
+
+    Returns the empty string if neither is available.
+    """
+    conv_id = os.environ.get("SHELLEY_CONVERSATION_ID", "").strip()
+    if conv_id and MAIN_DB.exists():
+        try:
+            # Open read-only so we never lock or modify the live DB.
+            uri = f"file:{MAIN_DB}?mode=ro"
+            with sqlite3.connect(uri, uri=True, timeout=1.0) as conn:
+                row = conn.execute(
+                    "SELECT slug FROM conversations WHERE conversation_id = ?",
+                    (conv_id,),
+                ).fetchone()
+            if row and row[0]:
+                return str(row[0])
+            # No slug yet; fall through to the git subject.
+        except sqlite3.Error:
+            pass
+    try:
+        subj = subprocess.run(
+            ["git", "-C", str(SHELLEY_DIR), "log", "-1", "--pretty=%s"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        return subj
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
 def cmd_start(port: int, custom_db: Path | None = None, banner: str | None = None):
     sess = session_name(port)
     binary = SHELLEY_DIR / "bin" / "shelley"
@@ -88,6 +128,10 @@ def cmd_start(port: int, custom_db: Path | None = None, banner: str | None = Non
     # demo instances around we'd otherwise exhaust the 10 fallback slots
     # under ~/.config/shelley/ and the server would refuse to start.
     cmd = f"{binary} --config {CONFIG} --db {db} serve --port {port} --socket none"
+    if banner is None:
+        banner = default_banner()
+        if banner:
+            print(f"Using default banner: {banner!r} (override with --banner)")
     if banner:
         # Shell-quote via shlex to handle spaces/punctuation in the banner text.
         import shlex
