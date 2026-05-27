@@ -606,67 +606,9 @@ func NewManager(cfg *Config) (*Manager, error) {
 		db:       cfg.DB,
 	}
 
-	// Create HTTP client with recording if database is available
-	var httpc *http.Client
-	if cfg.DB != nil {
-		recorder := func(ctx context.Context, url string, requestBody, responseBody []byte, statusCode int, err error, duration time.Duration) {
-			modelID := llmhttp.ModelIDFromContext(ctx)
-			provider := llmhttp.ProviderFromContext(ctx)
-			conversationID := llmhttp.ConversationIDFromContext(ctx)
-
-			var convIDPtr *string
-			if conversationID != "" {
-				convIDPtr = &conversationID
-			}
-
-			var reqBodyPtr, respBodyPtr *string
-			if len(requestBody) > 0 {
-				s := string(requestBody)
-				reqBodyPtr = &s
-			}
-			if len(responseBody) > 0 {
-				s := string(responseBody)
-				respBodyPtr = &s
-			}
-
-			var statusCodePtr *int64
-			if statusCode != 0 {
-				sc := int64(statusCode)
-				statusCodePtr = &sc
-			}
-
-			var errPtr *string
-			if err != nil {
-				s := err.Error()
-				errPtr = &s
-			}
-
-			durationMs := duration.Milliseconds()
-			durationMsPtr := &durationMs
-
-			// Insert into database (fire and forget, don't block the request)
-			go func() {
-				_, insertErr := cfg.DB.InsertLLMRequest(context.Background(), generated.InsertLLMRequestParams{
-					ConversationID: convIDPtr,
-					Model:          modelID,
-					Provider:       provider,
-					Url:            url,
-					RequestBody:    reqBodyPtr,
-					ResponseBody:   respBodyPtr,
-					StatusCode:     statusCodePtr,
-					Error:          errPtr,
-					DurationMs:     durationMsPtr,
-				})
-				if insertErr != nil && cfg.Logger != nil {
-					cfg.Logger.Warn("Failed to record LLM request", "error", insertErr)
-				}
-			}()
-		}
-		httpc = llmhttp.NewClient(nil, recorder)
-	} else {
-		// Still use the custom transport for headers, just without recording
-		httpc = llmhttp.NewClient(nil, nil)
-	}
+	// Create HTTP client with Shelley headers. The custom transport adds
+	// User-Agent and conversation-ID headers based on context values.
+	httpc := llmhttp.NewClient(nil)
 
 	// Store the HTTP client and config for use with custom models
 	manager.httpc = httpc

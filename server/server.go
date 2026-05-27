@@ -450,11 +450,6 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /debug/conversation-stream", http.HandlerFunc(s.handleDebugConversationStreamPage))
 	mux.Handle("GET /debug/conversation-stream/history", http.HandlerFunc(s.handleDebugConversationStreamHistory))
 	mux.Handle("GET /debug/stylebook", http.HandlerFunc(s.handleDebugStylebook))
-	mux.Handle("GET /debug/llm_requests", http.HandlerFunc(s.handleDebugLLMRequests))
-	mux.Handle("GET /debug/llm_requests/api", http.HandlerFunc(s.handleDebugLLMRequestsAPI))
-	mux.Handle("GET /debug/llm_requests/{id}/request", http.HandlerFunc(s.handleDebugLLMRequestBody))
-	mux.Handle("GET /debug/llm_requests/{id}/request_full", http.HandlerFunc(s.handleDebugLLMRequestBodyFull))
-	mux.Handle("GET /debug/llm_requests/{id}/response", http.HandlerFunc(s.handleDebugLLMResponseBody))
 
 	// pprof endpoints
 	mux.Handle("GET /debug/pprof/", http.HandlerFunc(pprof.Index))

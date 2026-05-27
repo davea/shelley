@@ -1,15 +1,10 @@
-// Package llmhttp provides HTTP utilities for LLM requests including
-// custom headers and database recording.
+// Package llmhttp provides HTTP utilities for LLM requests, namely a
+// custom transport that adds Shelley-specific headers.
 package llmhttp
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"net/http"
-	"strings"
-	"sync"
-	"time"
 
 	"shelley.exe.dev/version"
 )
@@ -62,20 +57,13 @@ func ProviderFromContext(ctx context.Context) string {
 	return ""
 }
 
-// Recorder is called after each LLM HTTP request with the request/response details.
-type Recorder func(ctx context.Context, url string, requestBody, responseBody []byte, statusCode int, err error, duration time.Duration)
-
-// Transport wraps an http.RoundTripper to add Shelley-specific headers
-// and optionally record requests to a database.
+// Transport wraps an http.RoundTripper to add Shelley-specific headers.
 type Transport struct {
-	Base     http.RoundTripper
-	Recorder Recorder
+	Base http.RoundTripper
 }
 
 // RoundTrip implements http.RoundTripper.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	start := time.Now()
-
 	// Clone the request to avoid modifying the original
 	req = req.Clone(req.Context())
 
@@ -97,110 +85,15 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	// Read and store the request body for recording
-	var requestBody []byte
-	if t.Recorder != nil && req.Body != nil {
-		var err error
-		requestBody, err = io.ReadAll(req.Body)
-		if err != nil {
-			return nil, err
-		}
-		req.Body = io.NopCloser(bytes.NewReader(requestBody))
-	}
-
-	// Perform the actual request
 	base := t.Base
 	if base == nil {
 		base = http.DefaultTransport
 	}
-
-	resp, err := base.RoundTrip(req)
-
-	// Record the request if we have a recorder
-	if t.Recorder != nil && resp == nil {
-		// Transport-level error (DNS failure, connection refused, etc.) — no response to stream.
-		t.Recorder(req.Context(), req.URL.String(), requestBody, nil, 0, err, time.Since(start))
-	}
-	if t.Recorder != nil && resp != nil {
-		contentType := resp.Header.Get("Content-Type")
-		isStreaming := strings.HasPrefix(contentType, "text/event-stream")
-
-		if isStreaming {
-			// For SSE streams, wrap the body so we record after the caller
-			// finishes reading. This avoids buffering the entire stream
-			// upfront, which would destroy real-time streaming.
-			rb := &recordingBody{
-				ReadCloser: resp.Body,
-				ctx:        req.Context(),
-				url:        req.URL.String(),
-				reqBody:    requestBody,
-				statusCode: resp.StatusCode,
-				start:      start,
-				recorder:   t.Recorder,
-			}
-			resp.Body = rb
-		} else {
-			// For non-streaming responses, tee the body so callers see any read
-			// errors. Recording after Close preserves truncated/empty-response
-			// failures for retry logic instead of converting them to EOF here.
-			rb := &recordingBody{
-				ReadCloser: resp.Body,
-				ctx:        req.Context(),
-				url:        req.URL.String(),
-				reqBody:    requestBody,
-				statusCode: resp.StatusCode,
-				start:      start,
-				recorder:   t.Recorder,
-			}
-			resp.Body = rb
-		}
-	}
-
-	return resp, err
+	return base.RoundTrip(req)
 }
 
-// recordingBody wraps an io.ReadCloser to accumulate the response body
-// as it is read, then calls the recorder when Close is called.
-// This allows SSE streams to be read in real-time while still recording
-// the full response body for the database.
-type recordingBody struct {
-	io.ReadCloser
-	ctx        context.Context
-	url        string
-	reqBody    []byte
-	buf        bytes.Buffer
-	readErr    error
-	statusCode int
-	start      time.Time
-	recorder   Recorder
-	once       sync.Once
-}
-
-func (rb *recordingBody) Read(p []byte) (int, error) {
-	n, err := rb.ReadCloser.Read(p)
-	if n > 0 {
-		rb.buf.Write(p[:n])
-	}
-	if rb.readErr == nil && err != nil && err != io.EOF {
-		rb.readErr = err
-	}
-	return n, err
-}
-
-func (rb *recordingBody) Close() error {
-	err := rb.ReadCloser.Close()
-	rb.once.Do(func() {
-		recordErr := rb.readErr
-		if recordErr == nil {
-			recordErr = err
-		}
-		rb.recorder(rb.ctx, rb.url, rb.reqBody, rb.buf.Bytes(), rb.statusCode, recordErr, time.Since(rb.start))
-	})
-	return err
-}
-
-// NewClient creates an http.Client with Shelley headers and optional recording.
-func NewClient(base *http.Client, recorder Recorder) *http.Client {
+// NewClient creates an http.Client with Shelley headers applied via Transport.
+func NewClient(base *http.Client) *http.Client {
 	if base == nil {
 		base = http.DefaultClient
 	}
@@ -211,10 +104,7 @@ func NewClient(base *http.Client, recorder Recorder) *http.Client {
 	}
 
 	return &http.Client{
-		Transport: &Transport{
-			Base:     transport,
-			Recorder: recorder,
-		},
-		Timeout: base.Timeout,
+		Transport: &Transport{Base: transport},
+		Timeout:   base.Timeout,
 	}
 }
