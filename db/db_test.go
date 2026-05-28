@@ -97,6 +97,60 @@ func TestDB_Migrate(t *testing.T) {
 	}
 }
 
+// TestDB_Migrate_TracksByName verifies that the migrations table is keyed
+// by filename. If a row exists with a different name for an unapplied
+// migration's number, the new migration must still be executed.
+func TestDB_Migrate_TracksByName(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := New(Config{DSN: tmpDir + "/test.db"})
+	if err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	// Simulate the cross-branch rename scenario: this database was
+	// initialized against a branch where 017 was a different file. We
+	// rewrite the migrations row to that old name and undo what real
+	// 017 did, then re-run Migrate to confirm it doesn't silently skip
+	// the on-disk 017 just because some other 017 row already exists.
+	err = db.Pool().Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		if _, err := tx.Exec("DELETE FROM migrations WHERE migration_number = 17"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("INSERT INTO migrations (migration_number, migration_name) VALUES (17, '017-some-old-name.sql')"); err != nil {
+			return err
+		}
+		_, err := tx.Exec("ALTER TABLE conversations DROP COLUMN conversation_options")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to set up rename scenario: %v", err)
+	}
+
+	// Now re-run Migrate. The real 017 has a different filename, so it must run.
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate() after rename: %v", err)
+	}
+
+	var gotColumn int
+	err = db.Pool().Rx(ctx, func(ctx context.Context, rx *Rx) error {
+		return rx.QueryRow("SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'conversation_options'").Scan(&gotColumn)
+	})
+	if err != nil {
+		t.Fatalf("failed to check column existence: %v", err)
+	}
+	if gotColumn != 1 {
+		t.Fatalf("conversation_options column was not re-added; row keyed by number prevented re-run")
+	}
+}
+
 func TestDB_WithTx(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

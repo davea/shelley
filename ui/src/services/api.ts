@@ -647,7 +647,7 @@ class CustomModelsApi {
   async getCustomModels(): Promise<CustomModel[]> {
     const response = await fetch(`${this.baseUrl}/custom-models`);
     if (!response.ok) {
-      throw new Error(`Failed to get custom models: ${response.statusText}`);
+      throw await responseError(response, "Failed to get custom models");
     }
     return response.json();
   }
@@ -659,7 +659,7 @@ class CustomModelsApi {
       body: JSON.stringify(request),
     });
     if (!response.ok) {
-      throw new Error(`Failed to create custom model: ${response.statusText}`);
+      throw await responseError(response, "Failed to create custom model");
     }
     return response.json();
   }
@@ -674,7 +674,7 @@ class CustomModelsApi {
       body: JSON.stringify(request),
     });
     if (!response.ok) {
-      throw new Error(`Failed to update custom model: ${response.statusText}`);
+      throw await responseError(response, "Failed to update custom model");
     }
     return response.json();
   }
@@ -684,7 +684,7 @@ class CustomModelsApi {
       method: "DELETE",
     });
     if (!response.ok) {
-      throw new Error(`Failed to delete custom model: ${response.statusText}`);
+      throw await responseError(response, "Failed to delete custom model");
     }
   }
 
@@ -695,7 +695,7 @@ class CustomModelsApi {
       body: JSON.stringify({ display_name: displayName }),
     });
     if (!response.ok) {
-      throw new Error(`Failed to duplicate custom model: ${response.statusText}`);
+      throw await responseError(response, "Failed to duplicate custom model");
     }
     return response.json();
   }
@@ -709,7 +709,7 @@ class CustomModelsApi {
       body: JSON.stringify(request),
     });
     if (!response.ok) {
-      throw new Error(`Failed to test custom model: ${response.statusText}`);
+      throw await responseError(response, "Failed to test custom model");
     }
     return response.json();
   }

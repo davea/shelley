@@ -92,67 +92,71 @@ func (db *DB) Close() error {
 	return db.pool.Close()
 }
 
-// Migrate runs the database migrations
+// Migrate runs the database migrations.
+//
+// Migrations are tracked by filename. Two migration files may share a
+// numeric prefix as long as their full names differ; this keeps
+// concurrent feature branches that both grab "the next number" from
+// silently skipping each other's migrations after merge. (The earlier
+// implementation keyed on number, and a renumber-on-rebase could leave
+// production databases with a column missing because the runner thought
+// it had already executed something with that number.)
 func (db *DB) Migrate(ctx context.Context) error {
-	// Read all migration files
+	// Read and validate migration files.
 	entries, err := schemaFS.ReadDir("schema")
 	if err != nil {
 		return fmt.Errorf("failed to read schema directory: %w", err)
 	}
 
-	// Filter and validate migration files
-	var migrations []string
 	migrationPattern := regexp.MustCompile(`^(\d{3})-.*\.sql$`)
+	type migration struct {
+		name   string
+		number int
+	}
+	var migrations []migration
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		if !migrationPattern.MatchString(entry.Name()) {
+		matches := migrationPattern.FindStringSubmatch(entry.Name())
+		if matches == nil {
 			continue
 		}
-		migrations = append(migrations, entry.Name())
+		num, err := strconv.Atoi(matches[1])
+		if err != nil {
+			return fmt.Errorf("failed to parse migration number from %s: %w", entry.Name(), err)
+		}
+		migrations = append(migrations, migration{name: entry.Name(), number: num})
 	}
 
-	// Sort migrations by number
-	sort.Strings(migrations)
-
-	// Check for duplicate migration numbers
-	seenNumbers := make(map[string]string) // number -> filename
-	for _, migration := range migrations {
-		matches := migrationPattern.FindStringSubmatch(migration)
-		if len(matches) < 2 {
-			continue
+	// Sort by (number, name) so renumbered/sibling migrations have a stable order.
+	sort.Slice(migrations, func(i, j int) bool {
+		if migrations[i].number != migrations[j].number {
+			return migrations[i].number < migrations[j].number
 		}
-		num := matches[1]
-		if existing, ok := seenNumbers[num]; ok {
-			return fmt.Errorf("duplicate migration number %s: %s and %s", num, existing, migration)
-		}
-		seenNumbers[num] = migration
-	}
+		return migrations[i].name < migrations[j].name
+	})
 
-	// Get executed migrations
-	executedMigrations := make(map[int]bool)
+	// Load the names of already-applied migrations.
+	executed := make(map[string]bool)
 	var tableName string
 	err = db.pool.Rx(ctx, func(ctx context.Context, rx *Rx) error {
 		row := rx.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'")
 		return row.Scan(&tableName)
 	})
-
 	if err == nil {
-		// Migrations table exists, load executed migrations
 		err = db.pool.Rx(ctx, func(ctx context.Context, rx *Rx) error {
-			rows, err := rx.Query("SELECT migration_number FROM migrations")
+			rows, err := rx.Query("SELECT migration_name FROM migrations")
 			if err != nil {
 				return fmt.Errorf("failed to query executed migrations: %w", err)
 			}
 			defer rows.Close()
-
 			for rows.Next() {
-				var migrationNumber int
-				if err := rows.Scan(&migrationNumber); err != nil {
-					return fmt.Errorf("failed to scan migration number: %w", err)
+				var name string
+				if err := rows.Scan(&name); err != nil {
+					return fmt.Errorf("failed to scan migration name: %w", err)
 				}
-				executedMigrations[migrationNumber] = true
+				executed[name] = true
 			}
 			return rows.Err()
 		})
@@ -160,28 +164,16 @@ func (db *DB) Migrate(ctx context.Context) error {
 			return fmt.Errorf("failed to load executed migrations: %w", err)
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		// Migrations table doesn't exist - executedMigrations remains empty
 		slog.Info("migrations table not found, running all migrations")
 	}
 
-	// Run any migrations that haven't been executed
-	for _, migration := range migrations {
-		// Extract migration number from filename (e.g., "001-base.sql" -> 001)
-		matches := migrationPattern.FindStringSubmatch(migration)
-		if len(matches) != 2 {
-			return fmt.Errorf("invalid migration filename format: %s", migration)
+	for _, m := range migrations {
+		if executed[m.name] {
+			continue
 		}
-
-		migrationNumber, err := strconv.Atoi(matches[1])
-		if err != nil {
-			return fmt.Errorf("failed to parse migration number from %s: %w", migration, err)
-		}
-
-		if !executedMigrations[migrationNumber] {
-			slog.Info("running migration", "file", migration, "number", migrationNumber)
-			if err := db.runMigration(ctx, migration, migrationNumber); err != nil {
-				return err
-			}
+		slog.Info("running migration", "file", m.name, "number", m.number)
+		if err := db.runMigration(ctx, m.name, m.number); err != nil {
+			return err
 		}
 	}
 
