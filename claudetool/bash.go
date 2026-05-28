@@ -422,21 +422,21 @@ func formatForegroundBashOutput(out string) (string, error) {
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("[output too large (%s, %d lines), saved to: %s]\n\n",
-		humanizeBytes(len(out)), len(lines), outFile))
+	fmt.Fprintf(&result, "[output too large (%s, %d lines), saved to: %s]\n\n",
+		humanizeBytes(len(out)), len(lines), outFile)
 
 	// First N lines
 	result.WriteString("First lines:\n")
 	firstN := min(firstLinesCount, len(lines))
-	for i := 0; i < firstN; i++ {
-		result.WriteString(fmt.Sprintf("%5d: %s\n", i+1, truncateLine(lines[i])))
+	for i := range firstN {
+		fmt.Fprintf(&result, "%5d: %s\n", i+1, truncateLine(lines[i]))
 	}
 
 	// Last N lines
 	result.WriteString("\n...\n\nLast lines:\n")
 	startIdx := max(0, len(lines)-lastLinesCount)
 	for i := startIdx; i < len(lines); i++ {
-		result.WriteString(fmt.Sprintf("%5d: %s\n", i+1, truncateLine(lines[i])))
+		fmt.Fprintf(&result, "%5d: %s\n", i+1, truncateLine(lines[i]))
 	}
 
 	return result.String(), nil

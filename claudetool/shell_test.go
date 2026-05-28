@@ -203,15 +203,14 @@ func TestShellContextCancelKills(t *testing.T) {
 // joined by newlines, stopping at the next blank line.
 func extractSnippet(t *testing.T, payload, marker string) string {
 	t.Helper()
-	idx := strings.Index(payload, marker)
-	if idx < 0 {
+	_, rest, ok := strings.Cut(payload, marker)
+	if !ok {
 		t.Fatalf("marker %q not found in payload:\n%s", marker, payload)
 	}
-	rest := payload[idx+len(marker):]
 	// Skip leading newline after marker.
 	rest = strings.TrimLeft(rest, "\n")
 	var lines []string
-	for _, line := range strings.Split(rest, "\n") {
+	for line := range strings.SplitSeq(rest, "\n") {
 		if strings.TrimSpace(line) == "" {
 			break
 		}

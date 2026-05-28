@@ -566,8 +566,7 @@ func BenchmarkPatchTool_BasicOperations(b *testing.B) {
 	msg, _ := json.Marshal(input)
 	patch.Run(ctx, msg)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Benchmark replace operation
 		input.Patches = []PatchRequest{{
 			Operation: "replace",

@@ -80,14 +80,8 @@ specific pattern (e.g. grep).
 // shellInputSchema is built dynamically so the description reflects the
 // configured default and max yield times.
 func (s *ShellTool) inputSchema() string {
-	def := secondsCeil(s.defaultYield())
-	maxs := secondsCeil(s.maxYield())
-	if maxs < 1 {
-		maxs = 1
-	}
-	if def < 1 {
-		def = 1
-	}
+	def := max(secondsCeil(s.defaultYield()), 1)
+	maxs := max(secondsCeil(s.maxYield()), 1)
 	if def > maxs {
 		def = maxs
 	}
@@ -390,6 +384,7 @@ func readAndFormatShellOutput(path string) (string, error) {
 func buildYieldPayload(command string, pid, pgid int, logPath, tail string, yield time.Duration) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[yielded after %s; still running] PID=%d PGID=%d log=%s\n", yield, pid, pgid, logPath)
+	fmt.Fprintf(&b, "command: %s\n", command)
 	b.WriteString("--- last output ---\n")
 	if tail == "" {
 		b.WriteString("(no output yet)\n")

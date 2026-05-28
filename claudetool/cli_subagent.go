@@ -106,10 +106,7 @@ func (t *CLISubagentTool) run(ctx context.Context, req cliSubagentInput) llm.Too
 	// Determine timeout
 	timeout := cliSubagentDefaultTimeout
 	if req.TimeoutSeconds > 0 {
-		timeout = time.Duration(req.TimeoutSeconds) * time.Second
-		if timeout > cliSubagentMaxTimeout {
-			timeout = cliSubagentMaxTimeout
-		}
+		timeout = min(time.Duration(req.TimeoutSeconds)*time.Second, cliSubagentMaxTimeout)
 	}
 
 	// Build command based on CLI agent type
