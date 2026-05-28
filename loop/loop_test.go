@@ -1322,7 +1322,7 @@ func TestPredictableServiceRequestTracking(t *testing.T) {
 	}
 
 	// Test that only last 10 requests are kept
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		testReq := &llm.Request{
 			Messages: []llm.Message{
 				{Role: llm.MessageRoleUser, Content: []llm.Content{{Type: llm.ContentTypeText, Text: fmt.Sprintf("test %d", i)}}},

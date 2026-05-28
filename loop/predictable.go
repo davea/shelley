@@ -158,47 +158,42 @@ func (s *PredictableService) Do(ctx context.Context, req *llm.Request) (*llm.Res
 
 	default:
 		// Handle pattern-based inputs
-		if strings.HasPrefix(inputText, "echo: ") {
-			text := strings.TrimPrefix(inputText, "echo: ")
+		if text, ok := strings.CutPrefix(inputText, "echo: "); ok {
 			return s.makeResponse(text, inputTokens), nil
 		}
 
-		if strings.HasPrefix(inputText, "bash: ") {
-			cmd := strings.TrimPrefix(inputText, "bash: ")
+		if cmd, ok := strings.CutPrefix(inputText, "bash: "); ok {
 			return s.makeBashToolResponse(cmd, inputTokens), nil
 		}
 
-		if strings.HasPrefix(inputText, "think: ") {
-			thoughts := strings.TrimPrefix(inputText, "think: ")
+		if thoughts, ok := strings.CutPrefix(inputText, "think: "); ok {
 			return s.makeThinkingResponse(thoughts, inputTokens), nil
 		}
 
-		if strings.HasPrefix(inputText, "patch: ") {
-			filePath := strings.TrimPrefix(inputText, "patch: ")
+		if filePath, ok := strings.CutPrefix(inputText, "patch: "); ok {
 			return s.makePatchToolResponse(filePath, inputTokens), nil
 		}
 
-		if strings.HasPrefix(inputText, "fail ") {
-			errorMsg := strings.TrimSpace(strings.TrimPrefix(inputText, "fail "))
+		if rest, ok := strings.CutPrefix(inputText, "fail "); ok {
+			errorMsg := strings.TrimSpace(rest)
 			if req.OnRetry != nil {
 				req.OnRetry(llm.RetryEvent{Attempt: 1, Sleep: time.Second, Err: errorMsg, Provider: "predictable", Model: "predictable-v1"})
 			}
 			return nil, fmt.Errorf("predictable failure: %s", errorMsg)
 		}
 
-		if strings.HasPrefix(inputText, "error: ") {
-			errorMsg := strings.TrimPrefix(inputText, "error: ")
+		if errorMsg, ok := strings.CutPrefix(inputText, "error: "); ok {
 			return nil, fmt.Errorf("predictable error: %s", errorMsg)
 		}
 
-		if strings.HasPrefix(inputText, "screenshot: ") {
-			selector := strings.TrimSpace(strings.TrimPrefix(inputText, "screenshot: "))
+		if rest, ok := strings.CutPrefix(inputText, "screenshot: "); ok {
+			selector := strings.TrimSpace(rest)
 			return s.makeScreenshotToolResponse(selector, inputTokens), nil
 		}
 
-		if strings.HasPrefix(inputText, "subagent: ") {
+		if rest, ok := strings.CutPrefix(inputText, "subagent: "); ok {
 			// Format: "subagent: <slug> <prompt>"
-			parts := strings.SplitN(strings.TrimPrefix(inputText, "subagent: "), " ", 2)
+			parts := strings.SplitN(rest, " ", 2)
 			slug := parts[0]
 			prompt := "do the task"
 			if len(parts) > 1 {
@@ -207,18 +202,15 @@ func (s *PredictableService) Do(ctx context.Context, req *llm.Request) (*llm.Res
 			return s.makeSubagentToolResponse(slug, prompt, inputTokens), nil
 		}
 
-		if strings.HasPrefix(inputText, "markdown: ") {
-			text := strings.TrimPrefix(inputText, "markdown: ")
+		if text, ok := strings.CutPrefix(inputText, "markdown: "); ok {
 			return s.makeResponse(text, inputTokens), nil
 		}
 
-		if strings.HasPrefix(inputText, "change_dir: ") {
-			path := strings.TrimPrefix(inputText, "change_dir: ")
+		if path, ok := strings.CutPrefix(inputText, "change_dir: "); ok {
 			return s.makeChangeDirToolResponse(path, inputTokens), nil
 		}
 
-		if strings.HasPrefix(inputText, "delay: ") {
-			delayStr := strings.TrimPrefix(inputText, "delay: ")
+		if delayStr, ok := strings.CutPrefix(inputText, "delay: "); ok {
 			delaySeconds, err := strconv.ParseFloat(delayStr, 64)
 			if err == nil && delaySeconds > 0 {
 				delayDuration := time.Duration(delaySeconds * float64(time.Second))
