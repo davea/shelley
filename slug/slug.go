@@ -161,7 +161,18 @@ Respond with only the slug, nothing else.`, userMessage)
 		return "", fmt.Errorf("empty response from LLM")
 	}
 
-	slug := strings.TrimSpace(response.Content[0].Text)
+	// Find the first text content block. Reasoning models (e.g.
+	// gpt-oss-20b) return a leading Thinking block with the actual answer
+	// in a later text block, so we can't just read Content[0].
+	var text string
+	for _, content := range response.Content {
+		if content.Type == llm.ContentTypeText && strings.TrimSpace(content.Text) != "" {
+			text = content.Text
+			break
+		}
+	}
+
+	slug := strings.TrimSpace(text)
 	slug = Sanitize(slug)
 	if slug == "" {
 		return "", fmt.Errorf("generated slug is empty after sanitization")

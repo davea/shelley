@@ -74,14 +74,20 @@ func TestGenerateSlug_UniquenessSuffix(t *testing.T) {
 // MockLLMService provides a mock LLM service for testing
 type MockLLMService struct {
 	ResponseText string
+	// ResponseContent, if set, overrides ResponseText and lets a test return
+	// arbitrary content blocks (e.g. a leading Thinking block as reasoning
+	// models do).
+	ResponseContent []llm.Content
 }
 
 func (m *MockLLMService) Do(ctx context.Context, req *llm.Request) (*llm.Response, error) {
-	return &llm.Response{
-		Content: []llm.Content{
+	content := m.ResponseContent
+	if content == nil {
+		content = []llm.Content{
 			{Type: llm.ContentTypeText, Text: m.ResponseText},
-		},
-	}, nil
+		}
+	}
+	return &llm.Response{Content: content}, nil
 }
 
 func (m *MockLLMService) Provider() string { return "" }
@@ -604,4 +610,47 @@ func (m *mockFallbackProvider) GetAvailableModels() []string {
 
 func (m *mockFallbackProvider) GetModelInfo(modelID string) *models.ModelInfo {
 	return m.modelInfo[modelID]
+}
+
+// TestGenerateSlug_ReasoningModel verifies that slug generation works when the
+// LLM returns a leading Thinking content block followed by the text answer,
+// as reasoning models like gpt-oss-20b do. Previously the code only inspected
+// Content[0], so it read the (empty .Text of the) Thinking block and failed
+// with "generated slug is empty after sanitization".
+func TestGenerateSlug_ReasoningModel(t *testing.T) {
+	tempDB := t.TempDir() + "/slug_test.db"
+	database, err := db.New(db.Config{DSN: tempDB})
+	if err != nil {
+		t.Fatalf("Failed to create test database: %v", err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatalf("Failed to migrate database: %v", err)
+	}
+
+	mockLLM := &MockLLMProvider{
+		Service: &MockLLMService{
+			ResponseContent: []llm.Content{
+				{Type: llm.ContentTypeThinking, Thinking: "The user wants a slug. Options: parse-json-go."},
+				{Type: llm.ContentTypeText, Text: "parse-json-go"},
+			},
+		},
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	conv, err := database.CreateConversation(ctx, nil, true, nil, nil, db.ConversationOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create conversation: %v", err)
+	}
+
+	slug, err := GenerateSlug(ctx, mockLLM, database, logger, conv.ConversationID, "how do I parse JSON in Go", "test-model")
+	if err != nil {
+		t.Fatalf("GenerateSlug failed: %v", err)
+	}
+	if slug != "parse-json-go" {
+		t.Errorf("expected slug %q, got %q", "parse-json-go", slug)
+	}
 }
