@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from "react";
 import Modal from "./Modal";
 import { useI18n } from "../i18n";
 import {
+  api,
+  AvailableModel,
   customModelsApi,
   CustomModel,
   CreateCustomModelRequest,
@@ -54,15 +56,7 @@ const DEFAULT_MODELS: Record<ProviderType, { name: string; model_name: string }[
 };
 
 // Built-in model info from init data
-interface BuiltInModel {
-  id: string;
-  display_name?: string;
-  source?: string;
-  base_url?: string;
-  api_type?: string;
-  ready: boolean;
-  supports_images?: boolean;
-}
+type BuiltInModel = AvailableModel;
 
 // API_TYPE_LABELS maps the wire-protocol enum values from server-side
 // models.APIType to the same human-readable strings the custom-model form
@@ -157,6 +151,7 @@ function ModelsModal({ isOpen, onClose, onModelsChanged }: ModelsModalProps) {
   const { t } = useI18n();
   const [models, setModels] = useState<CustomModel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [builtInModels, setBuiltInModels] = useState<BuiltInModel[]>([]);
 
@@ -185,19 +180,20 @@ function ModelsModal({ isOpen, onClose, onModelsChanged }: ModelsModalProps) {
     }
   }, []);
 
+  const setBuiltInFromModelList = useCallback((modelList: AvailableModel[]) => {
+    setBuiltInModels(modelList.filter((m) => m.source && m.source !== "custom"));
+  }, []);
+
   useEffect(() => {
     if (isOpen) {
       loadModels();
       // Get built-in models from init data (those with non-custom source)
       const initData = window.__SHELLEY_INIT__;
       if (initData?.models) {
-        const builtIn = initData.models.filter(
-          (m: BuiltInModel) => m.source && m.source !== "custom",
-        );
-        setBuiltInModels(builtIn);
+        setBuiltInFromModelList(initData.models);
       }
     }
-  }, [isOpen, loadModels]);
+  }, [isOpen, loadModels, setBuiltInFromModelList]);
 
   const handleProviderChange = (provider: ProviderType) => {
     setForm((prev) => ({
@@ -341,10 +337,36 @@ function ModelsModal({ isOpen, onClose, onModelsChanged }: ModelsModalProps) {
     setTestResult(null);
   };
 
+  const handleRefreshModels = async () => {
+    try {
+      setRefreshing(true);
+      setError(null);
+      const refreshedModels = await api.refreshModels();
+      if (window.__SHELLEY_INIT__) {
+        window.__SHELLEY_INIT__.models = refreshedModels;
+      }
+      setBuiltInFromModelList(refreshedModels);
+      onModelsChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh models");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const headerRight = !showForm ? (
-    <button className="btn-primary btn-sm" onClick={handleAddNew}>
-      + {t("addModel")}
-    </button>
+    <div className="models-header-actions">
+      <button
+        className="btn-secondary btn-sm"
+        onClick={handleRefreshModels}
+        disabled={refreshing || loading}
+      >
+        {refreshing ? t("refreshingModels") : t("refreshModels")}
+      </button>
+      <button className="btn-primary btn-sm" onClick={handleAddNew}>
+        + {t("addModel")}
+      </button>
+    </div>
   ) : null;
 
   return (

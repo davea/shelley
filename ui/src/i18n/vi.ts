@@ -126,6 +126,8 @@ export const vi: TranslationKeys = {
   // Models Modal
   manageModels: "Quản lý models",
   addModel: "Thêm model",
+  refreshModels: "Làm mới",
+  refreshingModels: "Đang làm mới...",
   editModel: "Chỉnh sửa model",
   loadingModels: "Đang tải danh sách models...",
   providerApiFormat: "Provider / API Format",

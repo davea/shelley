@@ -127,6 +127,8 @@ export const fr: TranslationKeys = {
   // Models Modal
   manageModels: "Gérer les modèles",
   addModel: "Ajouter un modèle",
+  refreshModels: "Actualiser",
+  refreshingModels: "Actualisation...",
   editModel: "Modifier le modèle",
   loadingModels: "Chargement des modèles...",
   providerApiFormat: "Fournisseur / Format API",

@@ -126,6 +126,8 @@ export const en: TranslationKeys = {
   // Models Modal
   manageModels: "Manage Models",
   addModel: "Add Model",
+  refreshModels: "Refresh",
+  refreshingModels: "Refreshing...",
   editModel: "Edit Model",
   loadingModels: "Loading models...",
   providerApiFormat: "Provider / API Format",

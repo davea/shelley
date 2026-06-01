@@ -299,6 +299,76 @@ func TestRefreshCustomModelsConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestRefreshBuiltModelsReplacesBuiltModelsAndPreservesCustomModels(t *testing.T) {
+	testDB, err := db.New(db.Config{DSN: t.TempDir() + "/test.db"})
+	if err != nil {
+		t.Fatalf("failed to create test db: %v", err)
+	}
+	defer testDB.Close()
+	if err := testDB.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test db: %v", err)
+	}
+	if _, err := testDB.CreateModel(context.Background(), generated.CreateModelParams{
+		ModelID:      "custom-test-model",
+		DisplayName:  "Test Model",
+		ProviderType: "openai",
+		Endpoint:     "https://api.example.com/v1",
+		ApiKey:       "test-key",
+		ModelName:    "test-model",
+		MaxTokens:    4096,
+	}); err != nil {
+		t.Fatalf("failed to create test model: %v", err)
+	}
+
+	mgr, err := NewManager(&Config{
+		Models: []Built{
+			{
+				ID:          "old-built",
+				DisplayName: "Old Built",
+				Provider:    ProviderBuiltIn,
+				Source:      "old source",
+				Service:     &mockLLMService{},
+			},
+		},
+		DB: testDB,
+	})
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	if err := mgr.RefreshBuiltModels([]Built{
+		{
+			ID:          "new-built",
+			DisplayName: "New Built",
+			Provider:    ProviderBuiltIn,
+			Source:      "new source",
+			Service:     &mockLLMService{},
+		},
+	}); err != nil {
+		t.Fatalf("RefreshBuiltModels failed: %v", err)
+	}
+
+	if mgr.HasModel("old-built") {
+		t.Fatal("old built model was not removed")
+	}
+	if !mgr.HasModel("new-built") {
+		t.Fatal("new built model was not added")
+	}
+	if !mgr.HasModel("custom-test-model") {
+		t.Fatal("custom model was not preserved")
+	}
+	got := mgr.GetAvailableModels()
+	want := []string{"new-built", "custom-test-model"}
+	if len(got) != len(want) {
+		t.Fatalf("models = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("models = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestPreferredToolModelsAreRegistered(t *testing.T) {
 	known := map[string]bool{}
 	for _, m := range All() {

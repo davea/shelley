@@ -126,6 +126,8 @@ export const upgoer5: TranslationKeys = {
   // Models Modal
   manageModels: "Set Up Brains",
   addModel: "Add Brain",
+  refreshModels: "Get Again",
+  refreshingModels: "Getting again...",
   editModel: "Change Brain",
   loadingModels: "Getting brains...",
   providerApiFormat: "Who Made It / How to Talk to It",

@@ -323,8 +323,13 @@ button {
   letter-spacing: -0.01em;
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
   background: var(--bg-tertiary);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-sm {
@@ -2818,6 +2823,12 @@ button {
 .modal-title-right {
   margin-left: auto;
   margin-right: 1rem;
+}
+
+.models-header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 .modal-body {

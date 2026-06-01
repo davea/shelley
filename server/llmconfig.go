@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -31,6 +32,10 @@ type LLMConfig struct {
 	// (already baked into Models[*].Service) and custom DB-backed models
 	// the Manager constructs. Pass nil to let the Manager create one.
 	HTTPC *http.Client
+
+	// RefreshBuiltModels rebuilds the ready-to-use built-in model set.
+	// The server calls this for explicit user-triggered refreshes.
+	RefreshBuiltModels func(context.Context) ([]models.Built, error)
 
 	Logger *slog.Logger
 }

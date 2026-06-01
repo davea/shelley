@@ -2152,6 +2152,41 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(modelList)
 }
 
+type builtModelRefresher interface {
+	RefreshBuiltModels([]models.Built) error
+}
+
+// handleModelRefresh refreshes the non-custom model catalog and returns the
+// same shape as GET /api/models.
+func (s *Server) handleModelRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.refreshBuiltModels == nil {
+		http.Error(w, "model refresh is not configured", http.StatusNotImplemented)
+		return
+	}
+	refresher, ok := s.llmManager.(builtModelRefresher)
+	if !ok {
+		http.Error(w, "model manager does not support refresh", http.StatusInternalServerError)
+		return
+	}
+	builtModels, err := s.refreshBuiltModels(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := refresher.RefreshBuiltModels(builtModels); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	modelList := s.getModelList()
+	markDefaultModel(modelList, s.effectiveDefaultModel(modelList))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(modelList)
+}
+
 // markDefaultModel sets IsDefault=true on the entry matching defaultID.
 func markDefaultModel(modelList []ModelInfo, defaultID string) {
 	if defaultID == "" {

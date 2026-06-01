@@ -277,6 +277,7 @@ type Server struct {
 	predictableOnly          bool
 	defaultModel             string
 	requireHeader            string
+	refreshBuiltModels       func(context.Context) ([]models.Built, error)
 	conversationGroup        singleflight.Group[string, *ConversationManager]
 	versionChecker           *VersionChecker
 	notifDispatcher          *notifications.Dispatcher
@@ -363,6 +364,11 @@ func NewServer(database *db.DB, llmManager LLMProvider, toolSetConfig claudetool
 	return s
 }
 
+// SetModelRefresher configures the user-triggered model catalog refresh.
+func (s *Server) SetModelRefresher(refresh func(context.Context) ([]models.Built, error)) {
+	s.refreshBuiltModels = refresh
+}
+
 // RegisterNotificationChannel adds a backend notification channel to the dispatcher.
 func (s *Server) RegisterNotificationChannel(ch notifications.Channel) {
 	s.notifDispatcher.Register(ch)
@@ -416,6 +422,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("/api/notification-channel-types", http.HandlerFunc(s.handleNotificationChannelTypes))
 
 	// Models API (dynamic list refresh)
+	mux.Handle("POST /api/models/refresh", http.HandlerFunc(s.handleModelRefresh))
 	mux.Handle("/api/models", http.HandlerFunc(s.handleModels))
 	mux.Handle("/api/tools", http.HandlerFunc(s.handleTools))
 

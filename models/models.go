@@ -489,7 +489,16 @@ func NewManager(cfg *Config) (*Manager, error) {
 		httpc:    httpc,
 	}
 
-	for _, b := range cfg.Models {
+	m.registerBuiltModelsLocked(cfg.Models)
+
+	if err := m.loadCustomModels(); err != nil && cfg.Logger != nil {
+		cfg.Logger.Warn("Failed to load custom models", "error", err)
+	}
+	return m, nil
+}
+
+func (m *Manager) registerBuiltModelsLocked(built []Built) {
+	for _, b := range built {
 		dn := b.DisplayName
 		if dn == "" {
 			dn = b.ID
@@ -505,23 +514,29 @@ func NewManager(cfg *Config) (*Manager, error) {
 			apiType:     b.APIType,
 		}
 		m.modelOrder = append(m.modelOrder, b.ID)
-		logger.Info("Registered model", "id", b.ID, "source", b.Source)
+		if m.logger != nil {
+			m.logger.Info("Registered model", "id", b.ID, "source", b.Source)
+		}
 	}
+}
 
-	if err := m.loadCustomModels(); err != nil && cfg.Logger != nil {
-		cfg.Logger.Warn("Failed to load custom models", "error", err)
+func (m *Manager) customModelRows() ([]generated.Model, error) {
+	if m.db == nil {
+		return nil, nil
 	}
-	return m, nil
+	return m.db.GetModels(context.Background())
 }
 
 func (m *Manager) loadCustomModels() error {
-	if m.db == nil {
-		return nil
-	}
-	dbModels, err := m.db.GetModels(context.Background())
+	dbModels, err := m.customModelRows()
 	if err != nil {
 		return err
 	}
+	m.loadCustomModelsLocked(dbModels)
+	return nil
+}
+
+func (m *Manager) loadCustomModelsLocked(dbModels []generated.Model) {
 	for _, model := range dbModels {
 		if _, exists := m.services[model.ModelID]; exists {
 			continue
@@ -540,14 +555,14 @@ func (m *Manager) loadCustomModels() error {
 		}
 		m.modelOrder = append(m.modelOrder, model.ModelID)
 	}
-	return nil
 }
 
 // RefreshCustomModels reloads custom models from the database. Call this
 // after adding or removing custom models via the UI.
 func (m *Manager) RefreshCustomModels() error {
-	if m.db == nil {
-		return nil
+	dbModels, err := m.customModelRows()
+	if err != nil {
+		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -561,7 +576,24 @@ func (m *Manager) RefreshCustomModels() error {
 		}
 	}
 	m.modelOrder = newOrder
-	return m.loadCustomModels()
+	m.loadCustomModelsLocked(dbModels)
+	return nil
+}
+
+// RefreshBuiltModels replaces the non-custom models with a freshly discovered
+// built-in/catalog set, then re-applies DB-backed custom models.
+func (m *Manager) RefreshBuiltModels(built []Built) error {
+	dbModels, err := m.customModelRows()
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.services = map[string]serviceEntry{}
+	m.modelOrder = nil
+	m.registerBuiltModelsLocked(built)
+	m.loadCustomModelsLocked(dbModels)
+	return nil
 }
 
 // GetService returns the LLM service for modelID, wrapped with logging.

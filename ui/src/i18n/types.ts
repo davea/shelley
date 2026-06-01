@@ -126,6 +126,8 @@ export interface TranslationKeys {
   // Models Modal
   manageModels: string;
   addModel: string;
+  refreshModels: string;
+  refreshingModels: string;
   editModel: string;
   loadingModels: string;
   providerApiFormat: string;

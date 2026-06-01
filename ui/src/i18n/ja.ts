@@ -126,6 +126,8 @@ export const ja: TranslationKeys = {
   // Models Modal
   manageModels: "モデルの管理",
   addModel: "モデルの追加",
+  refreshModels: "更新",
+  refreshingModels: "更新中...",
   editModel: "モデルの編集",
   loadingModels: "モデルを読み込み中...",
   providerApiFormat: "プロバイダー / API形式",

@@ -126,6 +126,8 @@ export const zhCN: TranslationKeys = {
   // Models Modal
   manageModels: "管理模型",
   addModel: "添加模型",
+  refreshModels: "刷新",
+  refreshingModels: "刷新中...",
   editModel: "编辑模型",
   loadingModels: "加载模型中...",
   providerApiFormat: "提供商 / API 格式",

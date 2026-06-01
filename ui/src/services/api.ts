@@ -26,6 +26,18 @@ async function responseError(response: Response, prefix: string): Promise<Error>
   return new Error(`${prefix}: ${detail}`);
 }
 
+export interface AvailableModel {
+  id: string;
+  display_name?: string;
+  source?: string;
+  base_url?: string;
+  api_type?: string;
+  ready: boolean;
+  max_context_tokens?: number;
+  is_default?: boolean;
+  supports_images?: boolean;
+}
+
 class ApiService {
   private baseUrl = "/api";
 
@@ -52,18 +64,21 @@ class ApiService {
     return response.json();
   }
 
-  async getModels(): Promise<
-    Array<{
-      id: string;
-      display_name?: string;
-      source?: string;
-      ready: boolean;
-      max_context_tokens?: number;
-    }>
-  > {
+  async getModels(): Promise<AvailableModel[]> {
     const response = await fetch(`${this.baseUrl}/models`);
     if (!response.ok) {
       throw new Error(`Failed to get models: ${response.statusText}`);
+    }
+    return response.json();
+  }
+
+  async refreshModels(): Promise<AvailableModel[]> {
+    const response = await fetch(`${this.baseUrl}/models/refresh`, {
+      method: "POST",
+      headers: this.postHeaders,
+    });
+    if (!response.ok) {
+      throw await responseError(response, "Failed to refresh models");
     }
     return response.json();
   }

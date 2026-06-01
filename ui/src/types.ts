@@ -60,8 +60,12 @@ export interface Model {
   id: string;
   display_name?: string;
   source?: string; // Human-readable source (e.g., "exe.dev gateway", "$ANTHROPIC_API_KEY")
+  base_url?: string;
+  api_type?: string;
   ready: boolean;
   max_context_tokens?: number;
+  is_default?: boolean;
+  supports_images?: boolean;
 }
 
 export interface ChatRequest {

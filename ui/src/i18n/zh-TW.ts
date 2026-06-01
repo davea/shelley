@@ -126,6 +126,8 @@ export const zhTW: TranslationKeys = {
   // Models Modal
   manageModels: "管理模型",
   addModel: "新增模型",
+  refreshModels: "重新整理",
+  refreshingModels: "重新整理中...",
   editModel: "編輯模型",
   loadingModels: "載入模型中...",
   providerApiFormat: "提供商 / API 格式",

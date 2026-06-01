@@ -184,6 +184,7 @@ func runServe(global GlobalConfig, args []string) {
 
 	// Create server
 	svr := server.NewServer(database, llmManager, toolSetConfig, logger, global.PredictableOnly, llmConfig.DefaultModel, *requireHeader)
+	svr.SetModelRefresher(llmConfig.RefreshBuiltModels)
 	svr.Banner = *banner
 
 	// Load notification channels from DB.
@@ -382,6 +383,23 @@ func setupToolSetConfig(llmProvider claudetool.LLMServiceProvider, llmManager se
 //
 // Custom DB-backed models load on top of the returned set.
 func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) *server.LLMConfig {
+	defaultModel, sources := buildLLMModelSources(context.Background(), global, logger)
+
+	httpc := llmhttp.NewClient(nil)
+	return &server.LLMConfig{
+		Models:       modelsources.Build(models.All(), sources, httpc, logger),
+		DefaultModel: defaultModel,
+		DB:           database,
+		HTTPC:        httpc,
+		RefreshBuiltModels: func(ctx context.Context) ([]models.Built, error) {
+			_, sources := buildLLMModelSources(ctx, global, logger)
+			return modelsources.Build(models.All(), sources, httpc, logger), nil
+		},
+		Logger: logger,
+	}
+}
+
+func buildLLMModelSources(ctx context.Context, global GlobalConfig, logger *slog.Logger) (string, []modelsources.Source) {
 	configPath := global.ConfigPath
 	defaultModel := global.DefaultModel
 	anthropicKey := os.Getenv("ANTHROPIC_API_KEY")
@@ -389,19 +407,13 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) *
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	fireworksKey := os.Getenv("FIREWORKS_API_KEY")
 
-	llmCfg := &server.LLMConfig{
-		DefaultModel: defaultModel,
-		DB:           database,
-		Logger:       logger,
-	}
-
 	var sources []modelsources.Source
 
 	// 1. exe.dev LLM integrations.
 	var integs []*modelsources.LLMIntegrationConfig
 	llmIntegrationFound := false
 	if !global.DisableLLMIntegration {
-		discovered := discoverLLMIntegrations(context.Background(), nil, logger)
+		discovered := discoverLLMIntegrations(ctx, nil, logger)
 		llmIntegrationFound = discovered.Found
 		integs = discovered.Integrations
 	}
@@ -425,8 +437,8 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) *
 				logger.Warn("Failed to parse config file", "path", configPath, "error", err)
 			} else {
 				gateway = strings.TrimSuffix(cfg.LLMGateway, "/")
-				if cfg.DefaultModel != "" && llmCfg.DefaultModel == "" {
-					llmCfg.DefaultModel = cfg.DefaultModel
+				if cfg.DefaultModel != "" && defaultModel == "" {
+					defaultModel = cfg.DefaultModel
 					logger.Info("Using default model from config", "model", cfg.DefaultModel)
 				}
 			}
@@ -461,11 +473,7 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) *
 
 	// 4. Predictable always available.
 	sources = append(sources, modelsources.Predictable())
-
-	httpc := llmhttp.NewClient(nil)
-	llmCfg.HTTPC = httpc
-	llmCfg.Models = modelsources.Build(models.All(), sources, httpc, logger)
-	return llmCfg
+	return defaultModel, sources
 }
 
 // runModels prints the materialized list of built-in models the server

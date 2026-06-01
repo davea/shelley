@@ -126,6 +126,8 @@ export const ru: TranslationKeys = {
   // Models Modal
   manageModels: "Управление моделями",
   addModel: "Добавить модель",
+  refreshModels: "Обновить",
+  refreshingModels: "Обновление...",
   editModel: "Редактировать модель",
   loadingModels: "Загрузка моделей...",
   providerApiFormat: "Провайдер / Формат API",
