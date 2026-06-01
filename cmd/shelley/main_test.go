@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -13,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"shelley.exe.dev/models"
+	"shelley.exe.dev/modelsources"
 	"shelley.exe.dev/slug"
 )
 
@@ -39,6 +43,44 @@ func TestSanitizeSlug(t *testing.T) {
 			t.Errorf("slug.Sanitize(%q) = %q, expected %q", test.input, result, test.expected)
 		}
 	}
+}
+
+func TestBuildLLMConfigSkipsGatewayWhenReflectionFoundLLMIntegration(t *testing.T) {
+	oldDiscover := discoverLLMIntegrations
+	discoverLLMIntegrations = func(context.Context, *http.Client, *slog.Logger) modelsources.LLMIntegrationDiscoveryResult {
+		return modelsources.LLMIntegrationDiscoveryResult{Found: true}
+	}
+	t.Cleanup(func() { discoverLLMIntegrations = oldDiscover })
+
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("FIREWORKS_API_KEY", "")
+
+	configPath := filepath.Join(t.TempDir(), "shelley.json")
+	if err := os.WriteFile(configPath, []byte(`{"llm_gateway":"https://gateway.example.com"}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := buildLLMConfig(GlobalConfig{ConfigPath: configPath}, logger, nil)
+	for _, model := range cfg.Models {
+		if model.Source == "exe.dev gateway" {
+			t.Fatalf("gateway model %q was built despite discovered LLM integration", model.ID)
+		}
+	}
+	if findBuiltModelSource(cfg.Models, "predictable") != "builtin" {
+		t.Fatalf("predictable model missing from config")
+	}
+}
+
+func findBuiltModelSource(built []models.Built, id string) string {
+	for _, model := range built {
+		if model.ID == id {
+			return model.Source
+		}
+	}
+	return ""
 }
 
 func TestCLICommands(t *testing.T) {

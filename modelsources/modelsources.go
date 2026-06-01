@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"time"
 
@@ -118,10 +119,12 @@ func Env(anthropicKey, openAIKey, geminiKey, fireworksKey string) Source {
 func LLMIntegration(integ *LLMIntegrationConfig, idSuffix string) Source {
 	allowed := make(map[string]bool, len(integ.Models))
 	for _, m := range integ.Models {
-		allowed[m.ID] = true
+		if apiModelName := m.apiModelName(); apiModelName != "" {
+			allowed[apiModelName] = true
+		}
 	}
 	return Source{
-		label:    fmt.Sprintf("exe.dev llm integration (%s)", integ.Host),
+		label:    integ.Host,
 		idSuffix: idSuffix,
 		providers: map[models.Provider]*providerConn{
 			models.ProviderAnthropic: {baseURL: integ.URL, apiKey: "implicit"},
@@ -202,14 +205,25 @@ func Build(catalog []models.Model, sources []Source, httpc *http.Client, logger 
 // --- exe.dev LLM integration discovery ------------------------------------
 
 // integrationDiscoveryTimeout bounds each HTTP call made during exe.dev
-// integration discovery. Generous so a slow upstream during /v1/models
+// integration discovery. Generous so a slow upstream during models.json
 // can't silently drop the integration.
 const integrationDiscoveryTimeout = 30 * time.Second
 
-// IntegrationModel is one entry from an LLM integration's /v1/models list.
+var exeDevMarkerPath = "/exe.dev"
+
+// IntegrationModel is one entry from an LLM integration's models.json catalog.
 type IntegrationModel struct {
-	ID      string `json:"id"`
-	OwnedBy string `json:"owned_by,omitempty"`
+	ID       string   `json:"id"`
+	Provider string   `json:"provider,omitempty"`
+	NativeID string   `json:"native_id,omitempty"`
+	APIs     []string `json:"apis,omitempty"`
+}
+
+func (m IntegrationModel) apiModelName() string {
+	if m.NativeID != "" {
+		return m.NativeID
+	}
+	return m.ID
 }
 
 // LLMIntegrationConfig describes one exe.dev "llm" integration that
@@ -219,16 +233,25 @@ type LLMIntegrationConfig struct {
 	// Name is the integration name (e.g. "llm").
 	Name string
 
-	// Host is the integration hostname (e.g. "llm.int.exe.xyz"), shown to
-	// users in source labels.
+	// Host is the integration hostname (e.g. "llm.int.exe.xyz"), shown
+	// to users in source labels.
 	Host string
 
 	// URL is the integration base URL (no trailing slash, no path).
 	URL string
 
 	// Models is the set of models the integration serves, in the order
-	// returned by /v1/models.
+	// returned by models.json.
 	Models []IntegrationModel
+}
+
+// LLMIntegrationDiscoveryResult distinguishes "reflection found no LLM
+// integrations" from "reflection found LLM integrations, but none produced a
+// usable catalog." Callers use Found to avoid falling back to the gateway when
+// a VM has an explicit LLM integration attached.
+type LLMIntegrationDiscoveryResult struct {
+	Found        bool
+	Integrations []*LLMIntegrationConfig
 }
 
 type reflectionIntegration struct {
@@ -240,24 +263,22 @@ type reflectionIntegrationsResponse struct {
 	Integrations []reflectionIntegration `json:"integrations"`
 }
 
-type openAIModelsList struct {
-	Data []IntegrationModel `json:"data"`
+type llmIntegrationModelCatalog struct {
+	SchemaVersion int                `json:"schema_version"`
+	Models        []IntegrationModel `json:"models"`
 }
 
 // DiscoverLLMIntegrations looks up every integration of type "llm" via
-// the reflection endpoint and returns the resolved configs, sorted by
-// name. Returns nil when we are not on an exe.dev VM (no /exe.dev
-// directory), reflection is unreachable, or no "llm" integration is
-// registered. An integration whose /v1/models fetch fails is logged and
-// skipped; other integrations are still returned. Intentionally
-// best-effort so the caller can fall back to gateway/env-var
-// configuration.
-func DiscoverLLMIntegrations(ctx context.Context, httpc *http.Client, logger *slog.Logger) []*LLMIntegrationConfig {
+// the reflection endpoint and returns the resolved configs, sorted by name.
+// Found is false when we are not on an exe.dev VM, reflection is unreachable,
+// or no "llm" integration is registered. An integration whose models.json
+// fetch fails is logged and skipped; other integrations are still returned.
+func DiscoverLLMIntegrations(ctx context.Context, httpc *http.Client, logger *slog.Logger) LLMIntegrationDiscoveryResult {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if _, err := os.Stat("/exe.dev"); err != nil {
-		return nil
+	if _, err := os.Stat(exeDevMarkerPath); err != nil {
+		return LLMIntegrationDiscoveryResult{}
 	}
 	if httpc == nil {
 		httpc = http.DefaultClient
@@ -265,7 +286,7 @@ func DiscoverLLMIntegrations(ctx context.Context, httpc *http.Client, logger *sl
 
 	var ints reflectionIntegrationsResponse
 	if !fetchJSON(ctx, httpc, "https://reflection.int.exe.xyz/integrations", &ints) {
-		return nil
+		return LLMIntegrationDiscoveryResult{}
 	}
 
 	var names []string
@@ -275,32 +296,60 @@ func DiscoverLLMIntegrations(ctx context.Context, httpc *http.Client, logger *sl
 		}
 	}
 	if len(names) == 0 {
-		return nil
+		return LLMIntegrationDiscoveryResult{}
 	}
 	sort.Strings(names)
 
-	var out []*LLMIntegrationConfig
+	result := LLMIntegrationDiscoveryResult{Found: true}
 	for _, name := range names {
 		host := fmt.Sprintf("%s.int.exe.xyz", name)
 		base := "https://" + host
-		var ml openAIModelsList
-		if !fetchJSON(ctx, httpc, base+"/v1/models", &ml) {
-			logger.Warn("LLM integration discovery: /v1/models fetch failed; skipping", "name", name, "host", host)
+		var catalog llmIntegrationModelCatalog
+		if !fetchJSON(ctx, httpc, base+"/models.json", &catalog) {
+			logger.Warn("LLM integration discovery: models.json fetch failed; skipping", "name", name, "host", host)
 			continue
 		}
-		if len(ml.Data) == 0 {
-			logger.Warn("LLM integration discovery: /v1/models returned no models; skipping", "name", name, "host", host)
+		models := integrationModelsFromCatalog(catalog)
+		if len(models) == 0 {
+			logger.Warn("LLM integration discovery: models.json returned no supported models; skipping", "name", name, "host", host)
 			continue
 		}
-		out = append(out, &LLMIntegrationConfig{
+		result.Integrations = append(result.Integrations, &LLMIntegrationConfig{
 			Name:   name,
 			Host:   host,
 			URL:    base,
-			Models: ml.Data,
+			Models: models,
 		})
-		logger.Info("Discovered exe.dev LLM integration", "name", name, "host", host, "models", len(ml.Data))
+		logger.Info("Discovered exe.dev LLM integration", "name", name, "host", host, "models", len(models))
+	}
+	return result
+}
+
+func integrationModelsFromCatalog(catalog llmIntegrationModelCatalog) []IntegrationModel {
+	if catalog.SchemaVersion != 1 {
+		return nil
+	}
+	var out []IntegrationModel
+	for _, model := range catalog.Models {
+		if model.apiModelName() == "" || !integrationModelSupportedByShelley(model) {
+			continue
+		}
+		out = append(out, model)
 	}
 	return out
+}
+
+func integrationModelSupportedByShelley(model IntegrationModel) bool {
+	switch model.Provider {
+	case string(models.ProviderAnthropic):
+		return slices.Contains(model.APIs, "anthropic_messages")
+	case string(models.ProviderOpenAI):
+		return slices.Contains(model.APIs, "openai_responses") || slices.Contains(model.APIs, "openai_chat")
+	case string(models.ProviderFireworks):
+		return slices.Contains(model.APIs, "openai_chat")
+	default:
+		return false
+	}
 }
 
 // fetchJSON GETs url with a per-call timeout and decodes JSON into out.

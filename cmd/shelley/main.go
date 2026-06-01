@@ -36,6 +36,8 @@ type GlobalConfig struct {
 	DisableGateway        bool
 }
 
+var discoverLLMIntegrations = modelsources.DiscoverLLMIntegrations
+
 func main() {
 	// Define global flags
 	var global GlobalConfig
@@ -371,9 +373,10 @@ func setupToolSetConfig(llmProvider claudetool.LLMServiceProvider, llmManager se
 //  1. Each discovered exe.dev "llm" integration (sorted by name; when
 //     2+, subsequent integrations get an "@<name>" suffix on their
 //     model IDs so the union of all served models is visible).
-//  2. The exe.dev gateway from shelley.json's llm_gateway, if set.
-//     Any non-empty provider env var overrides the gateway's implicit
-//     credential for that provider (legacy behavior).
+//  2. The exe.dev gateway from shelley.json's llm_gateway, if set and no
+//     exe.dev LLM integration was discovered via reflection. Any non-empty
+//     provider env var overrides the gateway's implicit credential for
+//     that provider (legacy behavior).
 //  3. Provider env vars (ANTHROPIC_API_KEY, ...) when no gateway is set.
 //  4. Predictable (always available).
 //
@@ -396,8 +399,11 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) *
 
 	// 1. exe.dev LLM integrations.
 	var integs []*modelsources.LLMIntegrationConfig
+	llmIntegrationFound := false
 	if !global.DisableLLMIntegration {
-		integs = modelsources.DiscoverLLMIntegrations(context.Background(), nil, logger)
+		discovered := discoverLLMIntegrations(context.Background(), nil, logger)
+		llmIntegrationFound = discovered.Found
+		integs = discovered.Integrations
 	}
 	for i, integ := range integs {
 		suffix := ""
@@ -435,7 +441,12 @@ func buildLLMConfig(global GlobalConfig, logger *slog.Logger, database *db.DB) *
 
 	// 2. Gateway (Anthropic, OpenAI, Fireworks). Per-provider env vars
 	// override the gateway's implicit credential for those three.
-	if gateway != "" {
+	if gateway != "" && llmIntegrationFound {
+		logger.Info("Skipping LLM gateway because an exe.dev LLM integration was discovered")
+		if geminiKey != "" {
+			sources = append(sources, modelsources.Env("", "", geminiKey, ""))
+		}
+	} else if gateway != "" {
 		logger.Info("Using LLM gateway", "gateway", gateway)
 		sources = append(sources, modelsources.Gateway(gateway, anthropicKey, openAIKey, fireworksKey))
 		// 2b. Gemini is not served by the gateway; let GEMINI_API_KEY,
