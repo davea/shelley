@@ -206,6 +206,20 @@ func (db *DB) Pool() *Pool {
 	return db.pool
 }
 
+// Checkpoint runs a truncating WAL checkpoint, flushing the write-ahead log
+// back into the main database file and shrinking the -wal file on disk.
+//
+// In WAL mode SQLite's default auto-checkpoint is PASSIVE: it copies committed
+// frames into the main db but never shrinks the -wal file, which therefore
+// grows to (and stays at) its high-water mark. Run this periodically and at
+// startup to keep the -wal file bounded.
+func (db *DB) Checkpoint(ctx context.Context) error {
+	if err := db.pool.Exec(ctx, "PRAGMA wal_checkpoint(TRUNCATE);"); err != nil {
+		return fmt.Errorf("wal checkpoint: %w", err)
+	}
+	return nil
+}
+
 // WithTx runs a function within a database transaction
 func (db *DB) WithTx(ctx context.Context, fn func(*generated.Queries) error) error {
 	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {

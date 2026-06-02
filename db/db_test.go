@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -551,5 +552,51 @@ func assertSearchMisses(t *testing.T, db *DB, ctx context.Context, query string)
 	}
 	if len(results) != 0 {
 		t.Fatalf("SearchConversationsFTS(%q) got %d results, want 0: %#v", query, len(results), results)
+	}
+}
+
+// TestCheckpoint verifies that Checkpoint truncates the WAL file back down
+// after it has grown from writes, even while the long-lived reader
+// connections in the pool are open.
+func TestCheckpoint(t *testing.T) {
+	tmpDir := t.TempDir()
+	dsn := tmpDir + "/test.db"
+	database, err := New(Config{DSN: dsn})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// Generate a bunch of WAL writes.
+	for i := 0; i < 500; i++ {
+		if err := database.SetFeatureFlagOverride(ctx, fmt.Sprintf("flag-%d", i), fmt.Sprintf(`"%d"`, i)); err != nil {
+			t.Fatalf("SetFeatureFlagOverride: %v", err)
+		}
+	}
+
+	walPath := dsn + "-wal"
+	beforeInfo, err := os.Stat(walPath)
+	if err != nil {
+		t.Fatalf("stat wal before: %v", err)
+	}
+	if beforeInfo.Size() == 0 {
+		t.Fatalf("expected non-empty WAL before checkpoint")
+	}
+
+	if err := database.Checkpoint(ctx); err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+
+	afterInfo, err := os.Stat(walPath)
+	if err != nil {
+		t.Fatalf("stat wal after: %v", err)
+	}
+	if afterInfo.Size() >= beforeInfo.Size() {
+		t.Fatalf("Checkpoint did not shrink WAL: before=%d after=%d", beforeInfo.Size(), afterInfo.Size())
 	}
 }
