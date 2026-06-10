@@ -132,6 +132,8 @@ func TestStepSummary(t *testing.T) {
 		{Step{Action: "eval", Expression: "document.title"}, "eval document.title"},
 		{Step{Action: "eval", Expression: "1+1", Expect: "2"}, "eval 1+1 expect=2"},
 		{Step{Action: "assert_count", Selector: "li", Count: 3}, "assert_count li 3"},
+		{Step{Action: "wait_url", Value: "/c/abc"}, "wait_url /c/abc"},
+		{Step{Action: "wait_url", Text: "/c/"}, "wait_url ~/c/"},
 		{Step{Action: "sleep", Timeout: "1s"}, "sleep 1s"},
 	}
 	for _, tt := range tests {
@@ -139,5 +141,31 @@ func TestStepSummary(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("StepSummary(%+v) = %q, want %q", tt.step, got, tt.want)
 		}
+	}
+}
+
+func TestSameSteps(t *testing.T) {
+	a := []byte(`[{"action":"navigate","url":"/new"},{"action":"click","selector":"#go"}]`)
+	// Identical content but reformatted (whitespace + key order differ).
+	b := []byte(`[
+	  { "url": "/new", "action": "navigate" },
+	  { "selector": "#go", "action": "click" }
+	]`)
+	if !sameSteps(a, b) {
+		t.Error("reformatted but identical steps should compare equal")
+	}
+	// A real difference in a step field.
+	c := []byte(`[{"action":"navigate","url":"/new"},{"action":"click","selector":"#stop"}]`)
+	if sameSteps(a, c) {
+		t.Error("differing selector should compare unequal")
+	}
+	// Different number of steps.
+	d := []byte(`[{"action":"navigate","url":"/new"}]`)
+	if sameSteps(a, d) {
+		t.Error("differing length should compare unequal")
+	}
+	// Unparseable input is never "same".
+	if sameSteps(a, []byte(`not json`)) {
+		t.Error("unparseable steps should compare unequal")
 	}
 }

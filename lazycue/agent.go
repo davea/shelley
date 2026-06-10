@@ -48,7 +48,7 @@ type AgentResult struct {
 	OutputTokens   int
 }
 
-const maxAgentTurns = 15
+const maxAgentTurns = 25
 
 // --- Anthropic API types ---
 
@@ -110,6 +110,9 @@ type apiError struct {
 
 type runStepsInput struct {
 	Steps json.RawMessage `json:"steps"`
+	// Final marks this as the complete test to save (not an exploratory probe).
+	// When true and all steps pass, the harness caches exactly these steps.
+	Final bool `json:"final,omitempty"`
 }
 
 type screenshotInput struct{}
@@ -133,13 +136,14 @@ Available DSL actions:
 - click: {"action": "click", "selector": "..."} - Click element
 - press_key: {"action": "press_key", "key": "Enter"} - Press keyboard key
 - screenshot: {"action": "screenshot"} - Take screenshot
-- eval: {"action": "eval", "expression": "...", "expect": "..."} - Evaluate JS, optionally assert result
+- eval: {"action": "eval", "expression": "...", "expect": "..."} - Evaluate JS; if "expect" is set, assert the stringified result equals it. The run_steps result echoes the evaluated value back to you ("=> <value>"), so use eval WITHOUT expect to probe page state (selectors, scrollHeight, classes, etc.) while developing the test.
 - assert_visible: {"action": "assert_visible", "selector": "..."} - Assert element is visible
 - assert_not_visible: {"action": "assert_not_visible", "selector": "..."} - Assert element is not visible
 - assert_text: {"action": "assert_text", "selector": "...", "text": "..."} - Assert exact text content
 - assert_text_contains: {"action": "assert_text_contains", "selector": "...", "text": "..."} - Assert text contains substring
 - assert_attribute: {"action": "assert_attribute", "selector": "...", "attribute": "...", "value": "..."}
-- assert_url: {"action": "assert_url", "value": "..."} or {"action": "assert_url", "text": "..."} for contains
+- wait_url: {"action": "wait_url", "text": "...", "timeout": "10s"} (substring) or {"action": "wait_url", "value": "..."} (exact) - Wait for the browser URL to match. Use this (not assert_url) when a click triggers an async SPA route change, e.g. /new -> /c/<slug>.
+- assert_url: {"action": "assert_url", "value": "..."} or {"action": "assert_url", "text": "..."} for contains - Asserts the URL immediately (no waiting).
 - assert_title: {"action": "assert_title", "text": "..."}
 - assert_count: {"action": "assert_count", "selector": "...", "count": 3}
 - sleep: {"action": "sleep", "timeout": "1s"}
@@ -150,7 +154,7 @@ WORKFLOW:
 3. Use the run_steps tool to test your DSL steps. Review the results and fix any failures.
 4. Use screenshot to see what the page looks like if you're unsure about selectors or page state.
 5. Use git_command to explore the codebase (grep for selectors, data-testid attributes, etc.) when you need to discover the app's structure.
-6. Your FINAL call to run_steps should be the complete, passing test. Add "// FINAL" as a text response before it.
+6. Your FINAL call to run_steps must be the COMPLETE, passing test that exercises every part of the description. Submit it by setting "final": true on that run_steps call (exploratory probes must NOT set final). The harness caches exactly the steps from your final submission, so it must contain all the assertions — never submit a bare navigation/probe as final.
 7. Minimize the number of tool calls. Aim for 1-3 run_steps calls total.
 
 CRITICAL: WHEN FIXING A FAILING TEST:
@@ -193,7 +197,7 @@ func buildTools() []apiTool {
 	return []apiTool{
 		{
 			Name:        "run_steps",
-			Description: "Execute an array of DSL test steps against the browser. Returns structured results showing which step passed/failed and why. The browser is reset to a clean state before execution. Use this to test your generated DSL.",
+			Description: "Execute an array of DSL test steps against the browser. Returns structured results showing which step passed/failed and why. The browser is reset to a clean state before execution. Use this to test your generated DSL. When you have the COMPLETE test that exercises everything in the description and it passes, call run_steps one last time with \"final\": true to submit it for caching.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -201,6 +205,10 @@ func buildTools() []apiTool {
 						"type": "array",
 						"description": "Array of DSL step objects to execute",
 						"items": { "type": "object" }
+					},
+					"final": {
+						"type": "boolean",
+						"description": "Set true only when these steps are the complete, final test to save. Do not set on exploratory probes."
 					}
 				},
 				"required": ["steps"]
@@ -256,6 +264,12 @@ func RunAgent(ctx context.Context, cfg *AgentConfig) (*AgentResult, error) {
 
 	var lastStepsJSON []byte
 	var lastStepResults []StepResult
+	// finalStepsJSON / finalStepResults hold the run_steps call the agent
+	// explicitly marked as its complete test ("// FINAL"). Exploratory probes
+	// must not be cached, so we only accept these as the saved test.
+	var finalStepsJSON []byte
+	var finalStepResults []StepResult
+	var nudgedForFinal bool
 	var lastError string
 	var genuineFailure bool // set when agent determines the APP is broken, not the test
 	var totalInputTokens, totalOutputTokens int
@@ -275,14 +289,19 @@ func RunAgent(ctx context.Context, cfg *AgentConfig) (*AgentResult, error) {
 		totalInputTokens += resp.Usage.InputTokens
 		totalOutputTokens += resp.Usage.OutputTokens
 
-		// Check for tool_use blocks.
+		// Check for tool_use blocks. Track whether this assistant turn declared
+		// its run_steps as the FINAL, complete test (vs. an exploratory probe).
 		var toolUses []apiContentBlock
+		var turnIsFinal bool
 		for _, block := range resp.Content {
 			if block.Type == "tool_use" {
 				toolUses = append(toolUses, block)
 			}
 			if block.Type == "text" {
 				logf("assistant: %s", truncate(block.Text, 200))
+				if strings.Contains(block.Text, "// FINAL") {
+					turnIsFinal = true
+				}
 			}
 		}
 
@@ -313,14 +332,31 @@ func RunAgent(ctx context.Context, cfg *AgentConfig) (*AgentResult, error) {
 					OutputTokens: totalOutputTokens,
 				}, nil
 			}
-			if lastStepsJSON != nil && allPassed(lastStepResults) {
+			// Only accept a run_steps call the agent explicitly marked "// FINAL"
+			// as the saved test. This prevents caching an exploratory probe that
+			// happened to be the agent's last run_steps but doesn't actually test
+			// the described behavior.
+			if finalStepsJSON != nil && allPassed(finalStepResults) {
 				return &AgentResult{
 					Success:      true,
-					StepsJSON:    lastStepsJSON,
-					StepResults:  lastStepResults,
+					StepsJSON:    finalStepsJSON,
+					StepResults:  finalStepResults,
 					InputTokens:  totalInputTokens,
 					OutputTokens: totalOutputTokens,
 				}, nil
+			}
+			// The agent stopped without a passing FINAL test. Nudge it once to
+			// produce one (it may have only run exploratory probes), then fail.
+			if !nudgedForFinal {
+				nudgedForFinal = true
+				messages = append(messages, apiMessage{
+					Role: "user",
+					Content: []apiContentBlock{{
+						Type: "text",
+						Text: "You have not yet produced a complete, passing test. Do NOT stop on an exploratory probe. Write the FULL test that exercises everything in the description (including every assertion), output the text \"// FINAL\" on its own, and call run_steps with the complete step list. If you believe the application is genuinely broken, say so explicitly instead.",
+					}},
+				})
+				continue
 			}
 			errMsg := lastError
 			if errMsg == "" {
@@ -352,6 +388,7 @@ func RunAgent(ctx context.Context, cfg *AgentConfig) (*AgentResult, error) {
 
 		// Process tool calls.
 		var toolResults []apiContentBlock
+		var finalSubmittedThisTurn bool
 		for _, tu := range toolUses {
 			switch tu.Name {
 			case "run_steps":
@@ -375,6 +412,13 @@ func RunAgent(ctx context.Context, cfg *AgentConfig) (*AgentResult, error) {
 				results, execErr := cfg.Browser.ExecuteSteps(ctx, cfg.BaseURL, steps)
 				lastStepResults = results
 				lastStepsJSON = input.Steps
+				// A call is the final test if the agent set the explicit `final`
+				// flag on the tool call OR wrote the legacy "// FINAL" marker.
+				if input.Final || turnIsFinal {
+					finalStepResults = results
+					finalStepsJSON = input.Steps
+					finalSubmittedThisTurn = true
+				}
 
 				// Build result summary.
 				var sb strings.Builder
@@ -386,6 +430,11 @@ func RunAgent(ctx context.Context, cfg *AgentConfig) (*AgentResult, error) {
 					sb.WriteString(fmt.Sprintf("Step %d [%s] %s (%s)", i, r.Action, status, r.Duration.Round(time.Millisecond)))
 					if r.Error != "" {
 						sb.WriteString(": " + r.Error)
+					}
+					if r.Output != "" {
+						// Surface eval results so the agent can read the value it
+						// probed for. Truncate to keep tool results compact.
+						sb.WriteString(" => " + truncateArg(r.Output, 200))
 					}
 					sb.WriteString("\n")
 				}
@@ -444,6 +493,19 @@ func RunAgent(ctx context.Context, cfg *AgentConfig) (*AgentResult, error) {
 			Content: toolResults,
 		})
 
+		// The agent submitted a final test (via the run_steps `final` flag or
+		// "// FINAL") this turn and every step passed: accept it immediately
+		// without burning another round trip waiting for an end-of-turn message.
+		if (turnIsFinal || finalSubmittedThisTurn) && finalStepsJSON != nil && allPassed(finalStepResults) {
+			return &AgentResult{
+				Success:      true,
+				StepsJSON:    finalStepsJSON,
+				StepResults:  finalStepResults,
+				InputTokens:  totalInputTokens,
+				OutputTokens: totalOutputTokens,
+			}, nil
+		}
+
 		// If genuine failure was detected, stop immediately.
 		if genuineFailure {
 			errMsg := lastError
@@ -460,13 +522,14 @@ func RunAgent(ctx context.Context, cfg *AgentConfig) (*AgentResult, error) {
 			}, nil
 		}
 
-		// If the last run_steps call passed all steps, we're done.
-		if lastStepsJSON != nil && allPassed(lastStepResults) {
+		// If the agent marked a complete (FINAL) test that passed all steps,
+		// we're done. Exploratory probes are never accepted as the saved test.
+		if finalStepsJSON != nil && allPassed(finalStepResults) {
 			if resp.StopReason == "end_turn" {
 				return &AgentResult{
 					Success:      true,
-					StepsJSON:    lastStepsJSON,
-					StepResults:  lastStepResults,
+					StepsJSON:    finalStepsJSON,
+					StepResults:  finalStepResults,
 					InputTokens:  totalInputTokens,
 					OutputTokens: totalOutputTokens,
 				}, nil
@@ -475,12 +538,12 @@ func RunAgent(ctx context.Context, cfg *AgentConfig) (*AgentResult, error) {
 		}
 	}
 
-	// Exhausted turns.
-	if lastStepsJSON != nil && allPassed(lastStepResults) {
+	// Exhausted turns: only accept a passing FINAL test.
+	if finalStepsJSON != nil && allPassed(finalStepResults) {
 		return &AgentResult{
 			Success:      true,
-			StepsJSON:    lastStepsJSON,
-			StepResults:  lastStepResults,
+			StepsJSON:    finalStepsJSON,
+			StepResults:  finalStepResults,
 			InputTokens:  totalInputTokens,
 			OutputTokens: totalOutputTokens,
 		}, nil

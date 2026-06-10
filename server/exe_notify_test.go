@@ -19,10 +19,14 @@ func newExeNotifyTestServer(t *testing.T) *Server {
 	database, cleanup := setupTestDB(t)
 	t.Cleanup(cleanup)
 	ps := loop.NewPredictableService()
+	// predictableOnly is false here: these tests exercise the exe.dev notify
+	// integration logic itself, which is intentionally disabled in
+	// predictable-only mode (see exeNotifyEnabled). A predictable LLM service is
+	// still fine to back the server.
 	return NewServer(database, &testLLMManager{service: ps},
 		claudetool.ToolSetConfig{EnableBrowser: false},
 		slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn})),
-		true, "predictable", "")
+		false, "predictable", "")
 }
 
 // withReflection swaps in a fake reflection client returning the given
@@ -56,6 +60,23 @@ func TestExeNotifyDisabledWhenNoIntegration(t *testing.T) {
 	s := newExeNotifyTestServer(t)
 	if s.exeNotifyEnabled(context.Background()) {
 		t.Fatal("expected exe_notify disabled without notify integration")
+	}
+}
+
+func TestExeNotifyDisabledInPredictableMode(t *testing.T) {
+	// Even with the notify integration present and the setting at its default,
+	// predictable-only mode (used by automated browser tests) must never enable
+	// exe.dev push notifications.
+	withReflection(t, `{"integrations":[{"name":"notify","type":"notify"}]}`)
+	database, cleanup := setupTestDB(t)
+	t.Cleanup(cleanup)
+	ps := loop.NewPredictableService()
+	s := NewServer(database, &testLLMManager{service: ps},
+		claudetool.ToolSetConfig{EnableBrowser: false},
+		slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn})),
+		true /* predictableOnly */, "predictable", "")
+	if s.exeNotifyEnabled(context.Background()) {
+		t.Fatal("expected exe_notify disabled in predictable-only mode")
 	}
 }
 

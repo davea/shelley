@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/emulation"
@@ -16,6 +17,7 @@ type Browser struct {
 	allocCancel context.CancelFunc
 	ctxCancel   context.CancelFunc
 	ctx         context.Context
+	closeOnce   sync.Once
 
 	// screenshotSink, when non-nil, is invoked after every executed step with
 	// the step index and a PNG screenshot of the page. Used to capture a
@@ -60,14 +62,39 @@ func NewBrowser(parentCtx context.Context) (*Browser, error) {
 	}, nil
 }
 
-// Close shuts down the browser.
+// Close shuts down the browser and waits for the Chrome process to exit.
+//
+// We use chromedp.Cancel (which closes the browser gracefully and blocks until
+// the process is gone) rather than just cancelling the contexts, so that two
+// Chrome instances never run concurrently during the handoff between one test's
+// browser tearing down and the next test's browser launching. On a small VM
+// that overlap causes CPU contention that can slow a freshly-launched browser's
+// first paint / first SSE frame enough to spuriously trip a wait step.
 func (b *Browser) Close() {
-	if b.ctxCancel != nil {
-		b.ctxCancel()
-	}
-	if b.allocCancel != nil {
-		b.allocCancel()
-	}
+	b.closeOnce.Do(func() {
+		if b.ctx != nil {
+			// Best-effort graceful close that waits for the process to exit.
+			// Bound it so a wedged browser can't hang the suite; fall back to
+			// the raw context cancels. chromedp.Cancel can panic ("close of
+			// closed channel") if the allocator already tore down, so recover.
+			done := make(chan struct{})
+			go func() {
+				defer func() { _ = recover() }()
+				defer close(done)
+				_ = chromedp.Cancel(b.ctx)
+			}()
+			select {
+			case <-done:
+			case <-time.After(10 * time.Second):
+			}
+		}
+		if b.ctxCancel != nil {
+			b.ctxCancel()
+		}
+		if b.allocCancel != nil {
+			b.allocCancel()
+		}
+	})
 }
 
 // Context returns the browser's chromedp context.
@@ -76,9 +103,18 @@ func (b *Browser) Context() context.Context {
 }
 
 // Screenshot captures a full-page PNG screenshot.
+//
+// The capture is bounded by a short timeout: it runs after every step
+// (including while the predictable agent is mid-turn on a long `delay:`), and a
+// busy/unresponsive renderer can otherwise leave CaptureScreenshot blocked
+// indefinitely on b.ctx, which has no deadline. A diagnostic screenshot is
+// never worth hanging the whole test, so we cap it and let callers ignore the
+// error.
 func (b *Browser) Screenshot(ctx context.Context) ([]byte, error) {
+	shotCtx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
+	defer cancel()
 	var buf []byte
-	if err := chromedp.Run(b.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+	if err := chromedp.Run(shotCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 		var err error
 		buf, err = page.CaptureScreenshot().
 			WithFormat(page.CaptureScreenshotFormatPng).
@@ -97,13 +133,14 @@ func (b *Browser) ExecuteSteps(ctx context.Context, baseURL string, steps []Step
 	var results []StepResult
 	for i, step := range steps {
 		start := time.Now()
-		err := b.executeStep(ctx, baseURL, step)
+		output, err := b.executeStep(ctx, baseURL, step)
 		dur := time.Since(start)
 		sr := StepResult{
 			Action:   step.Action,
 			Summary:  StepSummary(step),
 			Pass:     err == nil,
 			Duration: dur,
+			Output:   output,
 		}
 		if err != nil {
 			sr.Error = err.Error()
@@ -121,7 +158,26 @@ func (b *Browser) ExecuteSteps(ctx context.Context, baseURL string, steps []Step
 	return results, nil
 }
 
-func (b *Browser) executeStep(ctx context.Context, baseURL string, step Step) error {
+// executeStep runs a single DSL step. It returns an optional diagnostic output
+// string (currently only the eval action populates it, with the JS result) and
+// an error if the step failed. The eval result is surfaced so the generating
+// agent can read the value it probed for instead of flying blind.
+func (b *Browser) executeStep(ctx context.Context, baseURL string, step Step) (string, error) {
+	if step.Action == ActionEval {
+		var result interface{}
+		if err := chromedp.Run(b.ctx, chromedp.Evaluate(step.Expression, &result)); err != nil {
+			return "", err
+		}
+		got := fmt.Sprintf("%v", result)
+		if step.Expect != "" && got != step.Expect {
+			return got, fmt.Errorf("eval: expected %q, got %q", step.Expect, got)
+		}
+		return got, nil
+	}
+	return "", b.executeStepErr(ctx, baseURL, step)
+}
+
+func (b *Browser) executeStepErr(ctx context.Context, baseURL string, step Step) error {
 	timeout := parseTimeout(step.Timeout, 10*time.Second)
 
 	switch step.Action {
@@ -175,19 +231,6 @@ func (b *Browser) executeStep(ctx context.Context, baseURL string, step Step) er
 		// Just take a screenshot, ignore the bytes (used for side effects in agent)
 		_, err := b.Screenshot(ctx)
 		return err
-
-	case ActionEval:
-		var result interface{}
-		if err := chromedp.Run(b.ctx, chromedp.Evaluate(step.Expression, &result)); err != nil {
-			return err
-		}
-		if step.Expect != "" {
-			got := fmt.Sprintf("%v", result)
-			if got != step.Expect {
-				return fmt.Errorf("eval: expected %q, got %q", step.Expect, got)
-			}
-		}
-		return nil
 
 	case ActionAssertVisible:
 		var visible bool
@@ -253,6 +296,20 @@ func (b *Browser) executeStep(ctx context.Context, baseURL string, step Step) er
 			return fmt.Errorf("assert_attribute %q: expected %q, got %q", step.Attribute, step.Value, got)
 		}
 		return nil
+
+	case ActionWaitURL:
+		// Poll the current location until it matches. Useful for SPA route
+		// changes (e.g. /new -> /c/<slug>) that happen asynchronously after a
+		// click and can't be caught by the instantaneous assert_url.
+		if step.Value != "" {
+			return b.pollJS(ctx, timeout, fmt.Sprintf(
+				`window.location.href === %q || (window.location.pathname + window.location.search + window.location.hash) === %q`,
+				step.Value, step.Value,
+			))
+		}
+		return b.pollJS(ctx, timeout, fmt.Sprintf(
+			`window.location.href.includes(%q)`, step.Text,
+		))
 
 	case ActionAssertURL:
 		var got string

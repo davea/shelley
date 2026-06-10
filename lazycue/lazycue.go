@@ -82,6 +82,7 @@ type StepResult struct {
 	Error      string        `json:"error,omitempty"`
 	Duration   time.Duration `json:"duration"`
 	Screenshot string        `json:"screenshot,omitempty"` // path to PNG captured after this step (if enabled)
+	Output     string        `json:"output,omitempty"`     // diagnostic output (e.g. the value returned by an eval step)
 }
 
 // Run executes a single lazy test described by the given plain-English description.
@@ -148,6 +149,30 @@ func Run(ctx context.Context, opts Options, description string) (*TestResult, er
 					break
 				}
 			}
+			// A cached test can fail spuriously under load (e.g. the app is slow
+			// to deliver the first message and an element doesn't appear within a
+			// wait timeout). Retry once with a fresh browser before paying for an
+			// LLM heal — a genuine app/test mismatch will fail both times.
+			if !allPassed && ctx.Err() == nil {
+				logf("[lazycue] cached test failed; retrying once with a fresh browser")
+				browser.Close()
+				if rb, rErr := NewBrowser(ctx); rErr == nil {
+					browser = rb
+					if collector != nil {
+						browser.SetScreenshotSink(collector.sink())
+					}
+					results, execErr = browser.ExecuteSteps(ctx, opts.BaseURL, steps)
+					allPassed = execErr == nil
+					for _, r := range results {
+						if !r.Pass {
+							allPassed = false
+							break
+						}
+					}
+				} else {
+					return nil, fmt.Errorf("relaunch browser for retry: %w", rErr)
+				}
+			}
 			if allPassed {
 				logf("[lazycue] cached test passed")
 				if collector != nil {
@@ -198,9 +223,22 @@ func Run(ctx context.Context, opts Options, description string) (*TestResult, er
 			newVersion := version + 1
 			cost := float64(agentResult.InputTokens)*3.0/1_000_000 + float64(agentResult.OutputTokens)*15.0/1_000_000
 			if agentResult.Success {
-				meta := buildCacheMetadata(opts, agentResult, "healed")
-				if saveErr := SaveCachedTest(opts.CacheDir, description, agentResult.StepsJSON, newVersion, meta); saveErr != nil {
-					logf("[lazycue] warning: save cached test: %v", saveErr)
+				// A cached test can fail spuriously under heavy CI load even after
+				// the in-process retry (e.g. a 60s wait that just barely times out
+				// when many tests run in parallel). The heal agent then often
+				// concludes the steps were already correct and re-emits the SAME
+				// steps. Rewriting the cache in that case only churns the tracked
+				// JSON (bumping the version, refreshing metadata) for no behavioral
+				// change, which breaks the queue's commit-back step. Only persist a
+				// heal when the steps actually differ from what's already cached.
+				if sameSteps(cachedTest.Steps, agentResult.StepsJSON) {
+					logf("[lazycue] healed steps identical to cache; not rewriting (transient flake)")
+					newVersion = version
+				} else {
+					meta := buildCacheMetadata(opts, agentResult, "healed")
+					if saveErr := SaveCachedTest(opts.CacheDir, description, agentResult.StepsJSON, newVersion, meta); saveErr != nil {
+						logf("[lazycue] warning: save cached test: %v", saveErr)
+					}
 				}
 			}
 
@@ -348,6 +386,31 @@ func (h *Harness) Test(t testing.TB, description string) {
 	if !result.Pass {
 		t.Fatalf("lazycue: test failed: %s", result.Error)
 	}
+}
+
+// sameSteps reports whether two raw step JSON blobs describe the same sequence
+// of DSL steps. It compares the parsed steps (not the raw bytes) so that
+// differences in whitespace or key ordering don't count as a change. Used to
+// avoid rewriting a cache file when a heal re-emits the already-cached steps
+// after a transient flake.
+func sameSteps(a, b []byte) bool {
+	sa, err := ParseSteps(a)
+	if err != nil {
+		return false
+	}
+	sb, err := ParseSteps(b)
+	if err != nil {
+		return false
+	}
+	if len(sa) != len(sb) {
+		return false
+	}
+	for i := range sa {
+		if sa[i] != sb[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func buildCacheMetadata(opts Options, agentResult *AgentResult, mode string) *CacheMetadata {
