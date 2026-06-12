@@ -3465,7 +3465,11 @@ function ChatInterface({
           onDraftSendStarted={handleDraftSendStarted}
           onDraftCleared={handleDraftCleared}
           initialRows={conversationId && !currentConversation?.is_draft ? 1 : 3}
-          statusSlot={conversationId && isMobile ? renderStatusContent() : undefined}
+          statusSlot={
+            conversationId && !currentConversation?.is_draft && isMobile
+              ? renderStatusContent()
+              : undefined
+          }
         />
       )}
 

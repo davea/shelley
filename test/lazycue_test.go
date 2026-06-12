@@ -96,6 +96,16 @@ func TestNewPageSendEnables(t *testing.T) {
 	lazyTest(t, `Navigate to /new. Type the text "hello world" into the message input (data-testid "message-input"). After typing, the send button (data-testid "send-button") should become enabled.`)
 }
 
+// Regression test for the mobile "double UI" bug: on the Pixel 5 mobile
+// viewport the harness uses, typing into the composer promotes the new
+// conversation into a draft (the URL gains a "/c/" segment) while the
+// model/effort/dir status block stays present. The block must render exactly
+// once. A bug caused it to render twice for drafts on mobile — once in the
+// standalone status bar and again inline in the composer's status slot.
+func TestNewPageDraftStatusBarNotDuplicated(t *testing.T) {
+	lazyTest(t, `Navigate to /new. There should be exactly one new-conversation status block (selector ".status-bar-new-conversation" should match exactly 1 element). Type "hello draft" into the message input (data-testid "message-input"). Typing promotes the conversation to a draft, so wait for the URL to contain "/c/". After that, add a short sleep (about 1 second) to let the UI settle, then confirm the new-conversation status block is NOT duplicated: selector ".status-bar-new-conversation" should still match exactly 1 element.`)
+}
+
 // --- Conversation tests (ported from ui/e2e/conversation.spec.ts) ---
 //
 // These drive the predictable LLM service through the real UI. The predictable
