@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -63,6 +64,19 @@ const agentBudget = 5 * time.Minute
 // no timeout, so without this a hung request could block a heal indefinitely
 // (until agentBudget, or formerly the package deadline).
 const anthropicCallTimeout = 90 * time.Second
+
+// anthropicMaxAttempts is the number of times callAnthropic will try a single
+// LLM request before giving up. Transient failures (network errors, per-request
+// timeouts, 429s, and 5xx responses) are common against the live Anthropic API
+// in CI and would otherwise fail an entire heal — and thus a queue build — on a
+// single hiccup. Retries are bounded by the surrounding agentBudget context.
+const anthropicMaxAttempts = 3
+
+// anthropicRetryBackoff is the base delay between retry attempts; it grows
+// linearly with the attempt number (attempt*base) and is capped well under
+// agentBudget so a retry chain can never exhaust it on sleeping alone. It is a
+// var (not a const) so tests can shrink it to avoid real sleeps.
+var anthropicRetryBackoff = 2 * time.Second
 
 // --- Anthropic API types ---
 
@@ -709,7 +723,75 @@ func executeGitCommand(repoRoot, command string) string {
 	return out
 }
 
+// callAnthropic issues an LLM request, retrying transient failures (network
+// errors, per-request timeouts, 429, and 5xx) up to anthropicMaxAttempts times
+// with a linear backoff. Non-retryable failures (e.g. 4xx other than 429, or a
+// cancelled parent context) return immediately. All sleeping respects ctx so
+// the surrounding agent budget and test cancellation still win.
 func callAnthropic(ctx context.Context, cfg *AgentConfig, systemPrompt string, messages []apiMessage, tools []apiTool) (*apiResponse, error) {
+	var lastErr error
+	for attempt := 1; attempt <= anthropicMaxAttempts; attempt++ {
+		resp, err := callAnthropicOnce(ctx, cfg, systemPrompt, messages, tools)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		// Stop early if the parent context is done (agent budget exhausted or
+		// the test was cancelled) or the error isn't worth retrying.
+		if ctx.Err() != nil || !isRetryableAnthropicErr(err) || attempt == anthropicMaxAttempts {
+			break
+		}
+		sleep := time.Duration(attempt) * anthropicRetryBackoff
+		if cfg.Verbose {
+			log.Printf("[agent] anthropic request failed (attempt %d/%d), retrying in %s: %v", attempt, anthropicMaxAttempts, sleep, err)
+		}
+		select {
+		case <-time.After(sleep):
+		case <-ctx.Done():
+			return nil, fmt.Errorf("anthropic API call: %w (last error: %v)", ctx.Err(), lastErr)
+		}
+	}
+	return nil, lastErr
+}
+
+// isRetryableAnthropicErr reports whether an error from callAnthropicOnce is
+// worth retrying. Transport errors (DNS, connection reset, EOF) and per-request
+// deadline timeouts are transient, as are HTTP 429 and 5xx responses. A
+// cancelled parent context is never retryable.
+func isRetryableAnthropicErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// A cancelled or expired parent context should not be retried; only the
+	// per-request timeout (a fresh deadline.Exceeded with the parent still live)
+	// is handled by the ctx.Err() check in the caller.
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var apiErr *anthropicStatusError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusTooManyRequests || apiErr.StatusCode >= 500
+	}
+	// Default: treat unknown errors (transport-level) as retryable, since the
+	// dominant CI failure mode is a flaky network to api.anthropic.com.
+	return true
+}
+
+// anthropicStatusError carries a non-200 HTTP status so the retry logic can
+// distinguish retryable (429, 5xx) from terminal (other 4xx) responses.
+type anthropicStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *anthropicStatusError) Error() string {
+	return fmt.Sprintf("API returned %d: %s", e.StatusCode, e.Body)
+}
+
+func callAnthropicOnce(ctx context.Context, cfg *AgentConfig, systemPrompt string, messages []apiMessage, tools []apiTool) (*apiResponse, error) {
 	reqBody := apiRequest{
 		Model:     cfg.Model,
 		MaxTokens: 8192,
@@ -750,7 +832,7 @@ func callAnthropic(ctx context.Context, cfg *AgentConfig, systemPrompt string, m
 	}
 
 	if httpResp.StatusCode != 200 {
-		return nil, fmt.Errorf("API returned %d: %s", httpResp.StatusCode, string(respBody))
+		return nil, &anthropicStatusError{StatusCode: httpResp.StatusCode, Body: string(respBody)}
 	}
 
 	var resp apiResponse
