@@ -106,7 +106,11 @@
     <div v-if="isExpanded" class="patch-tool-details">
       <div v-if="isComplete && !hasError && hasDiff" class="patch-tool-section">
         <div class="patch-tool-diffs-container">
-          <div v-if="diffHtml" v-html="diffHtml" />
+          <!-- The diff HTML embeds its own <style> blocks; render it inside a
+               shadow root (via ShadowHtml) so those styles stay scoped and
+               don't leak the @pierre/diffs `pre, code { display: block }` reset
+               into the page. Mirrors React's declarative-shadow-DOM wrapper. -->
+          <ShadowHtml v-if="diffHtml" :html="diffHtml" />
           <pre v-else-if="diffError && rawDiff" class="patch-tool-raw-diff">{{ rawDiff }}</pre>
         </div>
       </div>
@@ -128,6 +132,7 @@ import type { LLMContent } from "../../../types";
 import type { FileContents, SupportedLanguages, ThemeTypes, ThemesType } from "@pierre/diffs";
 import { preloadPatchDiff, preloadDiffHTML } from "@pierre/diffs/ssr";
 import { isDarkModeActive } from "../../../services/theme";
+import ShadowHtml from "../ShadowHtml.vue";
 
 // LocalStorage key for side-by-side preference
 const STORAGE_KEY_SIDE_BY_SIDE = "shelley-diff-side-by-side";
