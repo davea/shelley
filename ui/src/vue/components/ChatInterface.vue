@@ -1259,10 +1259,18 @@ async function loadMessages(focusedId: string) {
     if (props.onConversationUpdate && cached.conversation) {
       props.onConversationUpdate(cached.conversation);
     }
-    loadingFlag = false;
-    loading.value = false;
-    showLoadingProgressUI.value = false;
-    loadingProgress.value = null;
+    // Only drop the loading state once we actually have messages to show.
+    // A cached record can exist with an empty messages array (e.g. hydrated
+    // from an empty IDB row before the REST backfill lands); flipping loading
+    // off here would render the "Send a message to start the conversation"
+    // empty-state over a conversation that has history. Keep the spinner up
+    // until either messages arrive or the REST load below completes.
+    if (cached.messages.length > 0) {
+      loadingFlag = false;
+      loading.value = false;
+      showLoadingProgressUI.value = false;
+      loadingProgress.value = null;
+    }
   }
 
   if (
@@ -1270,6 +1278,13 @@ async function loadMessages(focusedId: string) {
     cached.hasFullHistory &&
     (cached.maxSequenceIdKnown <= 0 || cached.maxSequenceId >= cached.maxSequenceIdKnown)
   ) {
+    // We have the full history (even if it's legitimately empty). Clear the
+    // loading state so a genuinely empty conversation shows its empty-state
+    // rather than an indefinite spinner.
+    loadingFlag = false;
+    loading.value = false;
+    showLoadingProgressUI.value = false;
+    loadingProgress.value = null;
     return;
   }
 
@@ -1972,6 +1987,22 @@ watch(
     unsubTransient = messageStore.subscribeTransient(focusedId, () =>
       syncTransientFromStore(focusedId),
     );
+
+    // Decide the loading state SYNCHRONOUSLY before kicking off the async
+    // load. Otherwise `loading` stays false (its value from the previous
+    // conversation) while loadMessages awaits messageStore.hydrate(), so the
+    // template renders the "Send a message to start the conversation"
+    // empty-state over a conversation that clearly has history — a multi-second
+    // flash on cold loads. If we already have messages in memory we can show
+    // them immediately (no spinner); otherwise show the spinner until
+    // loadMessages resolves, so the empty-state only appears for genuinely
+    // empty conversations.
+    const inMemory = messageStore.peek(focusedId);
+    if (inMemory && inMemory.messages.length > 0) {
+      loading.value = false;
+    } else {
+      loading.value = true;
+    }
     void loadMessages(focusedId);
   },
   { immediate: true },

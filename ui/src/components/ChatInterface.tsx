@@ -1448,6 +1448,17 @@ function ChatInterface({
     const unsubStore = messageStore.subscribe(focusedId, sync);
     const unsubTransient = messageStore.subscribeTransient(focusedId, syncTransient);
 
+    // Decide the loading state synchronously before the async loadMessages
+    // call. Otherwise `loading` keeps its previous value while loadMessages
+    // awaits messageStore.hydrate(), so renderMessages() briefly shows the
+    // "Send a message to start the conversation" empty-state over a
+    // conversation that has history. If we already have messages in memory we
+    // show them immediately; otherwise show the spinner until loadMessages
+    // resolves, so the empty-state only appears for genuinely empty
+    // conversations.
+    const inMemory = messageStore.peek(focusedId);
+    setLoading(!(inMemory && inMemory.messages.length > 0));
+
     loadMessages(focusedId);
 
     return () => {
@@ -1636,10 +1647,18 @@ function ChatInterface({
         if (onConversationUpdate && cached.conversation) {
           onConversationUpdate(cached.conversation);
         }
-        loadingRef.current = false;
-        setLoading(false);
-        setShowLoadingProgressUI(false);
-        setLoadingProgress(null);
+        // Only drop the loading state once we actually have messages to show.
+        // A cached record can exist with an empty messages array (e.g.
+        // hydrated from an empty IDB row before the REST backfill lands);
+        // flipping loading off here would render the empty-state over a
+        // conversation that has history. Keep the spinner up until messages
+        // arrive or the REST load below completes.
+        if (cached.messages.length > 0) {
+          loadingRef.current = false;
+          setLoading(false);
+          setShowLoadingProgressUI(false);
+          setLoadingProgress(null);
+        }
       }
 
       if (
@@ -1647,6 +1666,13 @@ function ChatInterface({
         cached.hasFullHistory &&
         (cached.maxSequenceIdKnown <= 0 || cached.maxSequenceId >= cached.maxSequenceIdKnown)
       ) {
+        // We have the full history (even if it's legitimately empty). Clear the
+        // loading state so a genuinely empty conversation shows its empty-state
+        // rather than an indefinite spinner.
+        loadingRef.current = false;
+        setLoading(false);
+        setShowLoadingProgressUI(false);
+        setLoadingProgress(null);
         return;
       }
 

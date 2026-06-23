@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
-import type { SupportedLanguages } from "@pierre/diffs";
+import { diffsPoolOptions, diffsHighlighterOptions } from "./services/diffsWorkerPool";
 import ChatInterface from "./components/ChatInterface";
 import type { EphemeralTerminal } from "./components/TerminalPanel";
 import ConversationDrawer from "./components/ConversationDrawer";
@@ -16,44 +16,6 @@ import { applyConversationListPatch } from "./services/conversationListStream";
 import { connectGlobalStream, type StreamStatus } from "./services/globalStream";
 import { handleNotificationEvent } from "./services/notifications";
 import { useI18n } from "./i18n";
-
-// Worker pool configuration for @pierre/diffs syntax highlighting
-// Workers run tokenization off the main thread for better performance with large diffs
-const diffsPoolOptions = {
-  workerFactory: () => new Worker("/diffs-worker.js"),
-};
-
-// Languages to preload in the highlighter (matches PatchTool.tsx langMap)
-const diffsHighlighterOptions = {
-  langs: [
-    "typescript",
-    "tsx",
-    "javascript",
-    "jsx",
-    "python",
-    "ruby",
-    "go",
-    "rust",
-    "java",
-    "c",
-    "cpp",
-    "csharp",
-    "php",
-    "swift",
-    "kotlin",
-    "scala",
-    "bash",
-    "sql",
-    "html",
-    "css",
-    "scss",
-    "json",
-    "xml",
-    "yaml",
-    "toml",
-    "markdown",
-  ] as SupportedLanguages[],
-};
 
 // Check if a slug is a generated ID (format: cXXXX where X is alphanumeric)
 function isGeneratedId(slug: string | null): boolean {

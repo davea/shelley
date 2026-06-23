@@ -1,15 +1,18 @@
-<!-- Vue port of components/PatchTool.tsx. Uses @pierre/diffs SSR module
-     (preloadPatchDiff / preloadDiffHTML) to render syntax-highlighted diffs
-     as HTML strings, avoiding the React-only component bindings.
+<!-- Vue port of components/PatchTool.tsx. Drives the framework-agnostic
+     @pierre/diffs FileDiff renderer (via the useFileDiffInstance composable)
+     against the shared syntax-highlighting worker pool, matching React's
+     <PatchDiff>/<MultiFileDiff>.
 
-     Approach: The @pierre/diffs/ssr module provides preloadPatchDiff (for
-     unified diff strings) and preloadDiffHTML (for oldFile/newFile snapshots)
-     which generate complete HTML+CSS strings for the diff. We render these
-     via v-html. No WorkerPoolContext needed — the SSR codepath uses the
-     DiffHunksRenderer directly (synchronous shiki highlighting via WASM).
+     Approach: getSingularPatch (unified diff strings) / parseDiffFromFile
+     (old/new file snapshots) parse the diff into FileDiffMetadata; the
+     composable creates a <diffs-container> custom element and hydrates a
+     FileDiff instance with the worker pool, so shiki/TextMate tokenization runs
+     off the main thread. The previous SSR path (preloadPatchDiff /
+     preloadDiffHTML) ran synchronous WASM highlighting on the main thread,
+     which froze the UI for seconds in conversations with many diffs.
 
-     Error boundary: Instead of a React class component, we use a try/catch
-     around the async render and fall back to a raw <pre> on failure.
+     Error handling: parsing failures set diffError and fall back to a raw
+     <pre>, replacing the React class-based error boundary.
 
      Preserves: .patch-tool, .patch-tool-details, .patch-tool-header,
      .patch-tool-toggle, .patch-tool-emoji, data-testid tool-call-completed,
@@ -106,12 +109,13 @@
     <div v-if="isExpanded" class="patch-tool-details">
       <div v-if="isComplete && !hasError && hasDiff" class="patch-tool-section">
         <div class="patch-tool-diffs-container">
-          <!-- The diff HTML embeds its own <style> blocks; render it inside a
-               shadow root (via ShadowHtml) so those styles stay scoped and
-               don't leak the @pierre/diffs `pre, code { display: block }` reset
-               into the page. Mirrors React's declarative-shadow-DOM wrapper. -->
-          <ShadowHtml v-if="diffHtml" :html="diffHtml" />
-          <pre v-else-if="diffError && rawDiff" class="patch-tool-raw-diff">{{ rawDiff }}</pre>
+          <!-- The FileDiff renderer (driven by useFileDiffInstance) creates its
+               own <diffs-container> custom element here and renders into its
+               shadow root, so the diff's scoped <style> blocks never leak into
+               the page. Highlighting runs off the main thread via the shared
+               @pierre/diffs worker pool, matching React's <PatchDiff>. -->
+          <div ref="diffHostEl" class="patch-tool-diff-host"></div>
+          <pre v-if="diffError && rawDiff" class="patch-tool-raw-diff">{{ rawDiff }}</pre>
         </div>
       </div>
 
@@ -127,12 +131,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from "vue";
+import { computed, ref, onMounted, onUnmounted } from "vue";
 import type { LLMContent } from "../../../types";
-import type { FileContents, SupportedLanguages, ThemeTypes, ThemesType } from "@pierre/diffs";
-import { preloadPatchDiff, preloadDiffHTML } from "@pierre/diffs/ssr";
+import type {
+  FileContents,
+  SupportedLanguages,
+  ThemeTypes,
+  ThemesType,
+  FileDiffMetadata,
+  FileDiffOptions,
+} from "@pierre/diffs";
+import { getSingularPatch, parseDiffFromFile } from "@pierre/diffs";
 import { isDarkModeActive } from "../../../services/theme";
-import ShadowHtml from "../ShadowHtml.vue";
+import { useFileDiffInstance } from "../../composables/fileDiffInstance";
 
 // LocalStorage key for side-by-side preference
 const STORAGE_KEY_SIDE_BY_SIDE = "shelley-diff-side-by-side";
@@ -236,8 +247,8 @@ const props = defineProps<{
 const isExpanded = ref(!props.hasError);
 const isMobile = ref(window.innerWidth < 768);
 const sideBySide = ref(!isMobile.value && getSideBySidePreference());
-const diffHtml = ref<string | null>(null);
-const diffError = ref(false);
+// Host element for the FileDiff renderer's <diffs-container>.
+const diffHostEl = ref<HTMLElement | null>(null);
 
 // Reactive theme tracking (mirrors the React useThemeType hook)
 const themeType = ref<ThemeTypes>(isDarkModeActive() ? "dark" : "light");
@@ -328,56 +339,53 @@ const rawDiff = computed(() => {
   return displayData.value.diff ?? "";
 });
 
-// Render diff HTML using @pierre/diffs SSR
-async function renderDiff(): Promise<string | null> {
+// FileDiff render options derived from the current side-by-side + theme state.
+const diffOptions = computed<FileDiffOptions<undefined>>(() => ({
+  diffStyle: sideBySide.value ? "split" : "unified",
+  theme: DIFF_THEMES,
+  themeType: themeType.value,
+  disableFileHeader: true,
+}));
+
+// Parse the diff into FileDiff metadata. getSingularPatch handles unified diff
+// strings; parseDiffFromFile handles legacy old/new file-content snapshots
+// (immune to content that looks like diff headers, mirroring React's
+// MultiFileDiff path). Returns null when there's nothing renderable or parsing
+// fails (the template falls back to the raw <pre>).
+const fileDiff = computed<FileDiffMetadata | null>(() => {
   const dd = displayData.value;
   if (!dd) return null;
-
-  const diffStyle = sideBySide.value ? ("split" as const) : ("unified" as const);
-  const options = {
-    diffStyle,
-    theme: DIFF_THEMES,
-    themeType: themeType.value,
-    disableFileHeader: true,
-  };
-
   try {
-    // Legacy payloads with full file snapshots
     if (dd.oldContent != null && dd.newContent != null) {
       const lang = getLanguageFromPath(dd.path);
       const oldFile: FileContents = { name: dd.path, contents: dd.oldContent, lang };
       const newFile: FileContents = { name: dd.path, contents: dd.newContent, lang };
-      return await preloadDiffHTML({ oldFile, newFile, options });
+      return parseDiffFromFile(oldFile, newFile);
     }
-
-    // New payloads with unified diff string
     if (dd.diff) {
-      const result = await preloadPatchDiff({ patch: dd.diff, options });
-      return result.prerenderedHTML;
+      return getSingularPatch(dd.diff);
     }
   } catch (e) {
-    console.warn("PatchTool diff render error:", e);
-    throw e;
+    console.warn("PatchTool diff parse error:", e);
   }
-
   return null;
-}
+});
 
-// Watch all inputs that affect diff rendering and re-render
-watch(
-  [displayData, sideBySide, themeType, isExpanded, isComplete],
-  async () => {
-    if (!isExpanded.value || !isComplete.value || props.hasError || !hasDiff.value) {
-      return;
-    }
-    try {
-      diffError.value = false;
-      diffHtml.value = await renderDiff();
-    } catch {
-      diffError.value = true;
-      diffHtml.value = null;
-    }
-  },
-  { immediate: true },
-);
+// True when we have a diff to show but couldn't parse it into renderable
+// metadata — the template then falls back to the raw <pre>. Derived (no side
+// effects) so it stays correct as inputs change.
+const diffError = computed(() => hasDiff.value && fileDiff.value == null);
+
+// Drive the FileDiff renderer (off-main-thread tokenization via the shared
+// worker pool) whenever the parsed diff + options are ready and the section is
+// visible. Returns null inputs (teardown) when the section is collapsed/errored
+// so we don't render hidden diffs.
+useFileDiffInstance(diffHostEl, () => {
+  if (!isExpanded.value || !isComplete.value || props.hasError || !hasDiff.value) {
+    return null;
+  }
+  const fd = fileDiff.value;
+  if (!fd) return null;
+  return { fileDiff: fd, options: diffOptions.value };
+});
 </script>
