@@ -26,6 +26,7 @@ import ConversationTOC from "./ConversationTOC";
 import MessageTimestamp, { formatDay } from "./MessageTimestamp";
 import MessageInput from "./MessageInput";
 import { useDraftAutosave } from "../hooks/useDraftAutosave";
+import { decideDraftSync, NO_SESSION } from "../utils/draftSync";
 import DiffViewer from "./DiffViewer";
 import { focusMessageInputIfUnfocused } from "../utils/focusMessageInput";
 import MessageSelectionToolbar from "./MessageSelectionToolbar";
@@ -2966,21 +2967,26 @@ function ChatInterface({
     if (lazyDraftId && conversationId !== lazyDraftId) setLazyDraftId(null);
   }, [conversationId, lazyDraftId]);
 
-  // Initialize from the conversation row when switching into a draft.
+  // Seed the composer's draft text from the conversation row, but ONLY when
+  // entering a conversation (a genuine session change) -- never on the autosave
+  // echoes for the same draft. The server bumps updated_at on each PUT /draft,
+  // which re-emits the conversation row (including its `draft` text) over the
+  // list-patch stream. Over a high-latency link that echo is stale relative to
+  // the live textarea, so re-adopting it would delete the characters typed
+  // since the PUT was issued ("the box deletes the text I am typing"). Local
+  // edits own the draft for the duration of an editing session; decideDraftSync
+  // encapsulates that rule (including the lazy-create snapshot special case).
+  const draftInitForRef = useRef<string | null | typeof NO_SESSION>(NO_SESSION);
   useEffect(() => {
-    // Skip our own lazily-created draft: its row arrives via the patch
-    // stream carrying the snapshot saved at create time, which is stale
-    // relative to the live textarea. Clobbering draftValue here would
-    // drop keystrokes typed after the create fired (and reset the caret).
-    if (conversationId === lazyDraftId && lazyDraftId !== null) return;
-    if (currentConversation?.is_draft) {
-      setDraftValue(currentConversation.draft || "");
-    } else if (!conversationId) {
-      setDraftValue("");
-    }
-    // Switching into a non-draft conversation leaves draftValue stale,
-    // but the MessageInput is keyed by conversationId so it remounts and
-    // re-syncs from this state on the next render anyway.
+    const decision = decideDraftSync({
+      conversationId,
+      lazyDraftId,
+      isDraft: !!currentConversation?.is_draft,
+      serverDraft: currentConversation?.draft || "",
+      initializedFor: draftInitForRef.current,
+    });
+    draftInitForRef.current = decision.initializedFor;
+    if (decision.adopt) setDraftValue(decision.value);
   }, [conversationId, currentConversation?.is_draft, currentConversation?.draft, lazyDraftId]);
 
   const draftConvIdRef = useRef<string | null>(conversationId);
