@@ -440,7 +440,10 @@ function App() {
       // server-side ordering.
       for (const conv of next) {
         messageStore.setMaxSequenceIdKnown(conv.conversation_id, conv.max_sequence_id);
-        messageStore.setAgentWorking(conv.conversation_id, conv.agent_working);
+        // Seed from `working` — the list's authoritative working flag, which
+        // the drawer indicator also renders — so the status bar and the
+        // conversation list (the source of truth) never disagree.
+        messageStore.setAgentWorking(conv.conversation_id, conv.working);
       }
       syncConversations(() => next);
       conversationListHashRef.current = event.new_hash;
