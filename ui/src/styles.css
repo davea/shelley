@@ -5807,6 +5807,9 @@ svg {
 .diff-viewer-content:not(.diff-viewer-content-sidebar) > .diff-viewer-main {
   height: 100%;
   width: 100%;
+  /* Make .diff-viewer-main the offset parent in both layouts so the floating
+     comment prompt's getBoundingClientRect math matches its positioning. */
+  position: relative;
 }
 
 .diff-viewer-sidebar {
@@ -6310,6 +6313,26 @@ svg {
   font-weight: 500;
 }
 
+/* Floating "add comment" prompt next to a text selection in comment mode */
+.diff-viewer-comment-prompt {
+  position: absolute;
+  z-index: 1002;
+  padding: 0.25rem 0.6rem;
+  background: var(--blue-bg);
+  color: var(--blue-text);
+  border: 1px solid var(--border-color);
+  border-radius: 1rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.diff-viewer-comment-prompt:hover {
+  filter: brightness(0.96);
+}
+
 /* Comment dialog */
 .diff-viewer-comment-dialog {
   position: absolute;
@@ -6326,9 +6349,29 @@ svg {
   z-index: 1001;
 }
 
+/* Once dragged, the dialog uses explicit top/left, so drop the centering transform. */
+.diff-viewer-comment-dialog.is-dragged {
+  transform: none;
+}
+
 .diff-viewer-comment-dialog h4 {
   margin: 0 0 0.75rem 0;
   color: var(--text-primary);
+}
+
+/* Draggable header for the comment dialog. */
+.diff-viewer-comment-dialog-handle {
+  cursor: move;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.diff-viewer-comment-dialog-handle::before {
+  content: "\2630";
+  opacity: 0.4;
+  font-size: 0.85em;
 }
 
 .diff-viewer-selected-text {

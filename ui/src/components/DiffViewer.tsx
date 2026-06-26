@@ -117,7 +117,29 @@ function DiffViewer({
     startLine?: number;
     endLine?: number;
   } | null>(null);
+  // Floating "add comment" prompt shown after a text selection in comment mode.
+  // Lets the user keep their selection (rather than the dialog popping up
+  // immediately on click and interfering with selecting text).
+  const [commentPrompt, setCommentPrompt] = useState<{
+    top: number;
+    left: number;
+    startLine: number;
+    endLine: number;
+    selectedText: string;
+  } | null>(null);
   const [commentText, setCommentText] = useState("");
+  // Optional drag position for the comment dialog. Null => CSS-centered default;
+  // otherwise an explicit top/left in px relative to the viewer.
+  const [commentDialogPos, setCommentDialogPos] = useState<{ top: number; left: number } | null>(
+    null,
+  );
+  const commentDialogRef = useRef<HTMLDivElement>(null);
+  const dialogDragRef = useRef<{
+    startX: number;
+    startY: number;
+    baseTop: number;
+    baseLeft: number;
+  } | null>(null);
   const [mode, setMode] = useState<ViewMode>("comment");
   const [commitMessages, setCommitMessages] = useState<GitCommitMessage[]>([]);
   // Mirror of commitMessages for reading inside the model-swap effect
@@ -185,20 +207,32 @@ function DiffViewer({
   const monacoRef = useRef<typeof Monaco | null>(null);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const modeRef = useRef<ViewMode>(mode);
+  // Mirror of commentText so the mousedown handler (installed once) can read the
+  // latest value when deciding whether to hide an empty dialog.
+  const commentTextRef = useRef(commentText);
+  commentTextRef.current = commentText;
   const hoverDecorationsRef = useRef<string[]>([]);
   const touchScrolledRef = useRef(false);
   const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  // Desktop: where a comment-mode mousedown started, to distinguish click vs drag.
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
 
   // Keep modeRef in sync with mode state and update editor options
   useEffect(() => {
     modeRef.current = mode;
+    // Switching out of comment mode (or files) clears any pending selection prompt.
+    setCommentPrompt(null);
     // Update editor readOnly state when mode changes
     // (but not for commit message files - those have their own editability logic)
     if (editorRef.current && selectedFile && !isCommitMessageFile(selectedFile)) {
       const isWorkingView = selectedDiff === "working" || selectedTo === "working";
       const readOnly = mode === "comment" || !isWorkingView;
-      editorRef.current.updateOptions({ readOnly });
-      editorRef.current.getModifiedEditor().updateOptions({ readOnly });
+      // Only allow drag-and-drop of selected text in edit mode. In comment mode
+      // (including editable commit messages) selecting text must not move it.
+      const dragAndDrop = mode === "edit";
+      editorRef.current.updateOptions({ readOnly, dragAndDrop });
+      editorRef.current.getModifiedEditor().updateOptions({ readOnly, dragAndDrop });
     }
   }, [mode, selectedFile, selectedDiff, selectedTo]);
 
@@ -214,6 +248,8 @@ function DiffViewer({
   // Focus comment input when dialog opens
   useEffect(() => {
     if (showCommentDialog && commentInputRef.current) {
+      // Each freshly opened dialog starts from the centered default position.
+      setCommentDialogPos(null);
       // Small delay to ensure the dialog is rendered
       setTimeout(() => {
         commentInputRef.current?.focus();
@@ -266,6 +302,7 @@ function DiffViewer({
       setDiffs([]);
       setError(null);
       setShowCommentDialog(null);
+      setCommentPrompt(null);
       setCommentText("");
       setCommitMessages([]);
       setAmendStatus("idle");
@@ -323,6 +360,7 @@ function DiffViewer({
     const diffEditor = monaco.editor.createDiffEditor(editorContainerRef.current, {
       theme: isDarkModeActive() ? "vs-dark" : "vs",
       readOnly: true,
+      dragAndDrop: false,
       originalEditable: false,
       automaticLayout: true,
       renderSideBySide: !initMobile,
@@ -383,16 +421,71 @@ function DiffViewer({
       });
     };
 
-    // Desktop: open comment dialog on mousedown (immediate response).
+    // A click counts as a "comment on this line" gesture if it lands on the line
+    // text/empty area OR on the gutter (line numbers, line decorations, or the
+    // glyph-margin comment indicator).
+    const isCommentClickTarget = (e: Monaco.editor.IEditorMouseEvent) => {
+      const T = monaco.editor.MouseTargetType;
+      return (
+        e.target.type === T.CONTENT_TEXT ||
+        e.target.type === T.CONTENT_EMPTY ||
+        e.target.type === T.GUTTER_GLYPH_MARGIN ||
+        e.target.type === T.GUTTER_LINE_NUMBERS ||
+        e.target.type === T.GUTTER_LINE_DECORATIONS
+      );
+    };
+
+    // Desktop: on mousedown in comment mode, dismiss any open selection prompt
+    // and remember where the press started so we can tell a click from a drag.
     // The editor is not recreated on viewport resize, so we gate on
     // isMobileRef at call time rather than installing only on desktop.
     modifiedEditor.onMouseDown((e: Monaco.editor.IEditorMouseEvent) => {
       if (isMobileRef.current) return;
-      const isLineClick =
-        e.target.type === monaco.editor.MouseTargetType.CONTENT_TEXT ||
-        e.target.type === monaco.editor.MouseTargetType.CONTENT_EMPTY;
+      if (modeRef.current !== "comment") return;
+      setCommentPrompt(null);
+      // Starting a new selection/click with an empty comment box hides it, so an
+      // abandoned empty dialog doesn't linger while you pick a new section.
+      if (!commentTextRef.current.trim()) {
+        setShowCommentDialog(null);
+      }
+      const be = e.event.browserEvent;
+      mouseDownPosRef.current = { x: be.clientX, y: be.clientY };
+    });
 
-      if (isLineClick && modeRef.current === "comment") {
+    // Desktop: decide on mouseup. If the user made a text selection, show a
+    // floating "Comment" prompt next to it (so the selection stays usable). If
+    // it was just a click on a line with no selection, open the comment dialog
+    // for that line directly.
+    modifiedEditor.onMouseUp((e: Monaco.editor.IEditorMouseEvent) => {
+      if (isMobileRef.current) return;
+      if (modeRef.current !== "comment") return;
+      const model = modifiedEditor.getModel();
+      const selection = modifiedEditor.getSelection();
+      const be = e.event.browserEvent;
+      if (selection && !selection.isEmpty() && model) {
+        const rect = mainRef.current?.getBoundingClientRect();
+        if (rect) {
+          setCommentPrompt({
+            top: be.clientY - rect.top + 8,
+            left: Math.max(0, Math.min(be.clientX - rect.left, rect.width - 110)),
+            startLine: selection.startLineNumber,
+            endLine: selection.endLineNumber,
+            selectedText: model.getValueInRange(selection),
+          });
+        }
+        return;
+      }
+      // No selection: treat as a click to comment on the line, but only if the
+      // pointer didn't move (a tiny drag that collapsed to an empty selection
+      // shouldn't trigger the dialog).
+      const start = mouseDownPosRef.current;
+      mouseDownPosRef.current = null;
+      if (start) {
+        const dx = be.clientX - start.x;
+        const dy = be.clientY - start.y;
+        if (dx * dx + dy * dy > 16) return;
+      }
+      if (isCommentClickTarget(e)) {
         const position = e.target.position;
         if (position) {
           openCommentDialog(position.lineNumber);
@@ -434,11 +527,7 @@ function DiffViewer({
       if (modeRef.current !== "comment") return;
       if (touchScrolledRef.current) return;
 
-      const isLineClick =
-        e.target.type === monaco.editor.MouseTargetType.CONTENT_TEXT ||
-        e.target.type === monaco.editor.MouseTargetType.CONTENT_EMPTY;
-
-      if (isLineClick) {
+      if (isCommentClickTarget(e)) {
         const position = e.target.position;
         if (position) {
           openCommentDialog(position.lineNumber);
@@ -599,8 +688,10 @@ function DiffViewer({
     // viewing the working tree (only working-tree views are editable).
     const isWorkingView = selectedDiff === "working" || selectedTo === "working";
     const readOnly = isCommitMsg ? !isHeadCommit : modeRef.current === "comment" || !isWorkingView;
-    diffEditor.updateOptions({ readOnly });
-    diffEditor.getModifiedEditor().updateOptions({ readOnly });
+    // Drag-and-drop of text only in edit mode (never on commit messages).
+    const dragAndDrop = !isCommitMsg && modeRef.current === "edit";
+    diffEditor.updateOptions({ readOnly, dragAndDrop });
+    diffEditor.getModifiedEditor().updateOptions({ readOnly, dragAndDrop });
 
     // Auto-scroll to first diff once per file load.
     let hasScrolledToFirstChange = false;
@@ -784,6 +875,54 @@ function DiffViewer({
     onCommentTextChange(commentBlock);
     setShowCommentDialog(null);
     setCommentText("");
+  };
+
+  // Open the comment dialog from the floating selection prompt, preserving the
+  // lines and text that were selected when the prompt appeared.
+  const openCommentFromPrompt = () => {
+    if (!commentPrompt) return;
+    setShowCommentDialog({
+      line: commentPrompt.startLine,
+      side: "right",
+      selectedText: commentPrompt.selectedText,
+      startLine: commentPrompt.startLine,
+      endLine: commentPrompt.endLine,
+    });
+    setCommentPrompt(null);
+  };
+
+  // Drag-to-move support for the comment dialog.
+  const onDialogDrag = useCallback((e: MouseEvent) => {
+    const d = dialogDragRef.current;
+    if (!d) return;
+    setCommentDialogPos({
+      top: d.baseTop + (e.clientY - d.startY),
+      left: d.baseLeft + (e.clientX - d.startX),
+    });
+  }, []);
+
+  const endDialogDrag = useCallback(() => {
+    dialogDragRef.current = null;
+    window.removeEventListener("mousemove", onDialogDrag);
+    window.removeEventListener("mouseup", endDialogDrag);
+  }, [onDialogDrag]);
+
+  // Clean up any in-flight dialog drag listeners on unmount.
+  useEffect(() => endDialogDrag, [endDialogDrag]);
+
+  const startDialogDrag = (e: React.MouseEvent) => {
+    // Ignore drags that begin on interactive controls inside the header.
+    if ((e.target as HTMLElement).closest("button, textarea, input")) return;
+    const el = commentDialogRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const parent = mainRef.current?.getBoundingClientRect();
+    const baseTop = parent ? rect.top - parent.top : rect.top;
+    const baseLeft = parent ? rect.left - parent.left : rect.left;
+    dialogDragRef.current = { startX: e.clientX, startY: e.clientY, baseTop, baseLeft };
+    window.addEventListener("mousemove", onDialogDrag);
+    window.addEventListener("mouseup", endDialogDrag);
+    e.preventDefault();
   };
 
   const goToNextFile = useCallback(() => {
@@ -1626,7 +1765,7 @@ function DiffViewer({
               </div>
             </aside>
           )}
-          <div className="diff-viewer-main">
+          <div ref={mainRef} className="diff-viewer-main">
             {loading && !fileDiff && (
               <div className="diff-viewer-loading">
                 <div className="spinner"></div>
@@ -1644,7 +1783,9 @@ function DiffViewer({
             {!loading && monacoLoaded && !fileDiff && !error && (
               <div className="diff-viewer-empty">
                 <p>Select a diff and file to view changes.</p>
-                <p className="diff-viewer-hint">Click on line numbers to add comments.</p>
+                <p className="diff-viewer-hint">
+                  Click a line to comment, or select text and click Comment.
+                </p>
               </div>
             )}
 
@@ -1656,6 +1797,18 @@ function DiffViewer({
             />
             {!isMobile && vimEnabled && fileDiff && monacoLoaded && (
               <div ref={setVimStatusNode} className="monaco-vim-status" />
+            )}
+            {/* Floating "add comment" prompt shown next to a selection in comment mode */}
+            {commentPrompt && (
+              <button
+                className="diff-viewer-comment-prompt"
+                style={{ top: `${commentPrompt.top}px`, left: `${commentPrompt.left}px` }}
+                title="Add comment on selection"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={openCommentFromPrompt}
+              >
+                💬 Comment
+              </button>
             )}
           </div>
         </div>
@@ -1709,13 +1862,23 @@ function DiffViewer({
 
         {/* Comment dialog */}
         {showCommentDialog && (
-          <div className="diff-viewer-comment-dialog">
-            <h4>
-              Add Comment (Line
-              {showCommentDialog.startLine !== showCommentDialog.endLine
-                ? `s ${showCommentDialog.startLine}-${showCommentDialog.endLine}`
-                : ` ${showCommentDialog.line}`}
-              , {showCommentDialog.side === "left" ? "old" : "new"})
+          <div
+            ref={commentDialogRef}
+            className={`diff-viewer-comment-dialog${commentDialogPos ? " is-dragged" : ""}`}
+            style={
+              commentDialogPos
+                ? { top: `${commentDialogPos.top}px`, left: `${commentDialogPos.left}px` }
+                : undefined
+            }
+          >
+            <h4 className="diff-viewer-comment-dialog-handle" onMouseDown={startDialogDrag}>
+              <span>
+                Add Comment (Line
+                {showCommentDialog.startLine !== showCommentDialog.endLine
+                  ? `s ${showCommentDialog.startLine}-${showCommentDialog.endLine}`
+                  : ` ${showCommentDialog.line}`}
+                , {showCommentDialog.side === "left" ? "old" : "new"})
+              </span>
             </h4>
             {showCommentDialog.selectedText && (
               <pre className="diff-viewer-selected-text">{showCommentDialog.selectedText}</pre>
