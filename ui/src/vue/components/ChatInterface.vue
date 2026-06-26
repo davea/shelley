@@ -56,297 +56,25 @@
           </svg>
         </button>
 
-        <!-- Overflow menu -->
-        <div ref="overflowMenuRef" class="chat-overflow-menu-wrapper">
-          <button
-            class="btn-icon"
-            :aria-label="t('moreOptions')"
-            @click="showOverflowMenu = !showOverflowMenu"
-          >
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                :stroke-width="2"
-                d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
-              />
-            </svg>
-            <span v-if="hasUpdate" class="version-update-dot" />
-          </button>
-
-          <div v-if="showOverflowMenu" class="overflow-menu">
-            <button
-              v-if="hasCwd"
-              class="overflow-menu-item"
-              @click="
-                showOverflowMenu = false;
-                showDiffViewer = true;
-              "
-            >
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-menu-icon">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :stroke-width="2"
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-              {{ t("diffs") }}
-            </button>
-            <button
-              v-if="hasCwd"
-              class="overflow-menu-item"
-              @click="
-                showOverflowMenu = false;
-                showGitGraph = true;
-              "
-            >
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-menu-icon">
-                <circle cx="6" cy="6" r="2" :stroke-width="2" />
-                <circle cx="6" cy="18" r="2" :stroke-width="2" />
-                <circle cx="18" cy="12" r="2" :stroke-width="2" />
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :stroke-width="2"
-                  d="M6 8v8M8 6h2a4 4 0 014 4v0M8 18h2a4 4 0 004-4v0"
-                />
-              </svg>
-              {{ t("gitGraph") }}
-            </button>
-            <button v-if="terminalURL" class="overflow-menu-item" @click="openTerminalUrl">
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-menu-icon">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :stroke-width="2"
-                  d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                />
-              </svg>
-              {{ t("terminal") }}
-            </button>
-            <button
-              v-for="(link, index) in links"
-              :key="index"
-              class="overflow-menu-item"
-              @click="openExternalLink(link.url)"
-            >
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-menu-icon">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :stroke-width="2"
-                  :d="
-                    link.icon_svg ||
-                    'M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14'
-                  "
-                />
-              </svg>
-              {{ link.title }}
-            </button>
-
-            <template
-              v-if="conversationId && onArchiveConversation && !currentConversation?.archived"
-            >
-              <div class="overflow-menu-divider" />
-              <button class="overflow-menu-item" @click="archiveFromMenu">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-menu-icon">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    :stroke-width="2"
-                    d="M5 8h14M8 8V6a4 4 0 118 0v2m-9 0v10a2 2 0 002 2h6a2 2 0 002-2V8"
-                  />
-                </svg>
-                {{ t("archiveConversation") }}
-              </button>
-            </template>
-
-            <template v-if="conversationId && messages.length > 0">
-              <div class="overflow-menu-divider" />
-              <button class="overflow-menu-item" @click="openExport">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-menu-icon">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    :stroke-width="2"
-                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                  />
-                </svg>
-                {{ t("exportConversation") }}
-              </button>
-            </template>
-
-            <div class="overflow-menu-divider" />
-            <button
-              class="overflow-menu-item"
-              @click="
-                showOverflowMenu = false;
-                showAgentsMdEditor = true;
-              "
-            >
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-menu-icon">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :stroke-width="2"
-                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                />
-              </svg>
-              {{ t("editUserAgentsMd") }}
-            </button>
-
-            <div class="overflow-menu-divider" />
-            <button
-              class="overflow-menu-item"
-              @click="
-                showOverflowMenu = false;
-                openVersionModal();
-              "
-            >
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-menu-icon">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  :stroke-width="2"
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              {{ t("checkForNewVersion") }}
-              <span v-if="hasUpdate" class="version-menu-dot" />
-            </button>
-
-            <div class="overflow-menu-divider" />
-            <div class="theme-toggle-row">
-              <button
-                :class="`theme-toggle-btn${themeMode === 'system' ? ' theme-toggle-btn-selected' : ''}`"
-                :title="t('system')"
-                @click="setThemeAndApply('system')"
-              >
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    :stroke-width="2"
-                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                  />
-                </svg>
-              </button>
-              <button
-                :class="`theme-toggle-btn${themeMode === 'light' ? ' theme-toggle-btn-selected' : ''}`"
-                :title="t('light')"
-                @click="setThemeAndApply('light')"
-              >
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    :stroke-width="2"
-                    d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-                  />
-                </svg>
-              </button>
-              <button
-                :class="`theme-toggle-btn${themeMode === 'dark' ? ' theme-toggle-btn-selected' : ''}`"
-                :title="t('dark')"
-                @click="setThemeAndApply('dark')"
-              >
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    :stroke-width="2"
-                    d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            <template v-if="notificationSupported">
-              <div class="overflow-menu-divider" />
-              <div class="theme-toggle-row">
-                <button
-                  :class="`theme-toggle-btn${browserNotifsEnabled ? ' theme-toggle-btn-selected' : ''}`"
-                  :title="
-                    browserNotifState === 'denied'
-                      ? t('blockedByBrowser')
-                      : t('enableNotifications')
-                  "
-                  :disabled="browserNotifState === 'denied'"
-                  @click="enableBrowserNotifs"
-                >
-                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      :stroke-width="2"
-                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-                    />
-                  </svg>
-                </button>
-                <button
-                  :class="`theme-toggle-btn${!browserNotifsEnabled ? ' theme-toggle-btn-selected' : ''}`"
-                  :title="t('disableNotifications')"
-                  @click="disableBrowserNotifs"
-                >
-                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      :stroke-width="2"
-                      d="M5.586 15H4l1.405-1.405A2.032 2.032 0 006 12.158V9a6.002 6.002 0 014-5.659V3a2 2 0 114 0v.341c.588.17 1.14.432 1.636.772M15 17h-6v1a3 3 0 006 0v-1zM18 9a3 3 0 00-3-3M3 3l18 18"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </template>
-
-            <div class="overflow-menu-divider" />
-            <div class="md-toggle-row">
-              <div class="md-toggle-label">{{ t("markdown") }}</div>
-              <div class="md-toggle-buttons">
-                <button
-                  :class="`md-toggle-btn${markdownMode === 'off' ? ' md-toggle-btn-selected' : ''}`"
-                  :title="t('showPlainText')"
-                  @click="setMarkdownMode('off')"
-                >
-                  {{ t("off") }}
-                </button>
-                <button
-                  :class="`md-toggle-btn${markdownMode === 'agent' ? ' md-toggle-btn-selected' : ''}`"
-                  :title="t('renderMarkdownAgent')"
-                  @click="setMarkdownMode('agent')"
-                >
-                  {{ t("agent") }}
-                </button>
-                <button
-                  :class="`md-toggle-btn${markdownMode === 'all' ? ' md-toggle-btn-selected' : ''}`"
-                  :title="t('renderMarkdownAll')"
-                  @click="setMarkdownMode('all')"
-                >
-                  {{ t("all") }}
-                </button>
-              </div>
-            </div>
-
-            <div class="overflow-menu-divider" />
-            <div class="language-selector-row">
-              <div class="md-toggle-label">
-                {{ t("language") }}
-                <a
-                  :href="reportBugHref"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="report-bug-link"
-                  @click.stop
-                >
-                  [{{ t("reportBug") }}]
-                </a>
-              </div>
-              <LanguageDropdown />
-            </div>
-          </div>
-        </div>
+        <!-- Overflow menu (PrimeVue Popover + SelectButton/Select) -->
+        <ChatOverflowMenu
+          :has-cwd="hasCwd"
+          :terminal-url="terminalURL"
+          :links="links"
+          :can-archive="
+            !!(conversationId && onArchiveConversation && !currentConversation?.archived)
+          "
+          :can-export="!!(conversationId && messages.length > 0)"
+          :has-update="hasUpdate"
+          @open-diffs="showDiffViewer = true"
+          @open-git-graph="showGitGraph = true"
+          @open-terminal="openTerminalUrl"
+          @open-external-link="openExternalLink"
+          @archive="archiveFromMenu"
+          @export="openExport"
+          @edit-agents-md="showAgentsMdEditor = true"
+          @check-version="openVersionModal"
+        />
       </div>
     </div>
 
@@ -615,14 +343,7 @@ import {
 } from "../../types";
 import { api } from "../../services/api";
 import { messageStore } from "../../services/messageStore";
-import { type ThemeMode, getStoredTheme, setStoredTheme, applyTheme } from "../../services/theme";
 import { setFaviconStatus } from "../../services/favicon";
-import {
-  isChannelEnabled,
-  setChannelEnabled,
-  getBrowserNotificationState,
-  requestBrowserNotificationPermission,
-} from "../../services/notifications";
 import { useMarkdownMode } from "../composables/markdownMode";
 import { useI18n } from "../composables/i18n";
 import { useDraftAutosave } from "../composables/draftAutosave";
@@ -651,7 +372,7 @@ import GitGraphViewer from "./GitGraphViewer.vue";
 import AgentsMdEditorModal from "./AgentsMdEditorModal.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import VersionChecker from "./VersionChecker.vue";
-import LanguageDropdown from "./LanguageDropdown.vue";
+import ChatOverflowMenu from "./ChatOverflowMenu.vue";
 import MessageRenderNode from "./MessageRenderNode.vue";
 import ChatStatusContent from "./ChatStatusContent.vue";
 import MarkdownContent from "./MarkdownContent.vue";
@@ -711,8 +432,8 @@ const props = withDefaults(
   },
 );
 
-const { t, locale, setLocale } = useI18n();
-const { markdownMode, setMarkdownMode } = useMarkdownMode();
+const { t } = useI18n();
+const { markdownMode } = useMarkdownMode();
 const toolPillsEnabled = useFeatureFlag("tool-pills");
 const {
   hasUpdate,
@@ -796,10 +517,7 @@ function setSelectedCwd(cwd: string) {
 
 const cwdError = ref<string | null>(null);
 const showDirectoryPicker = ref(false);
-const showOverflowMenu = ref(false);
-const themeMode = ref<ThemeMode>(getStoredTheme());
 const isMobile = ref(window.innerWidth < 768);
-const browserNotifsEnabled = ref(isChannelEnabled("browser"));
 const showDiffViewer = ref(false);
 const showGitGraph = ref(false);
 const showAgentsMdEditor = ref(false);
@@ -824,7 +542,6 @@ const terminalAutoFocusId = ref<string | null>(null);
 
 // ---- refs to DOM ----
 const messagesContainerRef = ref<HTMLDivElement | null>(null);
-const overflowMenuRef = ref<HTMLDivElement | null>(null);
 
 // ---- non-reactive refs (mutable closures) ----
 let userScrolled = false;
@@ -1595,40 +1312,21 @@ function handleInsertFromTerminal(text: string) {
   terminalInjectedText.value = text;
 }
 
-function setThemeAndApply(mode: ThemeMode) {
-  themeMode.value = mode;
-  setStoredTheme(mode);
-  applyTheme(mode);
-}
-
-async function enableBrowserNotifs() {
-  if (browserNotifsEnabled.value) return;
-  const granted = await requestBrowserNotificationPermission();
-  if (granted) browserNotifsEnabled.value = true;
-}
-function disableBrowserNotifs() {
-  if (!browserNotifsEnabled.value) return;
-  setChannelEnabled("browser", false);
-  browserNotifsEnabled.value = false;
-}
-
+// Overflow-menu action handlers. Closing the menu is owned by ChatOverflowMenu
+// (the PrimeVue Popover hides itself on click); these just perform the action.
 function openExternalLink(url: string) {
-  showOverflowMenu.value = false;
   window.open(url, "_blank");
 }
 function openTerminalUrl() {
-  showOverflowMenu.value = false;
   const cwd = props.currentConversation?.cwd || selectedCwd.value || "";
   if (!terminalURL) return;
   const url = terminalURL.replace("WORKING_DIR", encodeURIComponent(cwd));
   window.open(url, "_blank");
 }
 function openExport() {
-  showOverflowMenu.value = false;
   window.open(`/export/${props.conversationId}`, "_blank", "noopener");
 }
 async function archiveFromMenu() {
-  showOverflowMenu.value = false;
   if (!props.conversationId || !props.onArchiveConversation) return;
   try {
     await props.onArchiveConversation(props.conversationId);
@@ -1641,12 +1339,6 @@ function onNewConversationClick(e: MouseEvent) {
   if (handleModifiedNavClick(e, "/new")) return;
   props.onNewConversation();
 }
-
-const reportBugHref = `https://github.com/boldsoftware/shelley/issues/new?labels=translation&title=${encodeURIComponent(
-  "Translation issue: ",
-)}&body=${encodeURIComponent(
-  "**Language:** \n**Where in the UI:** \n**Current text:** \n**Suggested text:** \n",
-)}`;
 
 // ---- draft autosave ----
 const draftValue = ref("");
@@ -1765,9 +1457,6 @@ function onDiffViewerClose() {
   diffViewerCwd.value = undefined;
   if (!showGitGraph.value) focusMessageInputIfUnfocused();
 }
-
-const notificationSupported = typeof Notification !== "undefined";
-const browserNotifState = computed(() => getBrowserNotificationState());
 
 // Loading bar fill class/style mirror the React conditional.
 const loadingBarFillClass = computed(() => {
@@ -2144,17 +1833,6 @@ watch(
   },
 );
 
-// Close overflow menu on outside click.
-function onOverflowOutside(event: MouseEvent) {
-  if (overflowMenuRef.value && !overflowMenuRef.value.contains(event.target as Node)) {
-    showOverflowMenu.value = false;
-  }
-}
-watch(showOverflowMenu, (open) => {
-  document.removeEventListener("mousedown", onOverflowOutside);
-  if (open) document.addEventListener("mousedown", onOverflowOutside);
-});
-
 // Auto-scroll after DOM updates (mirrors the useLayoutEffect).
 watch(
   [messages, loading],
@@ -2305,7 +1983,6 @@ onUnmounted(() => {
   window.removeEventListener("beforeunload", saveScrollNow);
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   document.removeEventListener("keydown", handleScrollKeyDown);
-  document.removeEventListener("mousedown", onOverflowOutside);
   document.removeEventListener("mousedown", onAdvancedSettingsOutside);
   mobileMq.removeEventListener("change", onMobileChange);
   if (loadingProgressDelay) clearTimeout(loadingProgressDelay);
