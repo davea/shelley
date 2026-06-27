@@ -207,6 +207,7 @@ import {
 } from "../services/conversationListStream";
 import { connectGlobalStream, type StreamStatus } from "../services/globalStream";
 import { handleNotificationEvent } from "../services/notifications";
+import { loadCachedDraft } from "../services/draftCache";
 import { useI18n } from "./composables/i18n";
 
 const { t } = useI18n();
@@ -228,9 +229,18 @@ function isNewPath(): boolean {
   return window.location.pathname === "/new";
 }
 
+// A brand-new-conversation draft composed offline never reaches the server
+// (createDraft fails), so it survives only in localStorage under the "new"
+// slot. On reopen we land on "/" and would otherwise auto-select the most
+// recent conversation, orphaning that text. Detect a pending non-empty cached
+// draft so startup can keep the user in the new-conversation view instead.
+function hasPendingNewDraft(): boolean {
+  return !!loadCachedDraft(null)?.value.trim();
+}
+
 // Captured BEFORE render so URL-updating effects don't clobber it.
 const initialSlugFromUrl = getSlugFromPath();
-const initialIsNew = isNewPath();
+const initialIsNew = isNewPath() || (!getSlugFromPath() && hasPendingNewDraft());
 
 function updateUrlWithSlug(conversation: Conversation | undefined) {
   const currentSlug = getSlugFromPath();

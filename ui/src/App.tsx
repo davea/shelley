@@ -18,6 +18,7 @@ import {
 } from "./services/conversationListStream";
 import { connectGlobalStream, type StreamStatus } from "./services/globalStream";
 import { handleNotificationEvent } from "./services/notifications";
+import { loadCachedDraft } from "./services/draftCache";
 import { useI18n } from "./i18n";
 
 // Check if a slug is a generated ID (format: cXXXX where X is alphanumeric)
@@ -43,10 +44,22 @@ function isNewPath(): boolean {
   return window.location.pathname === "/new";
 }
 
+// A brand-new-conversation draft composed offline never reaches the server
+// (createDraft fails), so it survives only in localStorage under the "new"
+// slot. On reopen we land on "/" and would otherwise auto-select the most
+// recent conversation, orphaning that text. Detect a pending non-empty cached
+// draft so startup can keep the user in the new-conversation view instead.
+function hasPendingNewDraft(): boolean {
+  return !!loadCachedDraft(null)?.value.trim();
+}
+
 // Capture the initial slug from URL BEFORE React renders, so it won't be affected
 // by the useEffect that updates the URL based on current conversation.
 const initialSlugFromUrl = getSlugFromPath();
-const initialIsNew = isNewPath();
+// Treat a reopen with a pending offline-composed draft like an explicit /new:
+// keep the new-conversation view so the cached draft surfaces instead of
+// auto-selecting the most recent conversation.
+const initialIsNew = isNewPath() || (!getSlugFromPath() && hasPendingNewDraft());
 
 // Update the URL to reflect the current conversation slug. Drafts (no real
 // slug yet) use their conversation_id so reload restores the draft.
