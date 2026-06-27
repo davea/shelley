@@ -11340,3 +11340,33 @@ kbd {
   white-space: nowrap;
   border: 0;
 }
+
+/* =========================================================================
+   Modal.vue — the base modal rebuilt on PrimeVue Dialog. The #container slot
+   reproduces the legacy .modal markup, so the only PrimeVue-specific styling
+   needed is for the dialog scaffolding it wraps that markup in. Scoped under
+   PrimeVue's own classes so the legacy React modal (plain .modal-overlay div)
+   is untouched.
+   ========================================================================= */
+
+/* PrimeVue's mask already carries our .modal-overlay class (via pt), which owns
+   the backdrop, centering, and z-index. Neutralize the p-dialog root wrapper so
+   it doesn't add its own background/border/shadow around our .modal panel.
+   Scoped to .modal-dialog-root (set via pt) so it can't leak to any future
+   PrimeVue Dialog/ConfirmDialog/useDialog overlay, which share the .p-dialog
+   class. */
+.p-dialog.modal-dialog-root {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  max-width: none;
+  max-height: none;
+}
+
+/* We move focus to the .modal panel on open so PrimeVue's focus trap engages,
+   but the panel is a focus container, not an interactive control: hide the
+   browser focus ring on it (real controls inside keep their own outlines). */
+.modal-dialog-root > .modal:focus,
+.modal-dialog-root > .modal:focus-visible {
+  outline: none;
+}
