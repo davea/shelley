@@ -607,20 +607,18 @@ func (cm *ConversationManager) AcceptUserMessage(ctx context.Context, service ll
 }
 
 // errRetryNotApplicable is returned by RetryLastLLMRequest when the latest
-// message isn't a fresh retryable error — covers idempotency for duplicate
-// clicks after the first one already flagged the error as retried.
+// message isn't a retryable error; nothing to retry.
 var errRetryNotApplicable = fmt.Errorf("latest message is not a retryable error; nothing to retry")
 
-// RetryLastLLMRequest flags the most recent error message as retried (so the
-// UI hides its Retry button) and asks the loop to re-attempt the previous
-// LLM request. The error message itself remains in the conversation log —
-// messages are an append-only log; partitionMessages already strips error
-// messages before sending history to the LLM, so the retried request body
-// is byte-identical to the failed one.
+// RetryLastLLMRequest asks the loop to re-attempt the previous LLM request.
+// The error message itself remains in the conversation log — messages are an
+// append-only, immutable log; partitionMessages already strips error messages
+// before sending history to the LLM, so the retried request body is
+// byte-identical to the failed one.
 //
-// Multiple rapid clicks on the Retry button must not produce multiple extra
-// LLM calls; retryMu serializes invocations and the retried-flag check
-// makes the operation idempotent.
+// The error message row is never mutated. Once the retry kicks off a new turn,
+// the error is no longer the bottom-most message, so the UI stops offering the
+// Retry button on its own. retryMu serializes concurrent invocations.
 func (cm *ConversationManager) RetryLastLLMRequest(ctx context.Context) error {
 	// Take retryMu first to serialize across concurrent retries without
 	// holding cm.mu (which would block unrelated message recording and
@@ -646,41 +644,18 @@ func (cm *ConversationManager) RetryLastLLMRequest(ctx context.Context) error {
 		return errRetryNotApplicable
 	}
 
-	// Parse existing user_data and merge in retried=true. If the message has
-	// already been retried (e.g. duplicate click), bail out without firing a
-	// second loop attempt.
+	// Read (never write) user_data to honor the retryable gate. A
+	// non-retryable error must not start a new turn.
 	ud := map[string]any{}
 	if latest.UserData != nil && *latest.UserData != "" {
 		if err := json.Unmarshal([]byte(*latest.UserData), &ud); err != nil {
 			return fmt.Errorf("failed to parse error message user_data: %w", err)
 		}
 	}
-	if retried, _ := ud["retried"].(bool); retried {
-		return errRetryNotApplicable
-	}
 	if retryable, _ := ud["retryable"].(bool); !retryable {
 		return errRetryNotApplicable
 	}
-	ud["retried"] = true
-	udBytes, err := json.Marshal(ud)
-	if err != nil {
-		return fmt.Errorf("failed to marshal updated user_data: %w", err)
-	}
-	udStr := string(udBytes)
-	if err := database.UpdateMessageUserData(ctx, latest.MessageID, &udStr); err != nil {
-		return fmt.Errorf("failed to mark error message retried: %w", err)
-	}
-	logger.Info("retrying after marking error message retried", "message_id", latest.MessageID)
-
-	// Re-load the updated row and broadcast it as a normal message upsert so
-	// subscribed UIs refresh the error's user_data and drop the Retry button.
-	updated, err := database.GetMessageByID(ctx, latest.MessageID)
-	if err != nil {
-		return fmt.Errorf("failed to reload updated error message: %w", err)
-	}
-	cm.broadcastStream(StreamResponse{
-		Messages: toAPIMessages([]generated.Message{*updated}),
-	})
+	logger.Info("retrying last LLM request", "message_id", latest.MessageID)
 
 	cm.SetAgentWorking(true)
 	loopInstance.Retry()

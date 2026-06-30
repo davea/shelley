@@ -429,9 +429,10 @@ func (s *switchableTestLLM) setErr(err error) {
 }
 
 // TestRetryAfterLLMFailure: after a retryable LLM failure recorded as an error
-// message, POST /retry should delete the error message and re-run the request,
-// producing a fresh assistant message. The new LLM call must NOT see the
-// error in the conversation.
+// message, POST /retry should re-run the request, producing a fresh assistant
+// message. The error message must remain in the conversation log UNMUTATED
+// (messages are immutable) and the new LLM call must NOT see the error in the
+// conversation.
 func TestRetryAfterLLMFailure(t *testing.T) {
 	t.Parallel()
 	database, cleanup := setupTestDB(t)
@@ -491,7 +492,7 @@ func TestRetryAfterLLMFailure(t *testing.T) {
 	}
 
 	// Wait for a successful agent message. The error message must remain in
-	// the conversation log (append-only) but get flagged with retried=true.
+	// the conversation log (append-only) and stay byte-for-byte unmutated.
 	waitFor(t, 10*time.Second, func() bool {
 		var msgs []generated.Message
 		database.Queries(context.Background(), func(q *generated.Queries) error {
@@ -508,7 +509,8 @@ func TestRetryAfterLLMFailure(t *testing.T) {
 		return hasAgent
 	})
 
-	// Verify the error message is still present and now marked retried=true.
+	// Verify the error message is still present and was NOT mutated: it must
+	// still be retryable and must never have gained a retried flag.
 	var finalMsgs []generated.Message
 	database.Queries(context.Background(), func(q *generated.Queries) error {
 		var e error
@@ -522,14 +524,17 @@ func TestRetryAfterLLMFailure(t *testing.T) {
 		}
 		foundErr = true
 		if m.UserData == nil {
-			t.Fatalf("error message has nil user_data; want retried=true")
+			t.Fatalf("error message has nil user_data; want retryable=true")
 		}
 		var ud map[string]any
 		if err := json.Unmarshal([]byte(*m.UserData), &ud); err != nil {
 			t.Fatalf("unmarshal error user_data: %v", err)
 		}
-		if retried, _ := ud["retried"].(bool); !retried {
-			t.Errorf("expected error message user_data.retried=true, got %v", ud)
+		if retryable, _ := ud["retryable"].(bool); !retryable {
+			t.Errorf("expected error message to stay retryable, got %v", ud)
+		}
+		if _, present := ud["retried"]; present {
+			t.Errorf("error message must not be mutated with a retried flag, got %v", ud)
 		}
 	}
 	if !foundErr {

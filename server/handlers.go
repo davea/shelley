@@ -1510,13 +1510,12 @@ func (s *Server) handleCancelConversation(w http.ResponseWriter, r *http.Request
 }
 
 // handleRetryConversation handles POST /api/conversation/<id>/retry.
-// It flags the most recent error message with retried=true in user_data
-// (the messages list is an append-only log; we never delete) and re-runs
-// the LLM request that previously failed, using the conversation's current
-// state. The error message is excluded from LLM history by
+// It re-runs the LLM request that previously failed, using the conversation's
+// current state. The error message is left untouched (messages are an
+// append-only, immutable log) and is excluded from LLM history by
 // partitionMessages, so no synthetic retry-user-message is sent to the
 // model. Requires a latest message of type "error" that is classified
-// retryable and not yet retried.
+// retryable.
 func (s *Server) handleRetryConversation(w http.ResponseWriter, r *http.Request, conversationID string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -1535,21 +1534,16 @@ func (s *Server) handleRetryConversation(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if latest.Type != string(db.MessageTypeError) {
-		// Idempotent no-op: a previous retry click already flagged the error.
+		// No error at the bottom of the conversation: nothing to retry.
 		w.WriteHeader(http.StatusAccepted)
-		json.NewEncoder(w).Encode(map[string]string{"status": "already_retried"})
+		json.NewEncoder(w).Encode(map[string]string{"status": "not_applicable"})
 		return
 	}
-	// Inspect user_data to enforce retryable=true and short-circuit if already
-	// retried, before spinning up a loop with tools and a 12-hour context.
+	// Inspect user_data to enforce retryable=true before spinning up a loop
+	// with tools and a 12-hour context. Never mutate the row.
 	if latest.UserData != nil && *latest.UserData != "" {
 		var ud map[string]any
 		if err := json.Unmarshal([]byte(*latest.UserData), &ud); err == nil {
-			if retried, _ := ud["retried"].(bool); retried {
-				w.WriteHeader(http.StatusAccepted)
-				json.NewEncoder(w).Encode(map[string]string{"status": "already_retried"})
-				return
-			}
 			if retryable, _ := ud["retryable"].(bool); !retryable {
 				http.Error(w, "error is not retryable", http.StatusConflict)
 				return
@@ -1593,9 +1587,10 @@ func (s *Server) handleRetryConversation(w http.ResponseWriter, r *http.Request,
 
 	if err := manager.RetryLastLLMRequest(ctx); err != nil {
 		if errors.Is(err, errRetryNotApplicable) {
-			// Lost a race with a concurrent retry; treat as success.
+			// The bottom message is no longer a retryable error (e.g. a
+			// concurrent retry already started a new turn); treat as success.
 			w.WriteHeader(http.StatusAccepted)
-			json.NewEncoder(w).Encode(map[string]string{"status": "already_retried"})
+			json.NewEncoder(w).Encode(map[string]string{"status": "not_applicable"})
 			return
 		}
 		s.logger.Warn("Retry rejected", "conversationID", conversationID, "error", err)
