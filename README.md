@@ -49,7 +49,7 @@ follow the pattern `v0.N.9OCTAL` where N is the total commit count and 9OCTAL is
 # Architecture 
 
 The technical stack is Go for the backend, SQLite for storage, and Typescript
-and React for the UI. 
+with Vue 3 + PrimeVue for the UI. 
 
 The data model is that Conversations have Messages, which might be from the
 user, the model, the tools, or the harness. All of that is stored in the

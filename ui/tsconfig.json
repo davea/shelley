@@ -12,14 +12,13 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true,
-    "jsx": "react-jsx"
+    "noEmit": true
   },
   "include": ["src"],
   // The Vue frontend under src/vue is type-checked separately by vue-tsc via
   // tsconfig.vue.json (it imports .vue single-file components, which the plain
-  // tsc used for `type-check` can't resolve). Exclude it here so the React
-  // type-check stays green.
+  // tsc used for `type-check` can't resolve). Exclude it here so this
+  // (non-Vue, shared modules) type-check stays green.
   "exclude": ["src/vue"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

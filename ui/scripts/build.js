@@ -89,66 +89,40 @@ async function build() {
       },
     });
 
-    // Build the main app for BOTH frontends ("worlds"): the Vue 3 + PrimeVue
-    // entry (src/vue/main.ts) and the legacy React entry (src/main.tsx). Each
-    // world emits its own bundle (dist/main.<world>.js + dist/main.<world>.css);
-    // the Go server injects the right pair into index.html at request time based
-    // on the `vue-ui` feature flag (see server/ui_world.go), so a user can flip
-    // the flag and reload to switch frontends without a rebuild.
-    //
-    // Build scope can be narrowed for faster local iteration:
-    //   UI_WORLDS=vue|react|both   (default: both)
-    //   VUE=0                      legacy alias for UI_WORLDS=react
-    const allWorlds = [
-      { name: "vue", entry: "src/vue/main.ts", plugins: [monacoExternalPlugin(), vuePlugin()] },
-      { name: "react", entry: "src/main.tsx", plugins: [monacoExternalPlugin()] },
-    ];
-    let worldFilter = (process.env.UI_WORLDS || "both").toLowerCase();
-    if (process.env.VUE === "0") worldFilter = "react";
-    const worlds = allWorlds.filter(
-      (w) => (worldFilter === "both" || worldFilter === w.name) && fs.existsSync(w.entry),
-    );
-    if (worlds.length === 0) {
-      throw new Error(`No UI worlds to build (UI_WORLDS=${worldFilter})`);
-    }
-    // The per-world JS/CSS files emitted below, fed into gzip compression later.
-    const worldArtifacts = [];
-    for (const world of worlds) {
-      log(`Building main application (${world.name}: ${world.entry})...`);
-      await esbuild.build({
-        entryPoints: [world.entry],
-        bundle: true,
-        outfile: `dist/main.${world.name}.js`,
-        format: "esm",
-        minify: isProd,
-        sourcemap: !dropSourceMaps,
-        metafile: true,
-        external: ["monaco-editor", "/monaco-editor.js"],
-        loader: {
-          ".png": "dataurl",
-          ".svg": "text",
-          ".woff": "dataurl",
-          ".woff2": "dataurl",
-          ".ttf": "dataurl",
-          ".eot": "dataurl",
-        },
-        // Prefer ESM entry points so dynamic imports (e.g. monaco-vim) end
-        // up using `import` rather than CJS `require` (which esbuild can't
-        // emit at runtime in the browser).
-        // monaco-vim's package.json exports a UMD bundle under the "browser"
-        // condition; esbuild picks that by default and wraps it in a CJS
-        // shim that requires() the external /monaco-editor.js at runtime,
-        // which fails in the browser. Force resolution to its ESM build.
+    // Build the Vue 3 + PrimeVue app (src/vue/main.ts). It emits dist/main.js +
+    // dist/main.css, which index.html links statically (see src/index.html).
+    log("Building main application (src/vue/main.ts)...");
+    await esbuild.build({
+      entryPoints: ["src/vue/main.ts"],
+      bundle: true,
+      outfile: "dist/main.js",
+      format: "esm",
+      minify: isProd,
+      sourcemap: !dropSourceMaps,
+      metafile: true,
+      external: ["monaco-editor", "/monaco-editor.js"],
+      loader: {
+        ".png": "dataurl",
+        ".svg": "text",
+        ".woff": "dataurl",
+        ".woff2": "dataurl",
+        ".ttf": "dataurl",
+        ".eot": "dataurl",
+      },
+      // Prefer ESM entry points so dynamic imports (e.g. monaco-vim) end
+      // up using `import` rather than CJS `require` (which esbuild can't
+      // emit at runtime in the browser).
+      // monaco-vim's package.json exports a UMD bundle under the "browser"
+      // condition; esbuild picks that by default and wraps it in a CJS
+      // shim that requires() the external /monaco-editor.js at runtime,
+      // which fails in the browser. Force resolution to its ESM build.
 
-        // monaco-vim imports specific submodules of monaco-editor. Rewrite
-        // those to the same runtime URL the rest of the app uses, so we end
-        // up with a single Monaco instance instead of two. The rewritten
-        // imports are marked external (above) so esbuild emits them as-is.
-        plugins: world.plugins,
-      });
-      worldArtifacts.push(`main.${world.name}.js`, `main.${world.name}.css`);
-    }
-    log(`Built UI worlds: ${worlds.map((w) => w.name).join(", ")}`);
+      // monaco-vim imports specific submodules of monaco-editor. Rewrite
+      // those to the same runtime URL the rest of the app uses, so we end
+      // up with a single Monaco instance instead of two. The rewritten
+      // imports are marked external (above) so esbuild emits them as-is.
+      plugins: [monacoExternalPlugin(), vuePlugin()],
+    });
 
     // /static/excalidraw/skill.js: self-contained Excalidraw + React +
     // skill helper bundle. The host React app fetches it same-origin and
@@ -230,9 +204,8 @@ async function build() {
       "diffs-worker.js",
       "monaco-editor.css",
       "styles.css",
-      // Per-world app bundles (main.vue.js/css, main.react.js/css). Only the
-      // worlds we actually built are present; missing entries are skipped.
-      ...worldArtifacts,
+      "main.js",
+      "main.css",
       "static/excalidraw/skill.js",
     ];
     const checksums = {};

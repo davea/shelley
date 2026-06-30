@@ -1,6 +1,3 @@
-import React from "react";
-import { parseLinks } from "./linkify";
-
 export type InlineSegment =
   | { type: "text"; content: string }
   | { type: "code"; content: string }
@@ -58,48 +55,4 @@ function splitInline(text: string, out: InlineSegment[]): void {
   if (last < text.length) {
     out.push({ type: "text", content: text.slice(last) });
   }
-}
-
-/**
- * Render user-typed text with Slack-style backtick formatting.
- * - ```fenced``` -> <pre><code>
- * - `inline`    -> <code>
- * - URLs in plain-text segments become clickable <a>.
- * - URLs inside code are NOT linkified.
- */
-export function renderInlineText(text: string): React.ReactNode {
-  const segments = parseInlineSegments(text);
-  return segments.map((seg, i) => {
-    if (seg.type === "codeblock") {
-      return (
-        <pre key={i} className="inline-code-block">
-          <code>{seg.content}</code>
-        </pre>
-      );
-    }
-    if (seg.type === "code") {
-      return (
-        <code key={i} className="inline-code">
-          {seg.content}
-        </code>
-      );
-    }
-    return <React.Fragment key={i}>{linkifyPlain(seg.content)}</React.Fragment>;
-  });
-}
-
-function linkifyPlain(text: string): React.ReactNode {
-  const parts = parseLinks(text);
-  if (parts.length === 0) return text;
-  if (parts.length === 1 && parts[0].type === "text") return text;
-  return parts.map((p, i) => {
-    if (p.type === "link") {
-      return (
-        <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="text-link">
-          {p.content}
-        </a>
-      );
-    }
-    return <React.Fragment key={i}>{p.content}</React.Fragment>;
-  });
 }

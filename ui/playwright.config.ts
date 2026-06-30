@@ -45,33 +45,10 @@ export default defineConfig({
     video: "retain-on-failure",
   },
 
-  /*
-   * Both frontends ("worlds") are built and served by one binary; the server
-   * picks one per request from the `vue-ui` feature flag, overridable by the
-   * X-Shelley-UI header. We run the whole suite once per world by pinning that
-   * header per project, so every shared spec is exercised against both the Vue
-   * and React frontends.
-   *
-   * Test layout:
-   *   e2e/*.spec.ts        shared — run in BOTH worlds (the DOM/ARIA contract
-   *                        is identical, so a spec should pass in both)
-   *   e2e/vue/*.spec.ts    Vue-only — run only in the vue project
-   *   e2e/react/*.spec.ts  React-only — run only in the react project
-   *
-   * When a behavior legitimately diverges between worlds, copy the spec into
-   * e2e/vue/ and e2e/react/ and edit each independently, rather than adding
-   * world conditionals to a shared spec.
-   *
-   * Set UI_WORLD=vue|react to run just one world locally.
-   */
-  projects: (["vue", "react"] as const)
-    .filter((world) => !process.env.UI_WORLD || process.env.UI_WORLD === world)
-    .map((world) => ({
-      name: world,
-      testIgnore: world === "vue" ? "**/react/**" : "**/vue/**",
-      use: {
-        ...devices["Pixel 5"],
-        extraHTTPHeaders: { "X-Shelley-UI": world },
-      },
-    })),
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Pixel 5"] },
+    },
+  ],
 });

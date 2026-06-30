@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	lazycue "github.com/boldsoftware/shelley/lazycue"
@@ -45,17 +44,6 @@ import (
 // server is listening.
 var app *lazycue.Harness
 
-// lazycueWorld returns the frontend world this lazycue process targets:
-// "vue" (default) or "react", from LAZYCUE_WORLD. It also pins the in-process
-// server's default world via SHELLEY_UI so the served page matches the cache.
-func lazycueWorld() string {
-	w := strings.ToLower(strings.TrimSpace(os.Getenv("LAZYCUE_WORLD")))
-	if w != "react" {
-		w = "vue"
-	}
-	return w
-}
-
 func TestMain(m *testing.M) {
 	if os.Getenv("LAZYCUE_INTEGRATION") == "" {
 		// Tests below all skip; run them so `go test` reports them as skipped.
@@ -73,16 +61,9 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(diffFixtureDir)
 
-	// Run against one frontend ("world") per process. Both Vue and React are
-	// built and served by the same binary; the server picks one from the
-	// `vue-ui` flag, which startPredictableServer pins from LAZYCUE_WORLD (set
-	// by env on the SHELLEY_UI path). Each world has its own cache subdir so a
-	// heal in one world never overwrites the other's cached DSL script (the
-	// cache key is the description hash, which is identical across worlds).
-	world := lazycueWorld()
 	app = lazycue.New(lazycue.Options{
 		BaseURL:     ts.URL,
-		CacheDir:    filepath.Join("..", "ui", "lazycue", ".lazycue", world),
+		CacheDir:    filepath.Join("..", "ui", "lazycue", ".lazycue"),
 		Verbose:     true,
 		ArtifactDir: os.Getenv("LAZYCUE_ARTIFACT_DIR"),
 	})
@@ -432,17 +413,9 @@ func TestDiffViewerListsAddedModifiedDeleted(t *testing.T) {
 
 // diffFixtureDir is a deterministic path holding a git repo with working-tree
 // changes (a modified, a deleted, and a brand-new untracked file). The diff
-// viewer's file list is loaded from here.
-//
-// The path is per-world: the vue and react lazycue suites run as separate
-// processes that may share an agent's /tmp, and a single fixed path would race
-// (one process's RemoveAll+git-init stomping the other's, panicking on
-// "directory not empty"). The world suffix keeps each process's fixture
-// isolated while staying deterministic so the LazyCue description that embeds
-// the path hashes to a consistent per-world cache key. lazycueWorld() reads
-// LAZYCUE_WORLD, which the harness sets before the process starts, so it is
-// valid at package init.
-var diffFixtureDir = filepath.Join(os.TempDir(), "shelley-lazycue-diff-fixture-"+lazycueWorld())
+// viewer's file list is loaded from here. The path is fixed (not random) so the
+// LazyCue description that embeds it hashes to a stable cache key across runs.
+var diffFixtureDir = filepath.Join(os.TempDir(), "shelley-lazycue-diff-fixture")
 
 // setupDiffFixtureRepo (re)creates a git repo at dir with three kinds of
 // working-tree change: a modified tracked file, a deleted tracked file, and a
@@ -513,11 +486,6 @@ func setupDiffFixtureRepo(dir string) error {
 // startPredictableServer boots a Shelley server in predictable mode backed by a
 // temp DB and the embedded UI. It returns the test server and a cleanup func.
 func startPredictableServer() (*httptest.Server, func()) {
-	// Pin the default frontend world for the served pages to match the cache
-	// world this process targets. Per-request header overrides aren't available
-	// to the lazycue browser, so we set the process-wide default instead.
-	os.Setenv("SHELLEY_UI", lazycueWorld())
-
 	tempDB, err := os.MkdirTemp("", "lazycue-db-")
 	if err != nil {
 		panic(err)

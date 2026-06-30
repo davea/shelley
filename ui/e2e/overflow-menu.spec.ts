@@ -1,13 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { createConversationViaAPI } from "../helpers";
+import { createConversationViaAPI } from "./helpers";
 
-// Vue-only: the top-right overflow ("kebab") menu is built from PrimeVue
-// components (Popover + SelectButton + Select) in the Vue world, but is still
-// the hand-rolled dropdown in React, so the interaction details below diverge.
-// See components/ChatOverflowMenu.vue. The shared DOM contract
-// (.chat-overflow-menu-wrapper / .btn-icon / .overflow-menu-item) is covered
-// by the cross-world specs (agents-md-vim, diff-viewer-find); here we exercise
-// the PrimeVue-specific controls.
+// The top-right overflow ("kebab") menu is built from PrimeVue components
+// (Popover + SelectButton + Select). See components/ChatOverflowMenu.vue. The
+// DOM contract (.chat-overflow-menu-wrapper / .btn-icon / .overflow-menu-item)
+// is covered by other specs (agents-md-vim, diff-viewer-find); here we
+// exercise the PrimeVue-specific controls.
 test.describe("Overflow menu (PrimeVue)", () => {
   test("popover opens, theme/markdown SelectButtons and language Select work", async ({
     page,

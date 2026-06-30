@@ -410,18 +410,18 @@ func TestOutputIframeToolSchema(t *testing.T) {
 }
 
 // TestLibraryPathsInSync guards against the LIBRARY_PATHS map in
-// ui/src/components/OutputIframeTool.tsx drifting from allowedLibraries.
-// If they fall out of sync, the Go tool will accept a name the UI can't
-// fetch, leaving window.__LIBS__ unresolved.
+// ui/src/vue/components/tools/OutputIframeTool.vue drifting from
+// allowedLibraries. If they fall out of sync, the Go tool will accept a name
+// the UI can't fetch, leaving window.__LIBS__ unresolved.
 func TestLibraryPathsInSync(t *testing.T) {
-	data, err := os.ReadFile("../ui/src/components/OutputIframeTool.tsx")
+	data, err := os.ReadFile("../ui/src/vue/components/tools/OutputIframeTool.vue")
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(data)
 	start := strings.Index(src, "const LIBRARY_PATHS")
 	if start < 0 {
-		t.Fatal("LIBRARY_PATHS not found in OutputIframeTool.tsx")
+		t.Fatal("LIBRARY_PATHS not found in OutputIframeTool.vue")
 	}
 	end := strings.Index(src[start:], "};")
 	if end < 0 {
@@ -434,7 +434,7 @@ func TestLibraryPathsInSync(t *testing.T) {
 			t.Errorf("LIBRARY_PATHS missing entry for %q -> %q\nblock: %s", name, path, block)
 		}
 	}
-	// Also sanity-check there are no extra TSX entries by counting commas+entries.
+	// Also sanity-check there are no extra entries by counting commas+entries.
 	lines := strings.Split(block, "\n")
 	entries := 0
 	for _, ln := range lines {

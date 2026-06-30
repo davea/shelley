@@ -1,13 +1,12 @@
 import { test, expect } from "@playwright/test";
-import { createConversationViaAPI } from "../helpers";
+import { createConversationViaAPI } from "./helpers";
 
-// Vue-only: the base Modal.vue is backed by PrimeVue Dialog in the Vue world
-// (focus trap, role="dialog"/aria-modal, mask + Escape owned by PrimeVue) but
-// is still a hand-rolled Teleport div in React, so the behaviours below
-// diverge. See components/Modal.vue. The DOM/ARIA contract that the
-// cross-world specs rely on (.modal-overlay mask, .modal panel, .modal-header
-// .btn-icon close, .modal-body) is preserved via the #container slot and the
-// mask passthrough; here we exercise the PrimeVue-specific guarantees.
+// The base Modal.vue is backed by PrimeVue Dialog (focus trap,
+// role="dialog"/aria-modal, mask + Escape owned by PrimeVue). See
+// components/Modal.vue. The DOM/ARIA contract that the other specs rely on
+// (.modal-overlay mask, .modal panel, .modal-header .btn-icon close,
+// .modal-body) is preserved via the #container slot and the mask passthrough;
+// here we exercise the PrimeVue-specific guarantees.
 //
 // The Feature flags modal is the simplest consumer of the base Modal, and is
 // reachable via the command palette (Cmd/Ctrl+K -> "feature").

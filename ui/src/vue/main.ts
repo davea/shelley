@@ -1,7 +1,6 @@
-// Vue 3 + PrimeVue entry point. Drop-in replacement for src/main.tsx: it emits
-// dist/main.js + dist/main.css, mounts into #root, and respects the same
-// routing (/export/<id> vs the chat app) and side-effects (theme,
-// notifications) as the legacy React entry.
+// Vue 3 + PrimeVue entry point. Emits dist/main.js + dist/main.css, mounts into
+// #root, and handles routing (/export/<id> vs the chat app) plus app-wide
+// side-effects (theme, notifications).
 import { createApp } from "vue";
 import PrimeVue from "primevue/config";
 import Tooltip from "primevue/tooltip";
