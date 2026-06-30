@@ -31,6 +31,7 @@ const (
 	Claude45Opus   = "claude-opus-4-5-20251101"
 	Claude46Opus   = "claude-opus-4-6"
 	Claude46Sonnet = "claude-sonnet-4-6"
+	Claude5Sonnet  = "claude-sonnet-5"
 	Claude47Opus   = "claude-opus-4-7"
 	Claude48Opus   = "claude-opus-4-8"
 	ClaudeFable5   = "claude-fable-5"
@@ -44,6 +45,7 @@ var modelMaxOutputTokens = map[string]int{
 	Claude47Opus:   128000,
 	Claude46Opus:   128000,
 	Claude45Opus:   128000,
+	Claude5Sonnet:  64000,
 	Claude46Sonnet: 64000,
 	Claude45Sonnet: 64000,
 	Claude4Sonnet:  64000,
@@ -102,7 +104,7 @@ func (s *Service) maxOutputTokens() int {
 	switch model {
 	case ClaudeFable5, Claude48Opus, Claude47Opus, Claude46Opus:
 		return 128000
-	case Claude4Sonnet, Claude45Sonnet, Claude46Sonnet,
+	case Claude4Sonnet, Claude45Sonnet, Claude46Sonnet, Claude5Sonnet,
 		Claude45Haiku, Claude45Opus:
 		return 64000
 	default:
@@ -284,7 +286,7 @@ type systemContent struct {
 // "claude-opus-4-80".
 func useAdaptiveThinking(model string) bool {
 	model = "-" + strings.ReplaceAll(model, ".", "-") + "-"
-	for _, m := range []string{ClaudeFable5, Claude48Opus, Claude47Opus} {
+	for _, m := range []string{ClaudeFable5, Claude5Sonnet, Claude48Opus, Claude47Opus} {
 		if strings.Contains(model, "-"+m+"-") {
 			return true
 		}

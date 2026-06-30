@@ -266,6 +266,12 @@ func All() []Model {
 			Build: antSvc(ant.Claude45Opus),
 		},
 		{
+			ID: "claude-sonnet-5", Provider: ProviderAnthropic,
+			Description: "Claude Sonnet 5", APIModelName: ant.Claude5Sonnet,
+			APIType: APITypeAnthropicMessages, DefaultBaseURL: DefaultAnthropicBaseURL,
+			Build: antSvc(ant.Claude5Sonnet),
+		},
+		{
 			ID: "claude-sonnet-4.6", Provider: ProviderAnthropic,
 			Description: "Claude Sonnet 4.6", APIModelName: ant.Claude46Sonnet,
 			APIType: APITypeAnthropicMessages, DefaultBaseURL: DefaultAnthropicBaseURL,
