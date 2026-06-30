@@ -309,6 +309,17 @@ UPDATE conversations
 SET conversation_options = ?
 WHERE conversation_id = ?;
 
+-- name: GetConversationQueuedMessages :one
+SELECT queued_messages FROM conversations
+WHERE conversation_id = ?;
+
+-- name: UpdateConversationQueuedMessages :exec
+-- Replaces the queued-messages JSON array and bumps updated_at so the
+-- conversation re-sorts and a list-patch diff is emitted for the change.
+UPDATE conversations
+SET queued_messages = ?, updated_at = CURRENT_TIMESTAMP
+WHERE conversation_id = ?;
+
 -- name: UpdateConversationParent :one
 UPDATE conversations
 SET parent_conversation_id = ?, updated_at = CURRENT_TIMESTAMP

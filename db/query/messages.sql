@@ -105,10 +105,11 @@ WHERE conversation_id = ? AND sequence_id > ?
 ORDER BY sequence_id ASC;
 
 -- name: UpdateMessageUserData :exec
+-- Mutating message rows is forbidden in production paths (messages are an
+-- immutable, append-only log keyed by sequence_id and cached in the browser).
+-- This UPDATE exists ONLY for the FTS-trigger test (TestMessages*), which
+-- verifies the messages_fts AFTER UPDATE trigger re-indexes user_data.
 UPDATE messages SET user_data = ? WHERE message_id = ?;
-
--- name: UpdateMessageExcludedFromContext :exec
-UPDATE messages SET excluded_from_context = ? WHERE message_id = ?;
 
 -- name: ListAgentMessagesSinceLastUser :many
 -- Returns the agent messages produced during the most recent user turn,

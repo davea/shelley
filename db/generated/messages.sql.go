@@ -632,20 +632,6 @@ func (q *Queries) ListMessagesTail(ctx context.Context, arg ListMessagesTailPara
 	return items, nil
 }
 
-const updateMessageExcludedFromContext = `-- name: UpdateMessageExcludedFromContext :exec
-UPDATE messages SET excluded_from_context = ? WHERE message_id = ?
-`
-
-type UpdateMessageExcludedFromContextParams struct {
-	ExcludedFromContext bool   `json:"excluded_from_context"`
-	MessageID           string `json:"message_id"`
-}
-
-func (q *Queries) UpdateMessageExcludedFromContext(ctx context.Context, arg UpdateMessageExcludedFromContextParams) error {
-	_, err := q.db.ExecContext(ctx, updateMessageExcludedFromContext, arg.ExcludedFromContext, arg.MessageID)
-	return err
-}
-
 const updateMessageUserData = `-- name: UpdateMessageUserData :exec
 UPDATE messages SET user_data = ? WHERE message_id = ?
 `
@@ -655,6 +641,10 @@ type UpdateMessageUserDataParams struct {
 	MessageID string  `json:"message_id"`
 }
 
+// Mutating message rows is forbidden in production paths (messages are an
+// immutable, append-only log keyed by sequence_id and cached in the browser).
+// This UPDATE exists ONLY for the FTS-trigger test (TestMessages*), which
+// verifies the messages_fts AFTER UPDATE trigger re-indexes user_data.
 func (q *Queries) UpdateMessageUserData(ctx context.Context, arg UpdateMessageUserDataParams) error {
 	_, err := q.db.ExecContext(ctx, updateMessageUserData, arg.UserData, arg.MessageID)
 	return err

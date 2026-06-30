@@ -24,7 +24,6 @@
     :message="node.item.message"
     :on-open-diff-viewer="onOpenDiffViewer"
     :on-comment-text-change="onCommentTextChange"
-    :on-cancel-queued="isQueuedMessage(node.item.message) ? onCancelQueued : undefined"
     :tool-progress="toolProgress"
     :on-fork="conversationId ? onFork : undefined"
   />
@@ -56,14 +55,13 @@
       :conversation-id="conversationId"
       :on-open-diff-viewer="onOpenDiffViewer"
       :on-comment-text-change="onCommentTextChange"
-      :on-cancel-queued="onCancelQueued"
       :on-fork="onFork"
     />
   </CarriedBand>
 </template>
 
 <script setup lang="ts">
-import { type ToolProgress, isQueuedMessage } from "../../types";
+import { type ToolProgress } from "../../types";
 import type { RenderNode } from "./renderNode";
 import MessageComponent from "./Message.vue";
 import MessageTimestamp from "./MessageTimestamp.vue";
@@ -77,7 +75,6 @@ defineProps<{
   conversationId: string | null;
   onOpenDiffViewer: (commit: string, cwd?: string) => void;
   onCommentTextChange: (text: string) => void;
-  onCancelQueued: () => void;
   onFork: (messageId: string) => void;
 }>();
 </script>

@@ -352,6 +352,17 @@ class ApiService {
     }
   }
 
+  // Cancel a single queued message by its QueuedMessage id.
+  async cancelQueuedMessage(conversationId: string, queuedId: string): Promise<void> {
+    const response = await fetch(
+      `${this.baseUrl}/conversation/${conversationId}/cancel-queued?queued_id=${encodeURIComponent(queuedId)}`,
+      { method: "POST" },
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to cancel queued message: ${response.statusText}`);
+    }
+  }
+
   async validateCwd(path: string): Promise<{ valid: boolean; error?: string }> {
     const response = await fetch(`${this.baseUrl}/validate-cwd?path=${encodeURIComponent(path)}`);
     if (!response.ok) {

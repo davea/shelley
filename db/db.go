@@ -432,6 +432,159 @@ func (db *DB) PromoteDraft(ctx context.Context, conversationID string) error {
 	})
 }
 
+// QueuedMessage is one user message held in a conversation's queued_messages
+// JSON array while the agent is busy or distilling. The array is the single
+// source of truth for queued user input (there is no `messages` row until the
+// item drains). On drain the Llm payload is fed to the loop verbatim and a
+// normal, immutable user message is inserted with a fresh sequence_id.
+type QueuedMessage struct {
+	// ID is a stable identifier so clients can cancel a single queued item
+	// and so drain can remove exactly the item it consumed.
+	ID string `json:"id"`
+	// Llm is the raw JSON of the llm.Message to feed to the loop on drain.
+	// Stored as RawMessage so package db stays decoupled from package llm.
+	Llm json.RawMessage `json:"llm"`
+	// CreatedAt is when the message was queued (RFC3339).
+	CreatedAt time.Time `json:"created_at"`
+	// Model is the model id chosen at queue time, used to start/continue the
+	// loop when the queue drains.
+	Model string `json:"model"`
+}
+
+// ParseQueuedMessagesStrict parses the queued_messages JSON array, returning an
+// error if a NON-EMPTY column fails to unmarshal. MUTATION paths (append /
+// remove, and the atomic drain removal in insertMessageTx) MUST use this so a
+// corrupt-but-nonempty column is never silently overwritten with '[]', which
+// would lose queued user input. An empty string (legacy rows predating the
+// NOT NULL DEFAULT) parses to nil without error.
+func ParseQueuedMessagesStrict(s string) ([]QueuedMessage, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var out []QueuedMessage
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil, fmt.Errorf("failed to parse queued_messages JSON (%d bytes): %w", len(s), err)
+	}
+	return out, nil
+}
+
+// ParseQueuedMessages parses the queued_messages JSON array leniently for
+// READ / render / Hydrate paths: invalid input yields an empty slice (callers
+// that care about corruption should log; see Hydrate). Returns an empty slice
+// for empty or invalid input (the column defaults to '[]'). MUTATION paths must
+// use ParseQueuedMessagesStrict instead.
+func ParseQueuedMessages(s string) []QueuedMessage {
+	out, _ := ParseQueuedMessagesStrict(s)
+	return out
+}
+
+// MarshalQueuedMessages serializes a queued-message slice for storage. A nil
+// or empty slice serializes to "[]" so the column never holds null.
+func MarshalQueuedMessages(msgs []QueuedMessage) (string, error) {
+	if len(msgs) == 0 {
+		return "[]", nil
+	}
+	b, err := json.Marshal(msgs)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal queued messages: %w", err)
+	}
+	return string(b), nil
+}
+
+// AppendQueuedMessage atomically appends qm to a conversation's
+// queued_messages array and bumps updated_at (which re-sorts the conversation
+// and triggers a list-patch recompute). Returns the conversation row after the
+// update so callers can broadcast it.
+func (db *DB) AppendQueuedMessage(ctx context.Context, conversationID string, qm QueuedMessage) (*generated.Conversation, error) {
+	var conv generated.Conversation
+	err := db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		raw, err := q.GetConversationQueuedMessages(ctx, conversationID)
+		if err != nil {
+			return err
+		}
+		existing, err := ParseQueuedMessagesStrict(raw)
+		if err != nil {
+			return err
+		}
+		msgs := append(existing, qm)
+		jsonStr, err := MarshalQueuedMessages(msgs)
+		if err != nil {
+			return err
+		}
+		if err := q.UpdateConversationQueuedMessages(ctx, generated.UpdateConversationQueuedMessagesParams{
+			QueuedMessages: jsonStr,
+			ConversationID: conversationID,
+		}); err != nil {
+			return err
+		}
+		conv, err = q.GetConversation(ctx, conversationID)
+		return err
+	})
+	return &conv, err
+}
+
+// RemoveQueuedMessages atomically removes the queued messages whose IDs are in
+// the given set and bumps updated_at. Returns the conversation row after the
+// update. IDs not present are ignored. Passing no ids is a no-op append-bump
+// avoided by the caller.
+func (db *DB) RemoveQueuedMessages(ctx context.Context, conversationID string, ids ...string) (*generated.Conversation, error) {
+	remove := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		remove[id] = true
+	}
+	var conv generated.Conversation
+	err := db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		raw, err := q.GetConversationQueuedMessages(ctx, conversationID)
+		if err != nil {
+			return err
+		}
+		msgs, err := ParseQueuedMessagesStrict(raw)
+		if err != nil {
+			return err
+		}
+		kept := msgs[:0]
+		for _, m := range msgs {
+			if !remove[m.ID] {
+				kept = append(kept, m)
+			}
+		}
+		jsonStr, err := MarshalQueuedMessages(kept)
+		if err != nil {
+			return err
+		}
+		if err := q.UpdateConversationQueuedMessages(ctx, generated.UpdateConversationQueuedMessagesParams{
+			QueuedMessages: jsonStr,
+			ConversationID: conversationID,
+		}); err != nil {
+			return err
+		}
+		conv, err = q.GetConversation(ctx, conversationID)
+		return err
+	})
+	return &conv, err
+}
+
+// ClearQueuedMessages resets a conversation's queued_messages array to '[]'
+// and bumps updated_at. Returns the conversation row after the update.
+func (db *DB) ClearQueuedMessages(ctx context.Context, conversationID string) (*generated.Conversation, error) {
+	var conv generated.Conversation
+	err := db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		q := generated.New(tx.Conn())
+		if err := q.UpdateConversationQueuedMessages(ctx, generated.UpdateConversationQueuedMessagesParams{
+			QueuedMessages: "[]",
+			ConversationID: conversationID,
+		}); err != nil {
+			return err
+		}
+		var err error
+		conv, err = q.GetConversation(ctx, conversationID)
+		return err
+	})
+	return &conv, err
+}
+
 // ErrConversationNotDraft is returned by PromoteDraft when the
 // conversation is not (or is no longer) a draft. Callers that gate on
 // IsDraft should treat this as a race condition / 4xx, not a 500.
@@ -902,6 +1055,13 @@ type CreateMessageParams struct {
 	// commit. Most message writes want this; system-prompt and other internal
 	// metadata inserts deliberately leave it false (see the callers in convo.go).
 	BumpTimestamp bool
+	// RemoveQueuedID, when non-empty, drops the matching entry from the
+	// conversation's queued_messages array inside the SAME Tx as the INSERT.
+	// Drain uses this so creating the real (immutable) user message and
+	// removing its queued mirror entry are atomic: if the Tx aborts, neither
+	// the row nor the array change persists, so a crash can't leave an array
+	// entry that Hydrate would re-feed as a duplicate.
+	RemoveQueuedID string
 }
 
 // nullableString returns nil for an empty string so the column is stored as
@@ -990,6 +1150,34 @@ func insertMessageTx(ctx context.Context, q *generated.Queries, params CreateMes
 	if params.MarkAgentDone || params.MarkAgentStart {
 		if err := q.SetConversationAgentWorking(ctx, generated.SetConversationAgentWorkingParams{
 			AgentWorking:   params.MarkAgentStart,
+			ConversationID: params.ConversationID,
+		}); err != nil {
+			return generated.Message{}, err
+		}
+	}
+	if params.RemoveQueuedID != "" {
+		raw, err := q.GetConversationQueuedMessages(ctx, params.ConversationID)
+		if err != nil {
+			return generated.Message{}, err
+		}
+		msgs, err := ParseQueuedMessagesStrict(raw)
+		if err != nil {
+			return generated.Message{}, err
+		}
+		kept := msgs[:0]
+		for _, m := range msgs {
+			if m.ID != params.RemoveQueuedID {
+				kept = append(kept, m)
+			}
+		}
+		jsonStr, err := MarshalQueuedMessages(kept)
+		if err != nil {
+			return generated.Message{}, err
+		}
+		// UpdateConversationQueuedMessages also bumps updated_at, so this
+		// satisfies the re-sort even when BumpTimestamp wasn't set.
+		if err := q.UpdateConversationQueuedMessages(ctx, generated.UpdateConversationQueuedMessagesParams{
+			QueuedMessages: jsonStr,
 			ConversationID: params.ConversationID,
 		}); err != nil {
 			return generated.Message{}, err
@@ -1254,17 +1442,6 @@ func (db *DB) CountMessagesByType(ctx context.Context, conversationID string, me
 		return err
 	})
 	return count, err
-}
-
-// UpdateMessageUserData updates the user_data JSON field of a message
-func (db *DB) UpdateMessageUserData(ctx context.Context, messageID string, userData *string) error {
-	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
-		q := generated.New(tx.Conn())
-		return q.UpdateMessageUserData(ctx, generated.UpdateMessageUserDataParams{
-			MessageID: messageID,
-			UserData:  userData,
-		})
-	})
 }
 
 // Queries provides read-only access to generated queries within a read transaction

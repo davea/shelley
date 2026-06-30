@@ -173,31 +173,6 @@
           </div>
         </template>
 
-        <div v-if="isQueued" class="queued-message-badge" data-testid="queued-badge">
-          <span class="queued-message-badge-label">
-            <svg
-              fill="currentColor"
-              viewBox="0 0 24 24"
-              width="14"
-              height="14"
-              style="margin-right: 4px; vertical-align: middle"
-            >
-              <path
-                d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"
-              />
-            </svg>
-            Queued
-          </span>
-          <button
-            v-if="onCancelQueued"
-            class="queued-message-badge-cancel"
-            data-testid="cancel-queued"
-            title="Cancel queued message"
-            @click="onQueuedCancel"
-          >
-            Cancel
-          </button>
-        </div>
       </div>
     </div>
     <UsageDetailModal
@@ -227,7 +202,6 @@ import {
   type Usage,
   type ToolProgress,
   isDistillStatusMessage,
-  isQueuedMessage,
 } from "../../types";
 import { type MarkdownMode } from "../../services/settings";
 import { useMarkdownMode } from "../composables/markdownMode";
@@ -256,7 +230,6 @@ const props = defineProps<{
   message: MessageType;
   onOpenDiffViewer?: (commit: string, cwd?: string) => void;
   onCommentTextChange?: (text: string) => void;
-  onCancelQueued?: () => void;
   toolProgress?: Record<string, ToolProgress>;
   // onFork forks the conversation, copying messages up to and including this
   // one into a new conversation and navigating to it.
@@ -374,8 +347,6 @@ const distillationContentOverride = ref<string | null>(null);
 const displayedDistillationContent = computed(
   () => distillationContentOverride.value ?? distillation.value.distillationContent,
 );
-
-const isQueued = computed(() => isUser.value && isQueuedMessage(props.message));
 
 // ---- Text extraction for copy ----
 function getMessageText(): string {
@@ -520,7 +491,7 @@ const hasRenderableContent = computed(() => {
 // ---- Message container classes ----
 const messageClasses = computed(() => {
   if (isUser.value && !isDistilledUser.value) {
-    return `message message-user${isQueued.value ? " message-queued" : ""}`;
+    return `message message-user`;
   }
   if (isError.value) return "message message-error";
   if (isTool.value) return "message message-tool";
@@ -579,11 +550,6 @@ function handleFork() {
 function openDistillationEditor(e: MouseEvent) {
   e.stopPropagation();
   showDistillationEditor.value = true;
-}
-
-function onQueuedCancel(e: MouseEvent) {
-  e.stopPropagation();
-  props.onCancelQueued?.();
 }
 
 // Close action bar when clicking outside (mirrors the React useEffect).

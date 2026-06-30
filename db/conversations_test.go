@@ -854,3 +854,168 @@ func TestSplitPreviewPacked(t *testing.T) {
 		})
 	}
 }
+
+func TestQueuedMessages(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conv, err := db.CreateConversation(ctx, stringPtr("queued-test"), true, nil, nil, ConversationOptions{})
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	id := conv.ConversationID
+
+	// Fresh conversation defaults to an empty array.
+	if got := ParseQueuedMessages(conv.QueuedMessages); len(got) != 0 {
+		t.Fatalf("new conversation queued_messages = %v, want empty", got)
+	}
+
+	// Append two messages.
+	for _, qm := range []QueuedMessage{
+		{ID: "a", Llm: []byte(`{"role":"user"}`), CreatedAt: time.Now(), Model: "m1"},
+		{ID: "b", Llm: []byte(`{"role":"user"}`), CreatedAt: time.Now(), Model: "m1"},
+	} {
+		if _, err := db.AppendQueuedMessage(ctx, id, qm); err != nil {
+			t.Fatalf("AppendQueuedMessage: %v", err)
+		}
+	}
+
+	after, err := db.GetConversationByID(ctx, id)
+	if err != nil {
+		t.Fatalf("GetConversationByID: %v", err)
+	}
+	got := ParseQueuedMessages(after.QueuedMessages)
+	if len(got) != 2 || got[0].ID != "a" || got[1].ID != "b" {
+		t.Fatalf("after append, queued = %+v, want [a b] in order", got)
+	}
+
+	// Remove one by id.
+	if _, err := db.RemoveQueuedMessages(ctx, id, "a"); err != nil {
+		t.Fatalf("RemoveQueuedMessages: %v", err)
+	}
+	after, _ = db.GetConversationByID(ctx, id)
+	got = ParseQueuedMessages(after.QueuedMessages)
+	if len(got) != 1 || got[0].ID != "b" {
+		t.Fatalf("after remove, queued = %+v, want [b]", got)
+	}
+
+	// Clear.
+	if _, err := db.ClearQueuedMessages(ctx, id); err != nil {
+		t.Fatalf("ClearQueuedMessages: %v", err)
+	}
+	after, _ = db.GetConversationByID(ctx, id)
+	if after.QueuedMessages != "[]" {
+		t.Fatalf("after clear, queued_messages = %q, want []", after.QueuedMessages)
+	}
+}
+
+// TestCreateMessageRemoveQueuedIDAtomic verifies that CreateMessageParams.
+// RemoveQueuedID drops the matching queued entry in the SAME Tx as the INSERT,
+// so the real (immutable) drained message and the array removal are atomic.
+func TestCreateMessageRemoveQueuedIDAtomic(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conv, err := db.CreateConversation(ctx, stringPtr("atomic-drain"), true, nil, nil, ConversationOptions{})
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	id := conv.ConversationID
+
+	for _, qm := range []QueuedMessage{
+		{ID: "keep", Llm: []byte(`{"role":"user"}`), CreatedAt: time.Now(), Model: "m"},
+		{ID: "drain", Llm: []byte(`{"role":"user"}`), CreatedAt: time.Now(), Model: "m"},
+	} {
+		if _, err := db.AppendQueuedMessage(ctx, id, qm); err != nil {
+			t.Fatalf("AppendQueuedMessage: %v", err)
+		}
+	}
+
+	// Insert a real user row AND remove the "drain" entry in one Tx.
+	if _, err := db.CreateMessage(ctx, CreateMessageParams{
+		ConversationID: id,
+		Type:           MessageTypeUser,
+		LLMData:        map[string]any{"Role": 0},
+		UsageData:      map[string]any{},
+		BumpTimestamp:  true,
+		RemoveQueuedID: "drain",
+	}); err != nil {
+		t.Fatalf("CreateMessage with RemoveQueuedID: %v", err)
+	}
+
+	after, _ := db.GetConversationByID(ctx, id)
+	got := ParseQueuedMessages(after.QueuedMessages)
+	if len(got) != 1 || got[0].ID != "keep" {
+		t.Fatalf("after atomic drain, queued = %+v, want [keep]", got)
+	}
+	msgs, err := db.ListMessages(ctx, id)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	users := 0
+	for _, m := range msgs {
+		if m.Type == string(MessageTypeUser) {
+			users++
+		}
+	}
+	if users != 1 {
+		t.Fatalf("expected exactly 1 real user row after drain, got %d", users)
+	}
+}
+
+// TestQueuedMessagesMutationStrictOnCorruptColumn verifies that append/remove
+// REFUSE to clobber a corrupt-but-nonempty queued_messages column (MAJOR 5),
+// while the lenient ParseQueuedMessages still returns empty for reads.
+func TestQueuedMessagesMutationStrictOnCorruptColumn(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conv, err := db.CreateConversation(ctx, stringPtr("corrupt-queue"), true, nil, nil, ConversationOptions{})
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	id := conv.ConversationID
+
+	// Write a corrupt (non-JSON) value directly.
+	if err := db.QueriesTx(ctx, func(q *generated.Queries) error {
+		return q.UpdateConversationQueuedMessages(ctx, generated.UpdateConversationQueuedMessagesParams{
+			QueuedMessages: "{not json",
+			ConversationID: id,
+		})
+	}); err != nil {
+		t.Fatalf("seed corrupt column: %v", err)
+	}
+
+	// Mutations must error rather than overwrite with '[]'.
+	if _, err := db.AppendQueuedMessage(ctx, id, QueuedMessage{ID: "x"}); err == nil {
+		t.Fatal("AppendQueuedMessage on corrupt column: want error, got nil")
+	}
+	if _, err := db.RemoveQueuedMessages(ctx, id, "x"); err == nil {
+		t.Fatal("RemoveQueuedMessages on corrupt column: want error, got nil")
+	}
+	// The corrupt data must still be intact (not clobbered).
+	after, _ := db.GetConversationByID(ctx, id)
+	if after.QueuedMessages != "{not json" {
+		t.Fatalf("corrupt column was modified: %q", after.QueuedMessages)
+	}
+	// Lenient read returns empty (for render/Hydrate), strict returns error.
+	if got := ParseQueuedMessages(after.QueuedMessages); len(got) != 0 {
+		t.Fatalf("lenient parse want empty, got %+v", got)
+	}
+	if _, err := ParseQueuedMessagesStrict(after.QueuedMessages); err == nil {
+		t.Fatal("ParseQueuedMessagesStrict want error on corrupt input")
+	}
+	// An explicit clear is still allowed (hard reset).
+	if _, err := db.ClearQueuedMessages(ctx, id); err != nil {
+		t.Fatalf("ClearQueuedMessages: %v", err)
+	}
+}

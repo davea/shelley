@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"shelley.exe.dev/claudetool"
 	"shelley.exe.dev/db"
 	"shelley.exe.dev/db/generated"
@@ -29,8 +30,11 @@ type pendingBatchKind int
 
 const (
 	// pendingBatchUser is a user-typed message queued during a busy turn or
-	// distillation. The DB row already exists (excluded_from_context=true,
-	// userData={queued:true}); drain feeds it to the loop and un-excludes.
+	// distillation. There is NO messages row for it: the message lives in the
+	// conversation's queued_messages JSON array (the persistent + broadcast
+	// mirror). This in-memory batch only carries the QueuedMessage id(s) so
+	// drain knows which array entries it is consuming. On drain the message is
+	// inserted as a normal, immutable user row and removed from the array.
 	pendingBatchUser pendingBatchKind = iota
 	// pendingBatchSubagentDone is a synthetic tool_use/tool_result pair
 	// from a finished child subagent. The DB rows do NOT exist yet; drain
@@ -47,9 +51,10 @@ type pendingBatch struct {
 	Kind     pendingBatchKind
 	Messages []llm.Message
 	ModelID  string
-	// MessageIDs is non-empty only for Kind=pendingBatchUser (one DB row
-	// per message); used for cancel and to clear excluded_from_context
-	// after delivery. Indexed parallel to Messages.
+	// MessageIDs is non-empty only for Kind=pendingBatchUser. It holds the
+	// QueuedMessage ids in the conversation's queued_messages array (NOT
+	// messages-row ids — no row exists yet). Used to remove the entry from
+	// the array on drain or cancel. Indexed parallel to Messages.
 	MessageIDs []string
 }
 
@@ -129,6 +134,13 @@ type ConversationManager struct {
 	// retryMu serializes RetryLastLLMRequest so concurrent retry POSTs don't
 	// produce duplicate LLM calls or double-broadcast user_data updates.
 	retryMu sync.Mutex
+	// lastRetriedErrorMessageID dedupes retry double-clicks WITHOUT mutating the
+	// error message row (which would reintroduce the immutability violation).
+	// Guarded by cm.mu. Once a retry kicks off for a given bottom error message,
+	// a second POST for the SAME message id is rejected. It naturally resets
+	// because the retried turn appends a new bottom message, so a future error
+	// has a different id.
+	lastRetriedErrorMessageID string
 
 	// onStateChange is called when the conversation state changes.
 	// This allows the server to broadcast state changes to all subscribers.
@@ -529,11 +541,59 @@ func (cm *ConversationManager) Hydrate(ctx context.Context) error {
 		_ = systemMsg // persisted to DB; ensureLoop will read it
 	}
 
+	// Parse the persisted queued_messages array up front (outside cm.mu).
+	// We turn these into in-memory user batches below so messages queued
+	// before a server restart survive and still drain.
+	type restoredQueued struct {
+		id  string
+		msg llm.Message
+		mdl string
+	}
+	var restored []restoredQueued
+	for _, qm := range db.ParseQueuedMessages(conversation.QueuedMessages) {
+		var msg llm.Message
+		if err := json.Unmarshal(qm.Llm, &msg); err != nil {
+			cm.logger.Error("Failed to parse persisted queued message; dropping", "queued_id", qm.ID, "error", err)
+			continue
+		}
+		restored = append(restored, restoredQueued{id: qm.ID, msg: msg, mdl: qm.Model})
+	}
+
 	cm.mu.Lock()
 	cm.hasConversationEvents = hasNonSystemMessages(messages)
 	cm.lastActivity = time.Now()
 	cm.hydrated = true
 	cm.modelID = modelID
+	// Restore array entries as user batches, but DEDUPE against any user
+	// batches already in cm.pendingBatches (keyed by QueuedMessage id). The
+	// drainer calls Hydrate while its in-memory batches are still present, and
+	// QueueMessage persists each message to BOTH the array and pendingBatches,
+	// so the same id can appear in both. Restoring a duplicate would feed it to
+	// the loop and insert a second immutable row. Prepend the survivors so they
+	// drain before batches that arrived while Hydrate was running.
+	existingQueuedIDs := make(map[string]bool)
+	for _, b := range cm.pendingBatches {
+		if b.Kind == pendingBatchUser {
+			for _, id := range b.MessageIDs {
+				existingQueuedIDs[id] = true
+			}
+		}
+	}
+	var restoredBatches []pendingBatch
+	for _, r := range restored {
+		if existingQueuedIDs[r.id] {
+			continue
+		}
+		restoredBatches = append(restoredBatches, pendingBatch{
+			Kind:       pendingBatchUser,
+			Messages:   []llm.Message{r.msg},
+			ModelID:    r.mdl,
+			MessageIDs: []string{r.id},
+		})
+	}
+	if len(restoredBatches) > 0 {
+		cm.pendingBatches = append(restoredBatches, cm.pendingBatches...)
+	}
 	// Seed agentWorking from the persisted column so a fresh manager (e.g.
 	// after switching back to a conversation whose loop is still running) sees
 	// the real state instead of the zero value.
@@ -655,6 +715,19 @@ func (cm *ConversationManager) RetryLastLLMRequest(ctx context.Context) error {
 	if retryable, _ := ud["retryable"].(bool); !retryable {
 		return errRetryNotApplicable
 	}
+
+	// Dedupe double-clicks: if we already kicked off a retry for THIS bottom
+	// error message, don't fire a second loop.Retry(). retryMu serializes us,
+	// but without this both POSTs would pass the bottom-retryable-error gate
+	// (no new message has been appended yet) and call Retry() twice.
+	cm.mu.Lock()
+	if cm.lastRetriedErrorMessageID == latest.MessageID {
+		cm.mu.Unlock()
+		return errRetryNotApplicable
+	}
+	cm.lastRetriedErrorMessageID = latest.MessageID
+	cm.mu.Unlock()
+
 	logger.Info("retrying last LLM request", "message_id", latest.MessageID)
 
 	cm.SetAgentWorking(true)
@@ -662,40 +735,41 @@ func (cm *ConversationManager) RetryLastLLMRequest(ctx context.Context) error {
 	return nil
 }
 
-// QueueMessage records a user message to the database as "queued" and holds it
-// for delivery after the current agent turn (or distillation) completes.
-// The message is visible in the UI immediately (with queued status).
+// QueueMessage appends a user message to the conversation's queued_messages
+// JSON array (the single source of truth for queued user input) and holds it
+// for delivery after the current agent turn (or distillation) completes. It
+// does NOT create a messages row — the message becomes a real, immutable row
+// only when it drains. The append bumps updated_at, which re-sorts the
+// conversation and fires the conversation-list patch + per-conversation
+// broadcast so the new queued entry reaches subscribers via stream2 diffs.
 func (cm *ConversationManager) QueueMessage(ctx context.Context, s *Server, modelID string, message llm.Message) error {
 	cm.waitDistillingSetup()
 
-	// Record to DB with queued user_data so it appears in the UI.
-	// Mark as excluded_from_context so ensureLoop won't load it into
-	// the loop's history — we'll feed it via QueueUserMessage when draining.
-	userData := map[string]interface{}{"queued": true}
-	createdMsg, err := s.db.CreateMessage(ctx, db.CreateMessageParams{
-		ConversationID:      cm.conversationID,
-		Type:                db.MessageTypeUser,
-		LLMData:             message,
-		UserData:            userData,
-		UsageData:           llm.Usage{},
-		ExcludedFromContext: true,
-		// Bump updated_at in the same Tx so the queued message re-sorts the
-		// conversation without a second commit / full-list recompute.
-		BumpTimestamp: true,
-	})
+	llmJSON, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("failed to record queued message: %w", err)
+		return fmt.Errorf("failed to marshal queued message: %w", err)
+	}
+	qm := db.QueuedMessage{
+		ID:        uuid.New().String(),
+		Llm:       llmJSON,
+		CreatedAt: time.Now().UTC(),
+		Model:     modelID,
+	}
+	if _, err := s.db.AppendQueuedMessage(ctx, cm.conversationID, qm); err != nil {
+		return fmt.Errorf("failed to append queued message: %w", err)
 	}
 
-	// Notify subscribers so the queued message appears in the UI
-	go s.notifySubscribersNewMessage(context.WithoutCancel(ctx), cm.conversationID, createdMsg)
+	// Broadcast the updated conversation (with the new queued_messages array)
+	// to per-conversation subscribers. The list-patch stream is refreshed
+	// automatically by the Pool.OnCommit hook fired by the append's Tx.
+	go s.notifySubscribers(context.WithoutCancel(ctx), cm.conversationID)
 
-	cm.logger.Info("Queued user message", "message_id", createdMsg.MessageID)
+	cm.logger.Info("Queued user message", "queued_id", qm.ID)
 	cm.enqueueBatch(s, pendingBatch{
 		Kind:       pendingBatchUser,
 		Messages:   []llm.Message{message},
 		ModelID:    modelID,
-		MessageIDs: []string{createdMsg.MessageID},
+		MessageIDs: []string{qm.ID},
 	})
 	return nil
 }
@@ -736,17 +810,18 @@ func (cm *ConversationManager) enqueueBatch(s *Server, b pendingBatch) {
 	}
 }
 
-// CancelQueuedMessages removes all pending queued *user* messages and deletes
-// them from the DB. Subagent-done batches stay queued: they represent work
-// the parent agent still needs to acknowledge, and they have no DB rows to
-// delete (those are recorded at drain time).
+// CancelQueuedMessages removes all pending queued *user* messages: it drops
+// the in-memory user batches and clears the conversation's queued_messages
+// array. Subagent-done batches stay queued: they represent work the parent
+// agent still needs to acknowledge, and they live only in memory (no array
+// entry).
 func (cm *ConversationManager) CancelQueuedMessages(ctx context.Context, s *Server) {
 	cm.mu.Lock()
-	var cancelled []pendingBatch
 	var keep []pendingBatch
+	cancelled := 0
 	for _, b := range cm.pendingBatches {
 		if b.Kind == pendingBatchUser {
-			cancelled = append(cancelled, b)
+			cancelled += len(b.MessageIDs)
 		} else {
 			keep = append(keep, b)
 		}
@@ -754,54 +829,82 @@ func (cm *ConversationManager) CancelQueuedMessages(ctx context.Context, s *Serv
 	cm.pendingBatches = keep
 	cm.mu.Unlock()
 
-	total := 0
-	for _, b := range cancelled {
-		for _, id := range b.MessageIDs {
-			if err := s.db.QueriesTx(ctx, func(q *generated.Queries) error {
-				return q.DeleteMessage(ctx, id)
-			}); err != nil {
-				cm.logger.Error("Failed to delete queued message", "message_id", id, "error", err)
-			}
-			total++
-		}
+	// Clear the persistent array regardless of the in-memory count so a
+	// restart-orphaned queue (array populated but no in-memory batches) can
+	// still be cleared by the user.
+	if _, err := s.db.ClearQueuedMessages(ctx, cm.conversationID); err != nil {
+		cm.logger.Error("Failed to clear queued messages", "error", err)
+		return
 	}
+	cm.logger.Info("Cancelled queued messages", "count", cancelled)
+	// Broadcast the updated (now-empty) queued_messages array. The list-patch
+	// stream refreshes via the clear Tx's Pool.OnCommit hook.
+	go s.notifySubscribers(context.WithoutCancel(ctx), cm.conversationID)
+}
 
-	if total > 0 {
-		cm.logger.Info("Cancelled queued messages", "count", total)
-		// Notify subscribers so the UI removes the cancelled messages
-		go s.notifySubscribers(context.WithoutCancel(ctx), cm.conversationID)
+// CancelQueuedMessage removes a single queued user message by its QueuedMessage
+// id, from both the in-memory drain queue and the persistent array. Used by the
+// per-ghost cancel affordance in the UI.
+func (cm *ConversationManager) CancelQueuedMessage(ctx context.Context, s *Server, queuedID string) {
+	cm.mu.Lock()
+	var keep []pendingBatch
+	removed := false
+	for _, b := range cm.pendingBatches {
+		if b.Kind != pendingBatchUser {
+			keep = append(keep, b)
+			continue
+		}
+		// User batches carry exactly one message (QueueMessage appends one at
+		// a time), so drop the whole batch when its id matches.
+		if len(b.MessageIDs) == 1 && b.MessageIDs[0] == queuedID {
+			removed = true
+			continue
+		}
+		keep = append(keep, b)
 	}
+	cm.pendingBatches = keep
+	cm.mu.Unlock()
+
+	if _, err := s.db.RemoveQueuedMessages(ctx, cm.conversationID, queuedID); err != nil {
+		cm.logger.Error("Failed to remove queued message", "queued_id", queuedID, "error", err)
+		return
+	}
+	cm.logger.Info("Cancelled queued message", "queued_id", queuedID, "in_memory", removed)
+	go s.notifySubscribers(context.WithoutCancel(ctx), cm.conversationID)
 }
 
 // processBatch feeds one pendingBatch into the loop and handles its
-// batch-kind-specific persistence side effects. Errors are logged; we do
-// not unwind earlier successful batches.
-func (cm *ConversationManager) processBatch(ctx context.Context, s *Server, loopInstance *loop.Loop, b pendingBatch) {
+// batch-kind-specific persistence side effects. It returns false when a USER
+// batch failed to persist (insert error): the caller re-enqueues it so it
+// retries on the next drain rather than being silently dropped (it is still in
+// the queued_messages array, and Hydrate already ran). Subagent-done failures
+// return true — we do NOT unwind/retry those (a half-written tool_use/result
+// pair would corrupt history).
+func (cm *ConversationManager) processBatch(ctx context.Context, s *Server, loopInstance *loop.Loop, b pendingBatch) (ok bool) {
 	switch b.Kind {
 	case pendingBatchUser:
-		// User batches: DB rows already exist (excluded). Feed to loop,
-		// then un-exclude and broadcast.
-		loopInstance.QueueMessages(b.Messages...)
-		for _, id := range b.MessageIDs {
-			if err := s.db.QueriesTx(ctx, func(q *generated.Queries) error {
-				if err := q.UpdateMessageExcludedFromContext(ctx, generated.UpdateMessageExcludedFromContextParams{
-					ExcludedFromContext: false,
-					MessageID:           id,
-				}); err != nil {
-					return err
-				}
-				newData := `{}`
-				return q.UpdateMessageUserData(ctx, generated.UpdateMessageUserDataParams{
-					UserData:  &newData,
-					MessageID: id,
-				})
-			}); err != nil {
-				cm.logger.Error("Failed to update queued message", "message_id", id, "error", err)
+		// User batches: no DB row exists yet — the message lives only in the
+		// conversation's queued_messages array. CREATE the real, immutable
+		// user row AND remove its array entry in ONE Tx (RemoveQueuedID), then
+		// feed it to the loop. The new row gets a fresh sequence_id at drain
+		// time — exactly the immutability we want — and the atomic removal
+		// means a crash can't leave an orphan array entry that Hydrate would
+		// re-feed as a duplicate.
+		for i, msg := range b.Messages {
+			queuedID := ""
+			if i < len(b.MessageIDs) {
+				queuedID = b.MessageIDs[i]
 			}
-			if updatedMsg, err := s.db.GetMessageByID(ctx, id); err == nil {
-				go s.broadcastMessageUpdate(ctx, cm.conversationID, updatedMsg)
+			if err := s.recordDrainedQueuedMessage(ctx, cm.conversationID, queuedID, msg); err != nil {
+				cm.logger.Error("Failed to record drained queued message; will retry", "error", err)
+				return false
 			}
 		}
+		// notifySubscribersNewMessage (fired by recordDrainedQueuedMessage)
+		// already carried the cleaned array, so the ghost clears live; no extra
+		// broadcast needed.
+		loopInstance.QueueMessages(b.Messages...)
+		return true
 	case pendingBatchSubagentDone:
 		// Subagent-done batches: persist the synthetic pair now (in batch
 		// order so a future Hydrate reads them back correctly), then feed
@@ -811,11 +914,13 @@ func (cm *ConversationManager) processBatch(ctx context.Context, s *Server, loop
 		for _, msg := range b.Messages {
 			if err := cm.recordMessage(ctx, msg, llm.Usage{}); err != nil {
 				cm.logger.Error("Failed to record synthetic subagent message", "error", err)
-				return
+				return true // do not retry subagent-done batches
 			}
 		}
 		loopInstance.QueueMessages(b.Messages...)
+		return true
 	}
+	return true
 }
 
 // drainPendingMessages processes any queued batches after an agent turn ends.
@@ -871,6 +976,12 @@ restart:
 		cm.mu.Unlock()
 		return
 	}
+	// Snapshot+clear the batches we will feed this pass. We clear up front
+	// (rather than after Hydrate) so subagent-done batches keep their atomic
+	// ordering guarantee: a turn-end recordMessage that fires a re-entrant
+	// drainPendingMessages must NOT see these batches half-processed. The
+	// loop==nil/Hydrate dedup below handles the only resulting hazard (a queued
+	// user id present in BOTH this snapshot and the array Hydrate restores).
 	batches := cm.pendingBatches
 	cm.pendingBatches = nil
 	loopInstance := cm.loop
@@ -898,9 +1009,16 @@ restart:
 	}
 
 	// Make sure we have a loop. For the no-loop case (e.g. post-distillation
-	// or post-cancel), Hydrate+ensureLoop reads history from the DB; user
-	// batches are still excluded_from_context so they won't double-load, and
-	// subagent-done batches have no DB rows yet.
+	// or post-cancel, where CancelConversation reset hydrated=false), Hydrate+
+	// ensureLoop reads history from the DB. Queued user messages have NO
+	// messages row yet (they live in queued_messages), so they can't
+	// double-load. Hydrate repopulates user batches from the array and appends
+	// them to cm.pendingBatches (for the goto-restart pass). But the ids in our
+	// just-cleared `batches` snapshot are ALSO in the array, so Hydrate would
+	// restore them again — feeding the same message twice and inserting a
+	// duplicate immutable row. After Hydrate we therefore drop any restored
+	// user batch whose id is in this snapshot. processBatch's atomic
+	// insert+removal handles the array side.
 	if loopInstance == nil {
 		if err := cm.Hydrate(ctx); err != nil {
 			cm.logger.Error("Failed to hydrate for queued batches", "error", err)
@@ -913,14 +1031,46 @@ restart:
 		cm.mu.Lock()
 		loopInstance = cm.loop
 		cm.hasConversationEvents = true
+		cm.dropRestoredDuplicatesLocked(batches)
 		cm.mu.Unlock()
 	}
 	if loopInstance == nil {
 		return
 	}
 
+	var failedUser []pendingBatch
+	fedAny := false
 	for _, b := range batches {
-		cm.processBatch(ctx, s, loopInstance, b)
+		if cm.processBatch(ctx, s, loopInstance, b) {
+			fedAny = true
+		} else {
+			// User batch failed to persist (still in the queued_messages array).
+			// Re-enqueue so it retries on a LATER drain instead of being lost
+			// from memory while Hydrate (which already ran) won't re-read it.
+			failedUser = append(failedUser, b)
+		}
+	}
+	if len(failedUser) > 0 {
+		cm.mu.Lock()
+		// Prepend so failed batches drain before newer ones, preserving order.
+		cm.pendingBatches = append(failedUser, cm.pendingBatches...)
+		cm.mu.Unlock()
+		// Return WITHOUT goto restart: re-looping immediately would hot-spin on
+		// a persistent failure (e.g. DB down). Liveness of the re-enqueued (and
+		// any newer) batches is still guaranteed by an external drain trigger:
+		//   - fedAny=true: we fed the loop at least one message this pass, so the
+		//     loop runs and its end-of-turn recordMessage calls drainPendingMessages
+		//     again, which picks up failedUser + anything enqueued meanwhile. We
+		//     flip agentWorking=true to reflect that a turn is now running.
+		//   - fedAny=false (pure-failure pass): we leave agentWorking=false, so the
+		//     next enqueueBatch (its `!agentWorking` gate) starts a fresh drain.
+		// The only "stuck until next enqueue/restart" case is a pure-failure pass
+		// with no subsequent activity — an acceptable DB-down degradation; the
+		// messages survive in the queued_messages array either way.
+		if fedAny {
+			cm.SetAgentWorking(true)
+		}
+		return
 	}
 
 	cm.SetAgentWorking(true)
@@ -929,6 +1079,34 @@ restart:
 	// back to pick them up under the same draining ownership so we never
 	// start a second concurrent drainer.
 	goto restart
+}
+
+// dropRestoredDuplicatesLocked removes from cm.pendingBatches any user batch
+// whose QueuedMessage id already appears (as a pendingBatchUser) in the given
+// snapshot. Hydrate restores user batches from the queued_messages array; when
+// the drainer has already snapshotted those same ids for the current pass,
+// restoring them would feed the message twice and insert a duplicate immutable
+// row. Caller must hold cm.mu.
+func (cm *ConversationManager) dropRestoredDuplicatesLocked(snapshot []pendingBatch) {
+	snapIDs := make(map[string]bool)
+	for _, b := range snapshot {
+		if b.Kind == pendingBatchUser {
+			for _, id := range b.MessageIDs {
+				snapIDs[id] = true
+			}
+		}
+	}
+	if len(snapIDs) == 0 {
+		return
+	}
+	kept := cm.pendingBatches[:0]
+	for _, b := range cm.pendingBatches {
+		if b.Kind == pendingBatchUser && len(b.MessageIDs) == 1 && snapIDs[b.MessageIDs[0]] {
+			continue
+		}
+		kept = append(kept, b)
+	}
+	cm.pendingBatches = kept
 }
 
 const maxConsecutiveWarnings = 3
@@ -1578,20 +1756,22 @@ func (cm *ConversationManager) CancelConversation(ctx context.Context) error {
 	// is taking over; any followups they want to ask about subagents will
 	// arrive as new user messages.
 	cm.mu.Lock()
-	pendingToDelete := cm.pendingBatches
 	cm.pendingBatches = nil
 	cm.mu.Unlock()
 
-	// Delete orphaned queued user-message DB rows. Subagent-done batches
-	// have no DB rows yet (they would have been recorded at drain time),
-	// so nothing to delete for those.
-	for _, b := range pendingToDelete {
-		for _, id := range b.MessageIDs {
-			if err := cm.db.QueriesTx(ctx, func(q *generated.Queries) error {
-				return q.DeleteMessage(ctx, id)
-			}); err != nil {
-				cm.logger.Error("Failed to delete queued message on cancel", "message_id", id, "error", err)
-			}
+	// Clear the persistent queued_messages array when it actually holds
+	// entries. We must NOT gate this on the in-memory pendingBatches, which can
+	// diverge from the array (e.g. after a restart the manager may be re-created
+	// with an empty queue while the array still holds entries) — instead we read
+	// the persisted column (cheap reader-pool query) and only issue the
+	// writer-pool clear when there is something to clear. The common cancel case
+	// has an empty queue, so this avoids an extra transaction on SQLite's single
+	// writer connection in the cancel hot path.
+	if conv, err := cm.db.GetConversationByID(ctx, cm.conversationID); err != nil {
+		cm.logger.Error("Failed to read queued messages on cancel", "error", err)
+	} else if conv.QueuedMessages != "" && conv.QueuedMessages != "[]" {
+		if _, err := cm.db.ClearQueuedMessages(ctx, cm.conversationID); err != nil {
+			cm.logger.Error("Failed to clear queued messages on cancel", "error", err)
 		}
 	}
 

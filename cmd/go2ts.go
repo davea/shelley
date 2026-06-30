@@ -118,6 +118,7 @@ type conversationWithStateForTS struct {
 	Tags                 string  `json:"tags"`
 	IsDraft              bool    `json:"is_draft"`
 	Draft                string  `json:"draft"`
+	QueuedMessages       string  `json:"queued_messages"`
 	Working              bool    `json:"working"`
 	GitRepoRoot          string  `json:"git_repo_root,omitempty"`
 	GitWorktreeRoot      string  `json:"git_worktree_root,omitempty"`

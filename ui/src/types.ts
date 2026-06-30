@@ -317,14 +317,36 @@ export function isCompactionCarried(message: Message): boolean {
   }
 }
 
-// Helper to check if a user message is queued (waiting for agent to finish)
-export function isQueuedMessage(message: Message): boolean {
-  if (message.type !== "user" || !message.user_data) return false;
+// A queued user message held in the conversation's queued_messages JSON array
+// while the agent is busy. These are NOT messages rows — they are rendered as
+// ghost/pending items at the bottom of the conversation and only become real
+// (immutable) messages when the agent drains the queue. Mirror of
+// db.QueuedMessage on the Go side.
+export interface QueuedMessage {
+  id: string;
+  llm: LLMMessage;
+  created_at: string;
+  model: string;
+}
+
+// Parse the conversation.queued_messages JSON array into QueuedMessage[].
+// Returns [] for empty/invalid input.
+export function parseQueuedMessages(raw: string | undefined | null): QueuedMessage[] {
+  if (!raw) return [];
   try {
-    const userData =
-      typeof message.user_data === "string" ? JSON.parse(message.user_data) : message.user_data;
-    return !!userData.queued;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? (arr as QueuedMessage[]) : [];
   } catch {
-    return false;
+    return [];
   }
+}
+
+// Extract the plain text of a queued message for display in the ghost item.
+export function queuedMessageText(qm: QueuedMessage): string {
+  const content = qm.llm?.Content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((c) => c.Type === 2 && typeof c.Text === "string")
+    .map((c) => c.Text)
+    .join("");
 }

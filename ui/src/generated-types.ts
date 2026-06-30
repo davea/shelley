@@ -19,6 +19,7 @@ export interface Conversation {
   tags: string;
   is_draft: boolean;
   draft: string;
+  queued_messages: string;
 }
 
 export interface Usage {
@@ -89,6 +90,7 @@ export interface ConversationWithStateForTS {
   tags: string;
   is_draft: boolean;
   draft: string;
+  queued_messages: string;
   working: boolean;
   git_repo_root?: string;
   git_worktree_root?: string;

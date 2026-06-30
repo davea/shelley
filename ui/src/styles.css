@@ -2562,7 +2562,18 @@ button {
 
 /* Queued message badge (shown on queued user messages) */
 .message-queued {
-  opacity: 0.85;
+  opacity: 0.7;
+}
+
+/* Ghost queued messages render with a dashed border to read as "pending". */
+.message-queued .message-content {
+  border: 1px dashed rgba(249, 115, 22, 0.5);
+}
+
+.queued-cancel-all-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 4px 0 8px;
 }
 
 .queued-message-badge {

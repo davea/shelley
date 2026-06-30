@@ -120,6 +120,7 @@ function conv(convId: string, agentWorking: boolean): Conversation {
     tags: "[]",
     is_draft: false,
     draft: "",
+    queued_messages: "[]",
   };
 }
 

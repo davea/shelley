@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"shelley.exe.dev/db"
-	"shelley.exe.dev/db/generated"
 	"shelley.exe.dev/llm"
 )
 
@@ -165,29 +164,33 @@ func TestChatDuringDistillationQueuesEvenWithoutClientQueueFlag(t *testing.T) {
 		t.Fatalf("expected queued response, got %s", w.Body.String())
 	}
 
+	// The queued message must NOT create a messages row — it lives only in the
+	// conversation's queued_messages array (the single source of truth) until
+	// it drains after distillation finishes. This keeps messages immutable.
 	messages, err := h.db.ListMessages(ctx, h.convID)
 	if err != nil {
 		t.Fatalf("failed to list messages: %v", err)
 	}
-	var queued *generated.Message
 	for i := range messages {
 		msg := messages[i]
-		if msg.Type != string(db.MessageTypeUser) || msg.UserData == nil {
+		if msg.Type != string(db.MessageTypeUser) || msg.LlmData == nil {
 			continue
 		}
-		var userData map[string]bool
-		if err := json.Unmarshal([]byte(*msg.UserData), &userData); err != nil {
-			continue
-		}
-		if userData["queued"] {
-			queued = &msg
+		if strings.Contains(*msg.LlmData, "first message after distill click") {
+			t.Fatal("queued message must not be recorded as a messages row during distillation")
 		}
 	}
-	if queued == nil {
-		t.Fatal("expected non-queue chat during distillation to be recorded as queued")
+
+	fresh, err := h.db.GetConversationByID(ctx, h.convID)
+	if err != nil {
+		t.Fatalf("GetConversationByID: %v", err)
 	}
-	if !queued.ExcludedFromContext {
-		t.Fatal("expected queued message excluded from context until distillation finishes")
+	queued := db.ParseQueuedMessages(fresh.QueuedMessages)
+	if len(queued) != 1 {
+		t.Fatalf("expected 1 queued message in conversation array, got %d", len(queued))
+	}
+	if !strings.Contains(string(queued[0].Llm), "first message after distill click") {
+		t.Fatalf("queued array entry missing message text: %s", queued[0].Llm)
 	}
 }
 

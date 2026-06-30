@@ -1089,6 +1089,36 @@ func (s *Server) recordMessage(ctx context.Context, conversationID string, messa
 	return nil
 }
 
+// recordDrainedQueuedMessage records a queued user message at drain time as a
+// real, immutable user row AND removes its entry from the conversation's
+// queued_messages array in the SAME Tx (via CreateMessageParams.RemoveQueuedID).
+// This atomicity is the whole point: if the insert+removal Tx aborts (crash,
+// ctx cancel, error), neither the row nor the array change persists, so Hydrate
+// can't re-feed an already-delivered message as a duplicate. Mirrors
+// recordMessage's manager-sync + notify tail.
+func (s *Server) recordDrainedQueuedMessage(ctx context.Context, conversationID, queuedID string, message llm.Message) error {
+	params, err := s.buildCreateMessageParams(conversationID, message, llm.Usage{})
+	if err != nil {
+		return err
+	}
+	params.BumpTimestamp = true
+	params.RemoveQueuedID = queuedID
+	createdMsg, err := s.db.CreateMessage(ctx, params)
+	if err != nil {
+		return fmt.Errorf("failed to create drained queued message: %w", err)
+	}
+
+	s.mu.Lock()
+	mgr, ok := s.activeConversations[conversationID]
+	s.mu.Unlock()
+	if ok {
+		mgr.Touch()
+	}
+
+	go s.notifySubscribersNewMessage(context.WithoutCancel(ctx), conversationID, createdMsg)
+	return nil
+}
+
 // recordTurnStartMessage records the user message that starts an agent turn,
 // folding the agent_working=true flip and the updated_at bump into the same Tx
 // as the message INSERT. This replaces a separate SetAgentWorking(true) commit
@@ -1360,43 +1390,6 @@ func (s *Server) notifySubscribersNewMessages(ctx context.Context, conversationI
 	// advance past all of them.
 	maxSeq := newMsgs[len(newMsgs)-1].SequenceID
 	manager.publishStream(maxSeq, streamData)
-
-	s.publishConversationListUpdate(ConversationListUpdate{
-		Type:         "update",
-		Conversation: &conversation,
-	})
-}
-
-// broadcastMessageUpdate sends an updated existing message to all subscribers via Broadcast.
-// Unlike notifySubscribersNewMessage (which uses Publish with a sequence ID), this uses
-// Broadcast so subscribers receive the update even if they already have the original message.
-// Use this for in-place updates to existing messages (e.g., distill status changes).
-func (s *Server) broadcastMessageUpdate(ctx context.Context, conversationID string, updatedMsg *generated.Message) {
-	s.mu.Lock()
-	manager, exists := s.activeConversations[conversationID]
-	s.mu.Unlock()
-
-	if !exists {
-		return
-	}
-
-	var conversation generated.Conversation
-	err := s.db.Queries(ctx, func(q *generated.Queries) error {
-		var err error
-		conversation, err = q.GetConversation(ctx, conversationID)
-		return err
-	})
-	if err != nil {
-		s.logger.Error("Failed to get conversation data for broadcast", "conversationID", conversationID, "error", err)
-		return
-	}
-
-	apiMessages := toAPIMessages([]generated.Message{*updatedMsg})
-	streamData := StreamResponse{
-		Messages:     apiMessages,
-		Conversation: &conversation,
-	}
-	manager.broadcastStream(streamData)
 
 	s.publishConversationListUpdate(ConversationListUpdate{
 		Type:         "update",

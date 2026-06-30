@@ -193,6 +193,23 @@
               </div>
             </div>
           </div>
+          <!-- ghost pending (queued) messages at the bottom -->
+          <QueuedGhostMessage
+            v-for="qm in queuedGhosts"
+            :key="`queued-${qm.id}`"
+            :queued="qm"
+            :on-cancel="conversationId ? cancelQueuedMessage : undefined"
+          />
+          <div v-if="queuedGhosts.length > 1 && conversationId" class="queued-cancel-all-row">
+            <button
+              class="queued-message-badge-cancel"
+              data-testid="cancel-all-queued"
+              title="Cancel all queued messages"
+              @click="cancelQueuedMessages"
+            >
+              Cancel all queued
+            </button>
+          </div>
         </div>
       </div>
 
@@ -341,6 +358,7 @@ import {
   type ToolProgress,
   isDistillStatusMessage,
   distillStatus,
+  parseQueuedMessages,
 } from "../../types";
 import { api } from "../../services/api";
 import { messageStore } from "../../services/messageStore";
@@ -381,6 +399,7 @@ import TerminalPanel from "./TerminalPanel.vue";
 import VersionChecker from "./VersionChecker.vue";
 import ChatOverflowMenu from "./ChatOverflowMenu.vue";
 import MessageRenderNode from "./MessageRenderNode.vue";
+import QueuedGhostMessage from "./QueuedGhostMessage.vue";
 import ChatStatusContent from "./ChatStatusContent.vue";
 import MarkdownContent from "./MarkdownContent.vue";
 
@@ -1111,6 +1130,19 @@ async function cancelQueuedMessages() {
     console.error("Failed to cancel queued messages:", err);
   }
 }
+
+async function cancelQueuedMessage(queuedId: string) {
+  if (!props.conversationId) return;
+  try {
+    await api.cancelQueuedMessage(props.conversationId, queuedId);
+  } catch (err) {
+    console.error("Failed to cancel queued message:", err);
+  }
+}
+
+// Ghost pending messages derived from the open conversation's queued_messages
+// JSON array (not messages rows). Rendered at the bottom of the conversation.
+const queuedGhosts = computed(() => parseQueuedMessages(props.currentConversation?.queued_messages));
 
 async function sendFirstMessage(prompt: string) {
   if (!props.onFirstMessage) return;

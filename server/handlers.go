@@ -2820,18 +2820,46 @@ func (s *Server) handleSetSetting(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCancelQueued handles POST /conversation/<id>/cancel-queued
-// Cancels all pending queued messages for a conversation.
+// Cancels pending queued user messages for a conversation. With a ?queued_id=
+// query param it removes a single queued message by its QueuedMessage id;
+// without it, the whole queue is cleared.
 func (s *Server) handleCancelQueued(w http.ResponseWriter, r *http.Request, conversationID string) {
+	queuedID := r.URL.Query().Get("queued_id")
+
 	s.mu.Lock()
 	manager, ok := s.activeConversations[conversationID]
 	s.mu.Unlock()
 
-	if !ok {
-		http.Error(w, "Conversation not found", http.StatusNotFound)
+	if ok {
+		if queuedID != "" {
+			manager.CancelQueuedMessage(r.Context(), s, queuedID)
+		} else {
+			manager.CancelQueuedMessages(r.Context(), s)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		return
 	}
 
-	manager.CancelQueuedMessages(r.Context(), s)
+	// No active manager (e.g. after a restart, before the conversation is
+	// opened) but the queued_messages array may still hold persisted entries.
+	// Clear/remove directly via the DB so the user can always drain the queue,
+	// then broadcast the updated conversation row to list subscribers (the DB
+	// write also bumps updated_at, firing the list-patch OnCommit hook).
+	ctx := r.Context()
+	var conv *generated.Conversation
+	var err error
+	if queuedID != "" {
+		conv, err = s.db.RemoveQueuedMessages(ctx, conversationID, queuedID)
+	} else {
+		conv, err = s.db.ClearQueuedMessages(ctx, conversationID)
+	}
+	if err != nil {
+		s.logger.Error("Failed to cancel queued messages (no manager)", "conversationID", conversationID, "error", err)
+		http.Error(w, "Conversation not found", http.StatusNotFound)
+		return
+	}
+	s.publishConversationListUpdate(ConversationListUpdate{Type: "update", Conversation: conv})
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

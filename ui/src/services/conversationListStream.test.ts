@@ -22,6 +22,7 @@ function conv(id: string, slug: string, working = false): ConversationWithState 
     tags: "[]",
     is_draft: false,
     draft: "",
+    queued_messages: "[]",
     working,
     subagent_count: 0,
     max_sequence_id: 0,

@@ -31,6 +31,7 @@ type Conversation struct {
 	Tags                 string    `json:"tags"`
 	IsDraft              bool      `json:"is_draft"`
 	Draft                string    `json:"draft"`
+	QueuedMessages       string    `json:"queued_messages"`
 }
 
 type Message struct {
