@@ -212,6 +212,12 @@ func All() []Model {
 			Build: antSvc(ant.Claude48Opus),
 		},
 		{
+			ID: "claude-fable-5", Provider: ProviderAnthropic,
+			Description: "Claude Fable 5", APIModelName: ant.ClaudeFable5,
+			APIType: APITypeAnthropicMessages, DefaultBaseURL: DefaultAnthropicBaseURL,
+			Build: antSvc(ant.ClaudeFable5),
+		},
+		{
 			ID: "gpt-5.5", Provider: ProviderOpenAI,
 			Description: "GPT-5.5", APIModelName: oai.GPT55.ModelName,
 			APIType: APITypeOpenAIResponses, DefaultBaseURL: DefaultOpenAIBaseURL,
