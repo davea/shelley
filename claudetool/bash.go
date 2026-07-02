@@ -108,6 +108,11 @@ Bash state changes (working dir, variables, aliases) don't persist between calls
 For long-running processes (servers, watch modes), use tmux instead.
 Do NOT use &, nohup, or disown — the bash tool kills its process group on exit.
 
+To wake yourself later (longer than the 15-min cap), detach a tmux session that
+sleeps then calls the Shelley client. Use double quotes so THIS shell expands
+$SHELLEY_CONVERSATION_ID (tmux's server env may be stale):
+  tmux new-session -d "sleep 3600 && shelley client chat -c $SHELLEY_CONVERSATION_ID -p 'Resume: <what next>'"
+
 MUST set slow_ok=true for potentially slow commands: builds, downloads,
 installs, tests, or any other substantive operation.
 
