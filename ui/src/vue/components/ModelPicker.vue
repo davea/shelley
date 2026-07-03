@@ -51,6 +51,25 @@
           </svg>
           <span>Add / Remove Models...</span>
         </button>
+        <button
+          class="model-picker-option model-picker-manage"
+          type="button"
+          :disabled="refreshing"
+          @click="handleRefreshModels"
+        >
+          <svg
+            :class="`model-picker-refresh-icon ${refreshing ? 'spinning' : ''}`"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />
+          </svg>
+          <span>{{ refreshing ? "Refreshing Models..." : "Refresh Models" }}</span>
+        </button>
         <div class="model-picker-divider" />
       </div>
       <div class="model-picker-options">
@@ -97,12 +116,14 @@ const props = withDefaults(
     models: Model[];
     selectedModel: string;
     disabled?: boolean;
+    refreshing?: boolean;
   }>(),
-  { disabled: false },
+  { disabled: false, refreshing: false },
 );
 const emit = defineEmits<{
   (e: "selectModel", modelId: string): void;
   (e: "manageModels"): void;
+  (e: "refreshModels"): void;
 }>();
 
 const isOpen = ref(false);
@@ -127,6 +148,10 @@ function handleSelect(modelId: string) {
 function handleManageModels() {
   isOpen.value = false;
   emit("manageModels");
+}
+
+function handleRefreshModels() {
+  emit("refreshModels");
 }
 
 function handleClickOutside(event: MouseEvent) {

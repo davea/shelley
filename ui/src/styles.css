@@ -4365,12 +4365,21 @@ svg {
   color: var(--blue-text);
 }
 
-.model-picker-manage:hover {
+.model-picker-manage:hover:not(:disabled) {
   background: var(--bg-tertiary);
 }
 
 .model-picker-manage svg {
   flex-shrink: 0;
+}
+
+.model-picker-manage:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.model-picker-refresh-icon.spinning {
+  animation: spin 1s linear infinite;
 }
 
 .status-input {

@@ -87,8 +87,10 @@
         :models="models"
         :selected-model="selectedModel"
         :disabled="sending"
+        :refreshing="refreshingModels"
         @select-model="onSelectModel"
         @manage-models="onManageModels"
+        @refresh-models="onRefreshModels"
       />
     </div>
     <div class="status-field status-field-thinking">
@@ -259,6 +261,7 @@ const props = defineProps<{
   models: ModelInfo[];
   selectedModel: string;
   sending: boolean;
+  refreshingModels: boolean;
   thinkingLevel: ThinkingLevel;
   toolOverrides: Record<string, "on" | "off">;
   toolOverrideList: ToolInfo[];
@@ -274,6 +277,7 @@ const props = defineProps<{
   onStartNewGeneration: () => Promise<void> | void;
   onSelectModel: (model: string) => void;
   onManageModels: () => void;
+  onRefreshModels: () => void;
   onThinkingChange: (level: ThinkingLevel) => void;
   onSetToolOverride: (name: string, value: "default" | "on" | "off") => void;
   onResetToolOverrides: () => void;

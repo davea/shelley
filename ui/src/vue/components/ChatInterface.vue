@@ -1619,6 +1619,7 @@ const statusContentProps = computed(() => ({
   models: models.value,
   selectedModel: selectedModel.value,
   sending: sending.value,
+  refreshingModels: refreshingModels.value,
   thinkingLevel: thinkingLevel.value,
   toolOverrides: toolOverrides.value,
   toolOverrideList: toolOverrideList.value,
@@ -1633,6 +1634,7 @@ const statusContentProps = computed(() => ({
   onStartNewGeneration: handleStartNewGeneration,
   onSelectModel: setSelectedModel,
   onManageModels: () => props.onOpenModelsModal?.(),
+  onRefreshModels: handleRefreshModels,
   onThinkingChange: setThinkingLevel,
   onSetToolOverride: setToolOverride,
   onResetToolOverrides: resetToolOverrides,
@@ -1700,6 +1702,23 @@ watch(
   },
   { immediate: true },
 );
+
+// User-triggered model catalog refresh (re-runs LLM integration discovery
+// server-side, like Shelley startup does).
+const refreshingModels = ref(false);
+async function handleRefreshModels() {
+  if (refreshingModels.value) return;
+  refreshingModels.value = true;
+  try {
+    const newModels = await api.refreshModels();
+    models.value = newModels;
+    if (window.__SHELLEY_INIT__) window.__SHELLEY_INIT__.models = newModels;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "Failed to refresh models";
+  } finally {
+    refreshingModels.value = false;
+  }
+}
 
 // Refresh models list when triggered or when starting a new conversation.
 watch(
