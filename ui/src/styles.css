@@ -4172,216 +4172,6 @@ svg {
   border-color: var(--red-text, #dc2626);
 }
 
-.status-select {
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--blue-text);
-  border-radius: 0.25rem;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: border-color 0.2s;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.status-select:hover:not(:disabled) {
-  border-color: var(--blue-text);
-}
-
-.status-select:focus {
-  outline: none;
-  border-color: var(--blue-text);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
-}
-
-.status-select:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Model Picker Custom Dropdown */
-.model-picker {
-  position: relative;
-  display: inline-block;
-  width: 100%;
-}
-
-.model-picker-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  width: 100%;
-  text-align: left;
-  box-sizing: border-box;
-  min-height: 1.75rem;
-}
-
-.model-picker-trigger:hover:not(:disabled) {
-  background: var(--bg-secondary);
-  border-color: var(--blue-text);
-}
-
-.model-picker-trigger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.model-picker-value {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-picker-chevron {
-  flex-shrink: 0;
-  transition: transform 0.2s;
-  opacity: 0.6;
-}
-
-.model-picker-chevron.open {
-  transform: rotate(180deg);
-}
-
-.model-picker-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  margin-top: 2px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
-  /* Grow with the viewport so the bottommost model is reachable on
-     short mobile screens. Capped so it doesn't dominate the page. */
-  max-height: min(70vh, 500px);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.model-picker-dropdown.open-upward {
-  top: auto;
-  bottom: 100%;
-  margin-top: 0;
-  margin-bottom: 2px;
-}
-
-.model-picker-options {
-  overflow-y: auto;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.model-picker-action {
-  flex: 0 0 auto;
-  background: var(--bg-secondary);
-}
-
-.model-picker-option {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: none;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 0.875rem;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.15s;
-}
-
-.model-picker-option:hover:not(:disabled) {
-  background: var(--bg-tertiary);
-}
-
-.model-picker-option.selected {
-  background: var(--bg-tertiary);
-}
-
-.model-picker-option.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.model-picker-option-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  min-width: 0;
-}
-
-.model-picker-option-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-picker-option-source {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-picker-option-badge {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  background: var(--bg-base);
-  padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
-}
-
-.model-picker-option-check {
-  flex-shrink: 0;
-  color: var(--green-text);
-}
-
-.model-picker-divider {
-  flex-shrink: 0;
-  height: 1px;
-  background: var(--border);
-  margin: 0.25rem 0;
-}
-
-.model-picker-manage {
-  background: var(--bg-secondary);
-  color: var(--blue-text);
-}
-
-.model-picker-manage:hover:not(:disabled) {
-  background: var(--bg-tertiary);
-}
-
-.model-picker-manage svg {
-  flex-shrink: 0;
-}
-
-.model-picker-manage:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.model-picker-refresh-icon.spinning {
-  animation: spin 1s linear infinite;
-}
-
 .status-input {
   padding: 0.25rem 0.5rem;
   border: 1px solid var(--blue-text);
@@ -11359,6 +11149,93 @@ kbd {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* =========================================================================
+   Status-bar PrimeVue Selects — the Model and reasoning-Effort pickers
+   (ModelPicker.vue / ThinkingLevelPicker.vue), both rebuilt on PrimeVue
+   <Select>. PrimeVue owns open/close, outside-click, Escape, viewport-aware
+   flip placement AND all of the trigger/label/overlay/option theming: the
+   components pass size="small" plus a :dt token map (statusPickerDt.ts) that
+   feeds our CSS vars into PrimeVue's own token system. The only thing left to
+   hand-write is the overlay's content-width behaviour and ModelPicker's
+   bespoke option markup below. Scoped to the picker classes so nothing leaks
+   to other PrimeVue Selects (e.g. the overflow-menu language picker).
+   ========================================================================= */
+
+/* Let the overlay grow to its widest option (PrimeVue only guarantees
+   min-width:100% of the trigger) so labels like "minimal"/"medium" and long
+   model ids aren't clipped, while staying within the viewport. Applied to both
+   pickers' panels. */
+.p-select-overlay.thinking-level-picker-panel,
+.p-select-overlay.model-picker-panel {
+  width: max-content;
+  max-width: min(20rem, 90vw);
+  /* size="small" only shrinks the trigger label; PrimeVue has no overlay
+     font-size token, so match the compact status-bar scale here (options
+     inherit). */
+  font-size: 0.75rem;
+}
+
+/* ModelPicker option markup: name + source sub-label + "not ready" badge, and
+   the #footer "Add / Remove Models..." action. */
+.p-select-overlay.model-picker-panel .model-picker-option-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.p-select-overlay.model-picker-panel .model-picker-option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.p-select-overlay.model-picker-panel .model-picker-option-source {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.p-select-overlay.model-picker-panel .model-picker-option-badge {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--bg-base);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+}
+.p-select-overlay.model-picker-panel .model-picker-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.25rem 0;
+}
+.p-select-overlay.model-picker-panel .model-picker-manage {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: var(--bg-secondary);
+  color: var(--blue-text);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+}
+.p-select-overlay.model-picker-panel .model-picker-manage:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+.p-select-overlay.model-picker-panel .model-picker-manage svg {
+  flex-shrink: 0;
+}
+.p-select-overlay.model-picker-panel .model-picker-manage:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.p-select-overlay.model-picker-panel .model-picker-refresh-icon.spinning {
+  animation: spin 1s linear infinite;
 }
 
 /* =========================================================================
