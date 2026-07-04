@@ -2118,16 +2118,106 @@ func TestRefusal(t *testing.T) {
 		t.Errorf("error message should explain the refusal, got: %s", errMsg.Content[0].Text)
 	}
 
-	// The raw empty refusal must NOT be in history (it would poison future
-	// turns); the visible error message should be.
+	// Neither the raw empty refusal nor the synthetic error message may live in
+	// context history: both are user-visible-only artifacts. The cold-start path
+	// (partitionMessages + ListMessagesForContext) excludes them, and the active
+	// loop must match. So history holds only the user message.
 	loop.mu.Lock()
 	history := loop.history
 	loop.mu.Unlock()
-	if len(history) != 2 {
-		t.Fatalf("history should have 2 messages (user + error), got %d", len(history))
+	if len(history) != 1 {
+		t.Fatalf("history should have 1 message (user only), got %d", len(history))
 	}
-	if history[1].ErrorType != llm.ErrorTypeRefusal {
-		t.Errorf("history tail should be the refusal error, got ErrorType=%v", history[1].ErrorType)
+	for i, m := range history {
+		if m.ErrorType != llm.ErrorTypeNone {
+			t.Errorf("history[%d] should not be an error message, got ErrorType=%v", i, m.ErrorType)
+		}
+	}
+}
+
+// requestCapturingService records every request it receives (a deep-ish copy of
+// the Messages slice header is enough since the loop rebuilds it each turn) then
+// delegates to a PredictableService so keyword triggers like "refusal" and
+// "hello" still drive realistic responses.
+type requestCapturingService struct {
+	*PredictableService // embedded: promotes Provider/TokenContextWindow/MaxImage*/etc.
+	mu                  *sync.Mutex
+	out                 *[]*llm.Request
+}
+
+func NewRequestCapturingService(mu *sync.Mutex, out *[]*llm.Request) *requestCapturingService {
+	return &requestCapturingService{PredictableService: NewPredictableService(), mu: mu, out: out}
+}
+
+func (s *requestCapturingService) Do(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	s.mu.Lock()
+	captured := *req
+	captured.Messages = append([]llm.Message(nil), req.Messages...)
+	*s.out = append(*s.out, &captured)
+	s.mu.Unlock()
+	return s.PredictableService.Do(ctx, req)
+}
+
+// TestRefusalThenRephraseNotInContext is the reviewer's regression test: after
+// a refusal, a rephrased user message in the SAME active session must not send
+// the synthetic refusal artifact back to the model. This guards against the
+// active-vs-rehydrated divergence where l.history leaked the error message.
+func TestRefusalThenRephraseNotInContext(t *testing.T) {
+	var mu sync.Mutex
+	var sentRequests []*llm.Request
+	service := NewRequestCapturingService(&mu, &sentRequests)
+
+	loop := NewLoop(Config{
+		LLM:           service,
+		History:       []llm.Message{},
+		Tools:         []*llm.Tool{},
+		RecordMessage: func(context.Context, llm.Message, llm.Usage) error { return nil },
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// First turn triggers a refusal. Drive it as its own complete turn so the
+	// refusal is fully handled before the user rephrases (mirroring a real
+	// session: send, turn ends, then send again).
+	loop.QueueUserMessage(llm.Message{
+		Role:    llm.MessageRoleUser,
+		Content: []llm.Content{{Type: llm.ContentTypeText, Text: "refusal"}},
+	})
+	if err := loop.ProcessOneTurn(ctx); err != nil {
+		t.Fatalf("first turn: %v", err)
+	}
+
+	// Second (rephrased) turn should get a normal answer.
+	loop.QueueUserMessage(llm.Message{
+		Role:    llm.MessageRoleUser,
+		Content: []llm.Content{{Type: llm.ContentTypeText, Text: "hello"}},
+	})
+	if err := loop.ProcessOneTurn(ctx); err != nil {
+		t.Fatalf("second turn: %v", err)
+	}
+
+	mu.Lock()
+	reqs := make([]*llm.Request, len(sentRequests))
+	copy(reqs, sentRequests)
+	mu.Unlock()
+
+	if len(reqs) < 2 {
+		t.Fatalf("expected at least 2 LLM requests (refusal + rephrase), got %d", len(reqs))
+	}
+
+	// The last request is the rephrase turn. It must not contain the synthetic
+	// refusal text or any ErrorTypeRefusal message.
+	last := reqs[len(reqs)-1]
+	for i, m := range last.Messages {
+		if m.ErrorType == llm.ErrorTypeRefusal {
+			t.Errorf("rephrase request message[%d] carries ErrorTypeRefusal", i)
+		}
+		for _, c := range m.Content {
+			if strings.Contains(c.Text, "declined to continue") {
+				t.Errorf("rephrase request message[%d] leaks synthetic refusal text: %q", i, c.Text)
+			}
+		}
 	}
 }
 

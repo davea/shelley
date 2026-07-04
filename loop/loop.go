@@ -623,8 +623,9 @@ func (l *Loop) handleMaxTokensTruncation(ctx context.Context, resp *llm.Response
 // block, or nothing), so recording them normally leaves a blank agent bubble
 // and, because the empty response ends up in history, every follow-up
 // "continue" replays the same context and refuses again. We instead record the
-// raw response excluded from context (for cost tracking) and append a visible,
-// non-retryable error message that ends the turn.
+// raw response excluded from context (for cost tracking) and record a visible,
+// non-retryable error message that ends the turn. Neither is added to the live
+// context history, matching the cold-start rehydration path.
 func (l *Loop) handleRefusal(ctx context.Context, resp *llm.Response) error {
 	// Record the raw refusal for cost tracking, but keep it out of context so it
 	// doesn't poison future turns (an empty/near-empty assistant turn biases the
@@ -644,24 +645,30 @@ func (l *Loop) handleRefusal(ctx context.Context, resp *llm.Response) error {
 	// Record a visible refusal notice with EndOfTurn=true. Marked non-retryable:
 	// re-running the identical request just refuses again, so the UI should not
 	// offer a Retry button. Rephrasing the request is what actually helps.
+	//
+	// Deliberately NOT appended to l.history: like other error messages it is a
+	// system-generated, user-visible artifact that must not be sent back to the
+	// model. The cold-start path already excludes it from context
+	// (partitionMessages skips MessageTypeError, ListMessagesForContext skips
+	// excluded rows), so keeping it out of the live in-memory history too makes
+	// active-session and rehydrated behavior identical. Otherwise a rephrase in
+	// the same session would show the model an assistant turn narrating its own
+	// refusal, biasing it toward refusing again. (Mirrors the llm_request error
+	// path above, which also records without appending.)
 	errorMessage := llm.Message{
 		Role: llm.MessageRoleAssistant,
 		Content: []llm.Content{
 			{
 				Type: llm.ContentTypeText,
-				Text: "[The model declined to continue this request (content-policy refusal) " +
-					"and returned no response. Retrying the same request will likely be refused " +
-					"again; try rephrasing or clarifying the intent instead.]",
+				Text: "[The model declined to continue this request. Retrying the same " +
+					"request will likely be declined again; try rephrasing or clarifying " +
+					"the intent instead.]",
 			},
 		},
 		EndOfTurn:      true,
 		ErrorType:      llm.ErrorTypeRefusal,
 		ErrorRetryable: false,
 	}
-
-	l.mu.Lock()
-	l.history = append(l.history, errorMessage)
-	l.mu.Unlock()
 
 	if err := l.recordMessage(ctx, errorMessage, llm.Usage{}); err != nil {
 		l.logger.Error("failed to record refusal error message", "error", err)
