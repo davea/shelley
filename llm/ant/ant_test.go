@@ -784,18 +784,18 @@ func TestMaxOutputTokensCapping(t *testing.T) {
 		t.Errorf("Opus 4.6: MaxTokens = %d, want 100000", got2.MaxTokens)
 	}
 
-	// Sonnet 4.6 has a 64k limit — 50000 should pass through
+	// Sonnet 4.6 has a 128k limit — 50000 should pass through
 	s3 := &Service{Model: Claude46Sonnet, MaxTokens: 50000}
 	got3 := s3.fromLLMRequest(simpleReq)
 	if got3.MaxTokens != 50000 {
 		t.Errorf("Sonnet 4.6: MaxTokens = %d, want 50000", got3.MaxTokens)
 	}
 
-	// Sonnet 4.6 with MaxTokens above 64k must be capped
+	// Sonnet 4.6 with MaxTokens above 128k must be capped
 	s4 := &Service{Model: Claude46Sonnet, MaxTokens: 200000}
 	got4 := s4.fromLLMRequest(simpleReq)
-	if got4.MaxTokens != 64000 {
-		t.Errorf("Sonnet 4.6 capped: MaxTokens = %d, want 64000", got4.MaxTokens)
+	if got4.MaxTokens != 128000 {
+		t.Errorf("Sonnet 4.6 capped: MaxTokens = %d, want 128000", got4.MaxTokens)
 	}
 }
 

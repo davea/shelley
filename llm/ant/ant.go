@@ -46,7 +46,7 @@ var modelMaxOutputTokens = map[string]int{
 	Claude46Opus:   128000,
 	Claude45Opus:   128000,
 	Claude5Sonnet:  64000,
-	Claude46Sonnet: 64000,
+	Claude46Sonnet: 128000,
 	Claude45Sonnet: 64000,
 	Claude4Sonnet:  64000,
 	Claude45Haiku:  64000,
@@ -114,9 +114,9 @@ func (s *Service) maxOutputTokens() int {
 		model = DefaultModel
 	}
 	switch model {
-	case ClaudeFable5, Claude48Opus, Claude47Opus, Claude46Opus:
+	case ClaudeFable5, Claude48Opus, Claude47Opus, Claude46Opus, Claude46Sonnet:
 		return 128000
-	case Claude4Sonnet, Claude45Sonnet, Claude46Sonnet, Claude5Sonnet,
+	case Claude4Sonnet, Claude45Sonnet, Claude5Sonnet,
 		Claude45Haiku, Claude45Opus:
 		return 64000
 	default:
