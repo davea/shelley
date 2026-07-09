@@ -101,6 +101,9 @@ func TestLLMIntegrationSourceLabelsAndFiltering(t *testing.T) {
 		Name: "llm", Host: "llm.int.exe.xyz", URL: "https://llm.int.exe.xyz",
 		Models: []IntegrationModel{
 			{ID: "anthropic/claude-opus-4-7", Provider: "anthropic", NativeID: "claude-opus-4-7", APIs: []string{"anthropic_messages"}},
+			{ID: "openai/gpt-5.6-sol", Provider: "openai", NativeID: "gpt-5.6-sol", APIs: []string{"openai_chat", "openai_responses"}},
+			{ID: "openai/gpt-5.6-terra", Provider: "openai", NativeID: "gpt-5.6-terra", APIs: []string{"openai_chat", "openai_responses"}},
+			{ID: "openai/gpt-5.6-luna", Provider: "openai", NativeID: "gpt-5.6-luna", APIs: []string{"openai_chat", "openai_responses"}},
 			{ID: "openai/gpt-5.5", Provider: "openai", NativeID: "gpt-5.5", APIs: []string{"openai_responses"}},
 			{ID: "fireworks/glm-5p1", Provider: "fireworks", NativeID: "accounts/fireworks/models/glm-5p1", APIs: []string{"openai_chat"}},
 			{ID: "fireworks/gpt-oss-20b", Provider: "fireworks", NativeID: "accounts/fireworks/models/gpt-oss-20b", APIs: []string{"openai_chat"}},
@@ -108,7 +111,7 @@ func TestLLMIntegrationSourceLabelsAndFiltering(t *testing.T) {
 	}
 	bs := Build(models.All(), []Source{LLMIntegration(integ, ""), Predictable()}, &http.Client{}, nil)
 	wantLabel := "llm.int.exe.xyz"
-	for _, id := range []string{"claude-opus-4.7", "gpt-5.5", "glm-5.1-fireworks", "gpt-oss-20b-fireworks"} {
+	for _, id := range []string{"claude-opus-4.7", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "glm-5.1-fireworks", "gpt-oss-20b-fireworks"} {
 		b := findBuilt(bs, id)
 		if b == nil {
 			t.Errorf("%q should be built", id)
@@ -118,7 +121,7 @@ func TestLLMIntegrationSourceLabelsAndFiltering(t *testing.T) {
 			t.Errorf("%s source = %q, want %q", id, b.Source, wantLabel)
 		}
 	}
-	for _, id := range []string{"gemini-3-pro", "gemini-3-flash", "claude-opus-4.6", "claude-sonnet-4.6"} {
+	for _, id := range []string{"gpt-5.6", "gemini-3-pro", "gemini-3-flash", "claude-opus-4.6", "claude-sonnet-4.6"} {
 		if b := findBuilt(bs, id); b != nil {
 			t.Errorf("%q should NOT be built, got %+v", id, b)
 		}
@@ -133,6 +136,7 @@ func TestIntegrationModelsFromCatalogUsesNativeIDsForSupportedAPIs(t *testing.T)
 		SchemaVersion: 1,
 		Models: []IntegrationModel{
 			{ID: "anthropic/claude-opus-4-7", Provider: "anthropic", NativeID: "claude-opus-4-7", APIs: []string{"anthropic_messages"}},
+			{ID: "openai/gpt-5.6-sol", Provider: "openai", NativeID: "gpt-5.6-sol", APIs: []string{"openai_chat", "openai_responses"}},
 			{ID: "openai/gpt-5.5", Provider: "openai", NativeID: "gpt-5.5", APIs: []string{"openai_responses"}},
 			{ID: "fireworks/glm-5p1", Provider: "fireworks", NativeID: "accounts/fireworks/models/glm-5p1", APIs: []string{"openai_chat"}},
 			{ID: "openai/text-embedding-3-small", Provider: "openai", NativeID: "text-embedding-3-small", APIs: []string{"openai_embeddings"}},
@@ -140,10 +144,10 @@ func TestIntegrationModelsFromCatalogUsesNativeIDsForSupportedAPIs(t *testing.T)
 		},
 	})
 
-	if len(got) != 3 {
-		t.Fatalf("supported model count = %d, want 3 (%+v)", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("supported model count = %d, want 4 (%+v)", len(got), got)
 	}
-	for i, want := range []string{"claude-opus-4-7", "gpt-5.5", "accounts/fireworks/models/glm-5p1"} {
+	for i, want := range []string{"claude-opus-4-7", "gpt-5.6-sol", "gpt-5.5", "accounts/fireworks/models/glm-5p1"} {
 		if got[i].apiModelName() != want {
 			t.Fatalf("model %d apiModelName = %q, want %q", i, got[i].apiModelName(), want)
 		}
@@ -165,6 +169,7 @@ func TestDiscoverLLMIntegrationsReadsModelsJSONCatalog(t *testing.T) {
 				"schema_version": 1,
 				"models": [
 					{"id":"anthropic/claude-opus-4-7","provider":"anthropic","native_id":"claude-opus-4-7","apis":["anthropic_messages"]},
+					{"id":"openai/gpt-5.6-sol","provider":"openai","native_id":"gpt-5.6-sol","apis":["openai_chat","openai_responses"]},
 					{"id":"openai/gpt-5.5","provider":"openai","native_id":"gpt-5.5","apis":["openai_responses"]},
 					{"id":"fireworks/glm-5p1","provider":"fireworks","native_id":"accounts/fireworks/models/glm-5p1","apis":["openai_chat"]}
 				]
@@ -191,10 +196,10 @@ func TestDiscoverLLMIntegrationsReadsModelsJSONCatalog(t *testing.T) {
 	if integ.Name != "llm" || integ.Host != "llm.int.exe.xyz" || integ.URL != "https://llm.int.exe.xyz" {
 		t.Fatalf("integration = %+v, want llm host/base URL", integ)
 	}
-	if len(integ.Models) != 3 {
-		t.Fatalf("models = %+v, want 3", integ.Models)
+	if len(integ.Models) != 4 {
+		t.Fatalf("models = %+v, want 4", integ.Models)
 	}
-	for i, want := range []string{"claude-opus-4-7", "gpt-5.5", "accounts/fireworks/models/glm-5p1"} {
+	for i, want := range []string{"claude-opus-4-7", "gpt-5.6-sol", "gpt-5.5", "accounts/fireworks/models/glm-5p1"} {
 		if integ.Models[i].apiModelName() != want {
 			t.Fatalf("model %d apiModelName = %q, want %q", i, integ.Models[i].apiModelName(), want)
 		}

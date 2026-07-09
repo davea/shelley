@@ -408,6 +408,36 @@ var (
 		SupportsImages:     true,
 	}
 
+	GPT56Sol = Model{
+		UserName:           "gpt-5.6-sol",
+		ModelName:          "gpt-5.6-sol",
+		URL:                OpenAIURL,
+		APIKeyEnv:          OpenAIAPIKeyEnv,
+		IsReasoningModel:   true,
+		UseSimplifiedPatch: false,
+		SupportsImages:     true,
+	}
+
+	GPT56Terra = Model{
+		UserName:           "gpt-5.6-terra",
+		ModelName:          "gpt-5.6-terra",
+		URL:                OpenAIURL,
+		APIKeyEnv:          OpenAIAPIKeyEnv,
+		IsReasoningModel:   true,
+		UseSimplifiedPatch: false,
+		SupportsImages:     true,
+	}
+
+	GPT56Luna = Model{
+		UserName:           "gpt-5.6-luna",
+		ModelName:          "gpt-5.6-luna",
+		URL:                OpenAIURL,
+		APIKeyEnv:          OpenAIAPIKeyEnv,
+		IsReasoningModel:   true,
+		UseSimplifiedPatch: false,
+		SupportsImages:     true,
+	}
+
 	GPT55 = Model{
 		UserName:           "gpt-5.5",
 		ModelName:          "gpt-5.5",
@@ -519,6 +549,9 @@ var _ llm.Service = (*Service)(nil)
 // Declaration order is display order — keep current models at top, old models at bottom.
 var ModelsRegistry = []Model{
 	// Current OpenAI
+	GPT56Sol,
+	GPT56Terra,
+	GPT56Luna,
 	GPT55,
 	GPT55Pro,
 	GPT54,
@@ -1085,6 +1118,8 @@ func (s *Service) TokenContextWindow() int {
 	// OpenAI models generally have 128k context windows
 	// Some newer models have larger windows, but 128k is a safe default
 	switch model.ModelName {
+	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+		return 272000
 	case "gpt-5.5", "gpt-5.5-2026-04-23", "gpt-5.5-pro", "gpt-5.5-pro-2026-04-23":
 		return 272000
 	case "gpt-4.1-2025-04-14", "gpt-4.1-mini-2025-04-14", "gpt-4.1-nano-2025-04-14":

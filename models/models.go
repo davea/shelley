@@ -218,6 +218,24 @@ func All() []Model {
 			Build: antSvc(ant.ClaudeFable5),
 		},
 		{
+			ID: "gpt-5.6-sol", Provider: ProviderOpenAI,
+			Description: "GPT-5.6 Sol", APIModelName: oai.GPT56Sol.ModelName,
+			APIType: APITypeOpenAIResponses, DefaultBaseURL: DefaultOpenAIBaseURL,
+			Build: oaiResponsesSvc(oai.GPT56Sol),
+		},
+		{
+			ID: "gpt-5.6-terra", Provider: ProviderOpenAI,
+			Description: "GPT-5.6 Terra", APIModelName: oai.GPT56Terra.ModelName,
+			APIType: APITypeOpenAIResponses, DefaultBaseURL: DefaultOpenAIBaseURL,
+			Build: oaiResponsesSvc(oai.GPT56Terra),
+		},
+		{
+			ID: "gpt-5.6-luna", Provider: ProviderOpenAI,
+			Description: "GPT-5.6 Luna", APIModelName: oai.GPT56Luna.ModelName,
+			APIType: APITypeOpenAIResponses, DefaultBaseURL: DefaultOpenAIBaseURL,
+			Build: oaiResponsesSvc(oai.GPT56Luna),
+		},
+		{
 			ID: "gpt-5.5", Provider: ProviderOpenAI,
 			Description: "GPT-5.5", APIModelName: oai.GPT55.ModelName,
 			APIType: APITypeOpenAIResponses, DefaultBaseURL: DefaultOpenAIBaseURL,

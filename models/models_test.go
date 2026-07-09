@@ -49,6 +49,9 @@ func TestByID(t *testing.T) {
 		wantID  string
 		wantNil bool
 	}{
+		{id: "gpt-5.6-sol", wantID: "gpt-5.6-sol"},
+		{id: "gpt-5.6-terra", wantID: "gpt-5.6-terra"},
+		{id: "gpt-5.6-luna", wantID: "gpt-5.6-luna"},
 		{id: "gpt-5.5", wantID: "gpt-5.5"},
 		{id: "gpt-5.5-pro", wantNil: true},
 		{id: "deepseek-v4-pro-fireworks", wantID: "deepseek-v4-pro-fireworks"},
