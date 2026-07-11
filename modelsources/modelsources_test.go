@@ -34,14 +34,14 @@ func TestPredictableBuilds(t *testing.T) {
 }
 
 func TestEnvSourceBuildsAllProviders(t *testing.T) {
-	src := Env("a", "o", "g", "f")
+	src := Env("a", "o", "g", "f", "x")
 	bs := Build(models.All(), []Source{src}, &http.Client{}, nil)
 	// Order must match catalog order.
 	var expected []string
 	for _, m := range models.All() {
-		// Env source covers Anthropic/OpenAI/Gemini/Fireworks only.
+		// Env source covers Anthropic/OpenAI/Gemini/Fireworks/xAI only.
 		switch m.Provider {
-		case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderGemini, models.ProviderFireworks:
+		case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderGemini, models.ProviderFireworks, models.ProviderXAI:
 			expected = append(expected, m.ID)
 		}
 	}
@@ -56,7 +56,7 @@ func TestEnvSourceBuildsAllProviders(t *testing.T) {
 }
 
 func TestEnvSourceLabels(t *testing.T) {
-	bs := Build(models.All(), []Source{Env("a", "o", "g", "f")}, &http.Client{}, nil)
+	bs := Build(models.All(), []Source{Env("a", "o", "g", "f", "x")}, &http.Client{}, nil)
 	for _, tt := range []struct {
 		id, want string
 	}{
@@ -64,6 +64,7 @@ func TestEnvSourceLabels(t *testing.T) {
 		{"gpt-5.5", "$OPENAI_API_KEY"},
 		{"gemini-3-pro", "$GEMINI_API_KEY"},
 		{"gpt-oss-20b-fireworks", "$FIREWORKS_API_KEY"},
+		{"grok-4.5", "$XAI_API_KEY"},
 	} {
 		b := findBuilt(bs, tt.id)
 		if b == nil {
@@ -282,7 +283,7 @@ func TestMultipleLLMIntegrationsUnionWithSuffix(t *testing.T) {
 
 func TestBuiltBaseURLResolution(t *testing.T) {
 	// Env source supplies no URL: BaseURL should be the catalog default.
-	bs := Build(models.All(), []Source{Env("a", "o", "g", "f")}, &http.Client{}, nil)
+	bs := Build(models.All(), []Source{Env("a", "o", "g", "f", "x")}, &http.Client{}, nil)
 	for _, tt := range []struct {
 		id, want string
 	}{
@@ -290,6 +291,7 @@ func TestBuiltBaseURLResolution(t *testing.T) {
 		{"gpt-5.5", "https://api.openai.com"},
 		{"gpt-oss-20b-fireworks", "https://api.fireworks.ai/inference"},
 		{"gemini-3-pro", "https://generativelanguage.googleapis.com"},
+		{"grok-4.5", "https://api.x.ai"},
 	} {
 		b := findBuilt(bs, tt.id)
 		if b == nil {
@@ -319,7 +321,7 @@ func TestBuiltBaseURLResolution(t *testing.T) {
 }
 
 func TestBuiltAPITypePopulated(t *testing.T) {
-	bs := Build(models.All(), []Source{Env("a", "o", "g", "f"), Predictable()}, &http.Client{}, nil)
+	bs := Build(models.All(), []Source{Env("a", "o", "g", "f", "x"), Predictable()}, &http.Client{}, nil)
 	for _, tt := range []struct {
 		id   string
 		want models.APIType
@@ -327,6 +329,7 @@ func TestBuiltAPITypePopulated(t *testing.T) {
 		{"claude-opus-4.6", models.APITypeAnthropicMessages},
 		{"gpt-5.5", models.APITypeOpenAIResponses},
 		{"gpt-oss-20b-fireworks", models.APITypeOpenAIChat},
+		{"grok-4.5", models.APITypeOpenAIResponses},
 		{"gemini-3-pro", models.APITypeGemini},
 		{"predictable", models.APITypeBuiltIn},
 	} {

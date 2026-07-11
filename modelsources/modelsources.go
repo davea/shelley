@@ -96,7 +96,7 @@ func Gateway(gatewayURL, anthropicKey, openAIKey, fireworksKey string) Source {
 
 // Env returns a Source for direct-to-provider env-var credentials. Only
 // providers with a non-empty key are included.
-func Env(anthropicKey, openAIKey, geminiKey, fireworksKey string) Source {
+func Env(anthropicKey, openAIKey, geminiKey, fireworksKey, xaiKey string) Source {
 	prov := map[models.Provider]*providerConn{}
 	labels := map[models.Provider]string{}
 	add := func(p models.Provider, k, env string) {
@@ -110,6 +110,7 @@ func Env(anthropicKey, openAIKey, geminiKey, fireworksKey string) Source {
 	add(models.ProviderOpenAI, openAIKey, "OPENAI_API_KEY")
 	add(models.ProviderGemini, geminiKey, "GEMINI_API_KEY")
 	add(models.ProviderFireworks, fireworksKey, "FIREWORKS_API_KEY")
+	add(models.ProviderXAI, xaiKey, "XAI_API_KEY")
 	return Source{label: "env", providers: prov, providerLabels: labels}
 }
 

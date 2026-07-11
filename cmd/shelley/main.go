@@ -412,6 +412,7 @@ func buildLLMModelSources(ctx context.Context, global GlobalConfig, logger *slog
 	openAIKey := os.Getenv("OPENAI_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	fireworksKey := os.Getenv("FIREWORKS_API_KEY")
+	xaiKey := os.Getenv("XAI_API_KEY")
 
 	var sources []modelsources.Source
 
@@ -461,20 +462,21 @@ func buildLLMModelSources(ctx context.Context, global GlobalConfig, logger *slog
 	// override the gateway's implicit credential for those three.
 	if gateway != "" && llmIntegrationFound {
 		logger.Info("Skipping LLM gateway because an exe.dev LLM integration was discovered")
-		if geminiKey != "" {
-			sources = append(sources, modelsources.Env("", "", geminiKey, ""))
+		if geminiKey != "" || xaiKey != "" {
+			sources = append(sources, modelsources.Env("", "", geminiKey, "", xaiKey))
 		}
 	} else if gateway != "" {
 		logger.Info("Using LLM gateway", "gateway", gateway)
 		sources = append(sources, modelsources.Gateway(gateway, anthropicKey, openAIKey, fireworksKey))
-		// 2b. Gemini is not served by the gateway; let GEMINI_API_KEY,
-		// when set, supply Gemini models alongside the gateway.
-		if geminiKey != "" {
-			sources = append(sources, modelsources.Env("", "", geminiKey, ""))
+		// 2b. Gemini and xAI are not served by the gateway; let
+		// GEMINI_API_KEY / XAI_API_KEY, when set, supply those models
+		// alongside the gateway.
+		if geminiKey != "" || xaiKey != "" {
+			sources = append(sources, modelsources.Env("", "", geminiKey, "", xaiKey))
 		}
-	} else if anthropicKey != "" || openAIKey != "" || geminiKey != "" || fireworksKey != "" {
+	} else if anthropicKey != "" || openAIKey != "" || geminiKey != "" || fireworksKey != "" || xaiKey != "" {
 		// 3. Env vars.
-		sources = append(sources, modelsources.Env(anthropicKey, openAIKey, geminiKey, fireworksKey))
+		sources = append(sources, modelsources.Env(anthropicKey, openAIKey, geminiKey, fireworksKey, xaiKey))
 	}
 
 	// 4. Predictable always available.

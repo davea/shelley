@@ -27,6 +27,7 @@ const (
 	ProviderAnthropic Provider = "anthropic"
 	ProviderFireworks Provider = "fireworks"
 	ProviderGemini    Provider = "gemini"
+	ProviderXAI       Provider = "xai"
 	ProviderBuiltIn   Provider = "builtin"
 )
 
@@ -42,6 +43,7 @@ const (
 	DefaultOpenAIBaseURL    = "https://api.openai.com"
 	DefaultFireworksBaseURL = "https://api.fireworks.ai/inference"
 	DefaultGeminiBaseURL    = "https://generativelanguage.googleapis.com"
+	DefaultXAIBaseURL       = "https://api.x.ai"
 )
 
 // APIType identifies the wire protocol Shelley uses to talk to a model.
@@ -149,8 +151,12 @@ func antSvc(modelName string) func(baseURL, apiKey string, httpc *http.Client) l
 }
 
 func oaiResponsesSvc(model oai.Model) func(baseURL, apiKey string, httpc *http.Client) llm.Service {
+	return oaiResponsesSvcNamed(model, "openai")
+}
+
+func oaiResponsesSvcNamed(model oai.Model, providerName string) func(baseURL, apiKey string, httpc *http.Client) llm.Service {
 	return func(baseURL, apiKey string, httpc *http.Client) llm.Service {
-		s := &oai.ResponsesService{Model: model, APIKey: apiKey, HTTPC: httpc, ThinkingLevel: llm.ThinkingLevelMedium, ProviderName: "openai"}
+		s := &oai.ResponsesService{Model: model, APIKey: apiKey, HTTPC: httpc, ThinkingLevel: llm.ThinkingLevelMedium, ProviderName: providerName}
 		if baseURL != "" {
 			s.ModelURL = baseURL + "/v1"
 		}
@@ -264,6 +270,12 @@ func All() []Model {
 			Description: "Gemini 3 Pro", APIModelName: "gemini-3-pro-preview",
 			APIType: APITypeGemini, DefaultBaseURL: DefaultGeminiBaseURL,
 			Build: gemSvc("gemini-3-pro-preview"),
+		},
+		{
+			ID: "grok-4.5", Provider: ProviderXAI,
+			Description: "Grok 4.5", APIModelName: oai.Grok45.ModelName,
+			APIType: APITypeOpenAIResponses, DefaultBaseURL: DefaultXAIBaseURL,
+			Build: oaiResponsesSvcNamed(oai.Grok45, "xai"),
 		},
 		{
 			ID: "kimi-k2.6-fireworks", Provider: ProviderFireworks,

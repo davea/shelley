@@ -65,6 +65,7 @@ func TestByID(t *testing.T) {
 		{id: "claude-opus-4.8", wantID: "claude-opus-4.8"},
 		{id: "claude-opus-4.7", wantID: "claude-opus-4.7"},
 		{id: "claude-opus-4.6", wantID: "claude-opus-4.6"},
+		{id: "grok-4.5", wantID: "grok-4.5"},
 		{id: "nonexistent", wantNil: true},
 	}
 	for _, tt := range tests {

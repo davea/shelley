@@ -466,6 +466,8 @@ func (s *ResponsesService) TokenContextWindow() int {
 		return 288000 // 288k for gpt-5.3-codex
 	case "gpt-5.2-codex":
 		return 272000 // 272k for gpt-5.2-codex
+	case "grok-4.5":
+		return 500000 // 500k context window for Grok 4.5
 	case "gpt-5.1-codex":
 		return 256000 // 256k for gpt-5.1-codex
 	case "gpt-4.1-2025-04-14", "gpt-4.1-mini-2025-04-14", "gpt-4.1-nano-2025-04-14":

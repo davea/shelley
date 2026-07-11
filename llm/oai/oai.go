@@ -26,6 +26,7 @@ const (
 	GeminiURL    = "https://generativelanguage.googleapis.com/v1beta/openai/"
 	MistralURL   = "https://api.mistral.ai/v1"
 	MoonshotURL  = "https://api.moonshot.ai/v1"
+	XAIURL       = "https://api.x.ai/v1"
 
 	// Environment variable names for API keys
 	OpenAIAPIKeyEnv    = "OPENAI_API_KEY"
@@ -35,6 +36,7 @@ const (
 	GeminiAPIKeyEnv    = "GEMINI_API_KEY"
 	MistralAPIKeyEnv   = "MISTRAL_API_KEY"
 	MoonshotAPIKeyEnv  = "MOONSHOT_API_KEY"
+	XAIAPIKeyEnv       = "XAI_API_KEY"
 )
 
 //exe:completeinit
@@ -336,6 +338,16 @@ var (
 		IsReasoningModel:   false,
 		UseSimplifiedPatch: false,
 		SupportsImages:     false,
+	}
+
+	Grok45 = Model{
+		UserName:           "grok-4.5",
+		ModelName:          "grok-4.5",
+		URL:                XAIURL,
+		APIKeyEnv:          XAIAPIKeyEnv,
+		IsReasoningModel:   true,
+		UseSimplifiedPatch: false,
+		SupportsImages:     true,
 	}
 
 	GPTOSS20B = Model{
