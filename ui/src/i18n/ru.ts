@@ -164,7 +164,16 @@ export const ru: TranslationKeys = {
   reasoningEffort: "Reasoning Effort",
   reasoningEffortPlaceholder: "e.g., medium, high, xhigh, none — leave blank for default",
   reasoningEffortHint:
-    "Sent as reasoning.effort to the OpenAI Responses API. Free-form: providers add new tiers periodically.",
+    "Optional provider-specific default. Leave blank to use the provider default; explicit reasoning choices in a chat override it.",
+  supportsReasoning: "Supports reasoning",
+  reasoningSupportAuto: "Auto-detect",
+  reasoningSupportYes: "Supported",
+  reasoningSupportNo: "Not supported",
+  reasoningSupportHelp: "Auto uses the model catalog. Unknown custom models default to supported.",
+  reasoningLevelMapping: "Reasoning level mapping",
+  reasoningMappingUnsupported: "Unsupported",
+  reasoningMappingHelp:
+    "Controls which chat reasoning choices are offered and translates each choice to a level accepted by this model.",
   testButton: "Тест",
   testingButton: "Тестирование...",
   save: "Сохранить",

@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -511,8 +512,13 @@ func (l *loggingService) SupportsServerSideWebSearch() bool {
 	return false
 }
 
-func (l *loggingService) SupportsImages() bool {
-	return l.service.SupportsImages()
+func (l *loggingService) SupportsImages() bool { return l.service.SupportsImages() }
+func (l *loggingService) SupportsReasoning() bool {
+	return llm.SupportsReasoning(l.service)
+}
+
+func (l *loggingService) SupportedReasoningLevels() []llm.ThinkingLevel {
+	return llm.SupportedReasoningLevels(l.service)
 }
 
 // DefaultReasoningLevel forwards the wrapped service's default reasoning level
@@ -699,12 +705,111 @@ func (m *Manager) GetModelInfo(modelID string) *ModelInfo {
 	return &ModelInfo{DisplayName: entry.displayName, Tags: entry.tags, Source: entry.source, BaseURL: entry.baseURL, APIType: string(entry.apiType)}
 }
 
+type reasoningMapping struct {
+	level  llm.ThinkingLevel
+	effort string
+}
+
+type reasoningService struct {
+	llm.Service
+	supported     bool
+	levels        []llm.ThinkingLevel
+	mapping       map[llm.ThinkingLevel]reasoningMapping
+	defaultSource llm.ThinkingLevel
+}
+
+func (s *reasoningService) SupportsReasoning() bool  { return s.supported }
+func (s *reasoningService) UseSimplifiedPatch() bool { return llm.UseSimplifiedPatch(s.Service) }
+func (s *reasoningService) SupportsServerSideWebSearch() bool {
+	type capable interface{ SupportsServerSideWebSearch() bool }
+	c, ok := s.Service.(capable)
+	return ok && c.SupportsServerSideWebSearch()
+}
+
+func (s *reasoningService) SupportedReasoningLevels() []llm.ThinkingLevel {
+	return append([]llm.ThinkingLevel(nil), s.levels...)
+}
+
+func (s *reasoningService) DefaultReasoningLevel() string {
+	if !s.supported {
+		return "off"
+	}
+	if mapped, ok := s.mapping[s.defaultSource]; ok {
+		if mapped.level != llm.ThinkingLevelDefault {
+			return mapped.level.Name()
+		}
+		return mapped.effort
+	}
+	return llm.ServiceDefaultReasoningLevel(s.Service)
+}
+
+func (s *reasoningService) Do(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	copyReq := *req
+	if !s.supported {
+		copyReq.ThinkingLevel = llm.ThinkingLevelOff
+	} else if copyReq.ThinkingLevel == llm.ThinkingLevelDefault {
+		if mapped, ok := s.mapping[s.defaultSource]; ok {
+			copyReq.ThinkingLevel = mapped.level
+			copyReq.ReasoningEffort = mapped.effort
+		}
+	} else if len(s.mapping) > 0 {
+		mapped, ok := s.mapping[copyReq.ThinkingLevel]
+		if !ok {
+			return nil, fmt.Errorf("reasoning level %q is not supported by this model", copyReq.ThinkingLevel.Name())
+		}
+		copyReq.ThinkingLevel = mapped.level
+		copyReq.ReasoningEffort = mapped.effort
+	}
+	return s.Service.Do(ctx, &copyReq)
+}
+
+func wrapReasoningService(service llm.Service, model *generated.Model) llm.Service {
+	return WrapReasoningConfig(service, model.Endpoint, model.ModelName, model.ReasoningSupport, model.ReasoningMap)
+}
+
+// WrapReasoningConfig applies custom-model capability and level mapping.
+func WrapReasoningConfig(service llm.Service, endpoint, modelName, support, rawMap string) llm.Service {
+	supported := ResolveSupportsReasoning(endpoint, modelName, support)
+	mapping, levels := parseReasoningMap(rawMap)
+	defaultSource := llm.ParseThinkingLevel(llm.ServiceDefaultReasoningLevel(service))
+	return &reasoningService{Service: service, supported: supported, levels: levels, mapping: mapping, defaultSource: defaultSource}
+}
+
+func parseReasoningMap(raw string) (map[llm.ThinkingLevel]reasoningMapping, []llm.ThinkingLevel) {
+	if raw == "" {
+		return nil, nil
+	}
+	var values map[string]string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, nil
+	}
+	mapping := make(map[llm.ThinkingLevel]reasoningMapping, len(values))
+	levels := make([]llm.ThinkingLevel, 0, len(values))
+	for _, level := range []llm.ThinkingLevel{llm.ThinkingLevelOff, llm.ThinkingLevelMinimal, llm.ThinkingLevelLow, llm.ThinkingLevelMedium, llm.ThinkingLevelHigh, llm.ThinkingLevelXHigh} {
+		mappedName, ok := values[level.Name()]
+		if !ok || mappedName == "" {
+			continue
+		}
+		mapped := llm.ParseThinkingLevel(mappedName)
+		if mapped == llm.ThinkingLevelDefault && mappedName != "default" {
+			// Preserve the generic level as a safe fallback for providers that do
+			// not consume verbatim efforts; providers that do consume it use effort.
+			mapping[level] = reasoningMapping{level: level, effort: mappedName}
+		} else {
+			mapping[level] = reasoningMapping{level: mapped}
+		}
+		levels = append(levels, level)
+	}
+	return mapping, levels
+}
+
 // createServiceFromModel creates an LLM service from a database model configuration.
 func (m *Manager) createServiceFromModel(model *generated.Model) llm.Service {
 	supportsImages := ResolveSupportsImages(model.Endpoint, model.ModelName, model.ImageSupport)
+	var service llm.Service
 	switch model.ProviderType {
 	case "anthropic":
-		return &ant.Service{
+		service = &ant.Service{
 			APIKey:          model.ApiKey,
 			URL:             model.Endpoint,
 			Model:           model.ModelName,
@@ -713,7 +818,7 @@ func (m *Manager) createServiceFromModel(model *generated.Model) llm.Service {
 			SupportsImages_: supportsImages,
 		}
 	case "openai":
-		return &oai.Service{
+		service = &oai.Service{
 			APIKey:   model.ApiKey,
 			ModelURL: model.Endpoint,
 			Model: oai.Model{
@@ -721,12 +826,13 @@ func (m *Manager) createServiceFromModel(model *generated.Model) llm.Service {
 				URL:            model.Endpoint,
 				SupportsImages: supportsImages,
 			},
-			MaxTokens:    int(model.MaxTokens),
-			HTTPC:        m.httpc,
-			ProviderName: "openai",
+			MaxTokens:       int(model.MaxTokens),
+			HTTPC:           m.httpc,
+			ProviderName:    "openai",
+			ReasoningEffort: model.ReasoningEffort,
 		}
 	case "openai-responses":
-		return &oai.ResponsesService{
+		service = &oai.ResponsesService{
 			APIKey:   model.ApiKey,
 			ModelURL: model.Endpoint,
 			Model: oai.Model{
@@ -741,7 +847,7 @@ func (m *Manager) createServiceFromModel(model *generated.Model) llm.Service {
 			ProviderName:    "openai",
 		}
 	case "gemini":
-		return &gem.Service{
+		service = &gem.Service{
 			APIKey:          model.ApiKey,
 			URL:             model.Endpoint,
 			Model:           model.ModelName,
@@ -755,6 +861,7 @@ func (m *Manager) createServiceFromModel(model *generated.Model) llm.Service {
 		}
 		return nil
 	}
+	return wrapReasoningService(service, model)
 }
 
 // ResolveSupportsImages turns a stored image_support value ("auto"|"yes"|"no")
@@ -768,6 +875,26 @@ func ResolveSupportsImages(endpoint, modelName, imageSupport string) bool {
 		return false
 	case "auto", "":
 		supported, found := modelsdev.LookupImageSupport(endpoint, modelName)
+		if !found {
+			return true
+		}
+		return supported
+	default:
+		return true
+	}
+}
+
+// ResolveSupportsReasoning turns a stored reasoning_support value
+// ("auto"|"yes"|"no") into a capability boolean. Unknown models default to
+// supporting reasoning so custom endpoints remain configurable.
+func ResolveSupportsReasoning(endpoint, modelName, reasoningSupport string) bool {
+	switch reasoningSupport {
+	case "yes":
+		return true
+	case "no":
+		return false
+	case "auto", "":
+		supported, found := modelsdev.LookupReasoningSupport(endpoint, modelName)
 		if !found {
 			return true
 		}

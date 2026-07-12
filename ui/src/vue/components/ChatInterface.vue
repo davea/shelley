@@ -427,7 +427,7 @@ const props = withDefaults(
       conversationType?: "normal" | "orchestrator",
       subagentBackend?: "shelley" | "claude-cli" | "codex-cli",
       toolOverrides?: Record<string, "on" | "off">,
-      thinkingLevel?: ThinkingLevel,
+      thinkingLevel?: Exclude<ThinkingLevel, "default">,
     ) => Promise<void>;
     onDistillNewGeneration?: (
       sourceConversationId: string,
@@ -501,18 +501,28 @@ const models = ref<
     source?: string;
     ready: boolean;
     max_context_tokens?: number;
+    supports_reasoning?: boolean;
+    reasoning_levels?: Exclude<ThinkingLevel, "default">[];
   }>
 >(window.__SHELLEY_INIT__?.models || []);
 
 // Ready model ids, surfaced to MessageInput for /model argument autocomplete.
 const readyModelIds = computed(() => models.value.filter((m) => m.ready).map((m) => m.id));
 
-const THINKING_LEVEL_KEY = "shelley.thinkingLevel";
+const THINKING_LEVEL_KEY = "shelley.thinkingLevel.v2";
 const thinkingLevel = ref<ThinkingLevel>(
   (() => {
     try {
       const stored = localStorage.getItem(THINKING_LEVEL_KEY);
-      const valid: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+      const valid: ThinkingLevel[] = [
+        "default",
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+      ];
       if (stored !== null && valid.includes(stored as ThinkingLevel)) {
         return stored as ThinkingLevel;
       }
@@ -713,8 +723,25 @@ const selectedModelDisplayName = computed(() => {
   return modelObj?.display_name || selectedModel.value;
 });
 
-const maxContextTokens = computed(
-  () => models.value.find((m) => m.id === selectedModel.value)?.max_context_tokens || 200000,
+const selectedModelInfo = computed(() => models.value.find((m) => m.id === selectedModel.value));
+const maxContextTokens = computed(() => selectedModelInfo.value?.max_context_tokens || 200000);
+
+watch(
+  selectedModelInfo,
+  (model) => {
+    if (!model || model.supports_reasoning === false) {
+      setThinkingLevel("default");
+      return;
+    }
+    if (
+      thinkingLevel.value !== "default" &&
+      model.reasoning_levels?.length &&
+      !model.reasoning_levels.includes(thinkingLevel.value)
+    ) {
+      setThinkingLevel("default");
+    }
+  },
+  { immediate: true },
 );
 
 const conversationThinkingLevel = computed<string | null>(() => {
@@ -1187,10 +1214,9 @@ const queuedGhosts = computed(() =>
 );
 
 // Build the conversation_options bundle from the current composer selection
-// (orchestrator mode, tool overrides, thinking level). thinkingLevel always
-// has a value (defaults to "medium"), so the bundle is effectively always
-// present; it only returns undefined in the degenerate case of no thinking
-// level and no other overrides. Used when promoting an autosaved draft on
+// (orchestrator mode, tool overrides, thinking level). "default" omits the
+// thinking override so the model's configured/provider default applies. Used
+// when promoting an autosaved draft on
 // first send — the draft is created (via POST /draft autosave) without
 // options, so the selection only reaches the server on the promoting chat
 // request.
@@ -1202,14 +1228,16 @@ function buildConversationOptions(): ChatRequest["conversation_options"] | undef
     realOverrides[k] = v;
   }
   const hasOverrides = Object.keys(realOverrides).length > 0;
-  const hasThinking = !!thinkingLevel.value;
+  const explicitThinking =
+    thinkingLevel.value === "default" ? undefined : thinkingLevel.value;
+  const hasThinking = explicitThinking !== undefined;
   if (!orchestratorOn && !hasOverrides && !hasThinking) return undefined;
   return {
     ...(orchestratorOn
       ? { type: "orchestrator" as const, subagent_backend: subagentBackend.value }
       : {}),
     ...(hasOverrides ? { tool_overrides: realOverrides } : {}),
-    ...(hasThinking ? { thinking_level: thinkingLevel.value } : {}),
+    ...(explicitThinking ? { thinking_level: explicitThinking } : {}),
   };
 }
 
@@ -1234,7 +1262,7 @@ async function sendFirstMessage(prompt: string) {
     orchestratorOn ? "orchestrator" : undefined,
     orchestratorOn ? subagentBackend.value : undefined,
     Object.keys(realOverrides).length > 0 ? realOverrides : undefined,
-    thinkingLevel.value,
+    thinkingLevel.value === "default" ? undefined : thinkingLevel.value,
   );
 }
 

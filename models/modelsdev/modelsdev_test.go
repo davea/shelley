@@ -105,3 +105,22 @@ func TestBestProviderForPath(t *testing.T) {
 		})
 	}
 }
+
+func TestLookupReasoningSupport(t *testing.T) {
+	cases := []struct {
+		endpoint, model string
+		want, found     bool
+	}{
+		{"https://api.openai.com/v1", "gpt-5.4", true, true},
+		{"https://api.openai.com/v1", "gpt-4o", false, true},
+		{"https://api.fireworks.ai/inference/v1", "accounts/fireworks/models/gpt-oss-20b", true, true},
+		{"https://generativelanguage.googleapis.com", "gemini-3-flash-preview", true, true},
+		{"https://made-up.example.com", "x", false, false},
+	}
+	for _, tc := range cases {
+		got, found := LookupReasoningSupport(tc.endpoint, tc.model)
+		if got != tc.want || found != tc.found {
+			t.Errorf("LookupReasoningSupport(%q, %q) = (%v, %v), want (%v, %v)", tc.endpoint, tc.model, got, found, tc.want, tc.found)
+		}
+	}
+}

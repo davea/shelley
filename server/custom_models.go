@@ -25,11 +25,14 @@ type ModelAPI struct {
 	APIKey          string `json:"api_key"`
 	ModelName       string `json:"model_name"`
 	MaxTokens       int64  `json:"max_tokens"`
-	Tags            string `json:"tags"`             // Comma-separated tags (e.g., "slug" for slug generation)
-	ReasoningEffort string `json:"reasoning_effort"` // Free-form reasoning.effort for OpenAI Responses API; empty = default
+	Tags            string `json:"tags"` // Comma-separated tags (e.g., "slug" for slug generation)
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// ImageSupport is one of "auto", "yes", or "no". "auto" is resolved
 	// automatically from the model's endpoint and name.
-	ImageSupport string `json:"image_support"`
+	ImageSupport      string `json:"image_support"`
+	ReasoningSupport  string `json:"reasoning_support"`
+	ReasoningMap      string `json:"reasoning_map"`
+	SupportsReasoning bool   `json:"supports_reasoning"`
 	// SupportsImages is the resolved boolean that "image_support" evaluates
 	// to for this model. It lets the UI show what "auto" resolves to.
 	SupportsImages bool `json:"supports_images"`
@@ -37,65 +40,99 @@ type ModelAPI struct {
 
 // CreateModelRequest is the request body for creating a model.
 type CreateModelRequest struct {
-	DisplayName     string `json:"display_name"`
-	ProviderType    string `json:"provider_type"`
-	Endpoint        string `json:"endpoint"`
-	APIKey          string `json:"api_key"`
-	ModelName       string `json:"model_name"`
-	MaxTokens       int64  `json:"max_tokens"`
-	Tags            string `json:"tags"`             // Comma-separated tags
-	ReasoningEffort string `json:"reasoning_effort"` // Free-form reasoning.effort for OpenAI Responses API
-	ImageSupport    string `json:"image_support"`    // "auto"|"yes"|"no"; empty = "auto"
+	DisplayName      string `json:"display_name"`
+	ProviderType     string `json:"provider_type"`
+	Endpoint         string `json:"endpoint"`
+	APIKey           string `json:"api_key"`
+	ModelName        string `json:"model_name"`
+	MaxTokens        int64  `json:"max_tokens"`
+	Tags             string `json:"tags"` // Comma-separated tags
+	ReasoningEffort  string `json:"reasoning_effort,omitempty"`
+	ImageSupport     string `json:"image_support"`     // "auto"|"yes"|"no"; empty = "auto"
+	ReasoningSupport string `json:"reasoning_support"` // "auto"|"yes"|"no"; empty = "auto"
+	ReasoningMap     string `json:"reasoning_map"`     // JSON map of Shelley level to provider-supported level
 }
 
 // UpdateModelRequest is the request body for updating a model.
 type UpdateModelRequest struct {
-	DisplayName     string `json:"display_name"`
-	ProviderType    string `json:"provider_type"`
-	Endpoint        string `json:"endpoint"`
-	APIKey          string `json:"api_key"` // Empty string means keep existing
-	ModelName       string `json:"model_name"`
-	MaxTokens       int64  `json:"max_tokens"`
-	Tags            string `json:"tags"`             // Comma-separated tags
-	ReasoningEffort string `json:"reasoning_effort"` // Free-form reasoning.effort for OpenAI Responses API
-	ImageSupport    string `json:"image_support"`    // "auto"|"yes"|"no"; empty preserves existing
+	DisplayName      string  `json:"display_name"`
+	ProviderType     string  `json:"provider_type"`
+	Endpoint         string  `json:"endpoint"`
+	APIKey           string  `json:"api_key"` // Empty string means keep existing
+	ModelName        string  `json:"model_name"`
+	MaxTokens        int64   `json:"max_tokens"`
+	Tags             string  `json:"tags"` // Comma-separated tags
+	ReasoningEffort  *string `json:"reasoning_effort,omitempty"`
+	ImageSupport     string  `json:"image_support"`     // "auto"|"yes"|"no"; empty preserves existing
+	ReasoningSupport string  `json:"reasoning_support"` // "auto"|"yes"|"no"; empty preserves existing
+	ReasoningMap     string  `json:"reasoning_map"`
 }
 
 // validImageSupport returns the canonical value or an error.
-func validImageSupport(v string) (string, error) {
+func validSupportSetting(field, v string) (string, error) {
 	switch v {
 	case "", "auto":
 		return "auto", nil
 	case "yes", "no":
 		return v, nil
 	default:
-		return "", fmt.Errorf("image_support must be one of 'auto', 'yes', 'no'; got %q", v)
+		return "", fmt.Errorf("%s must be one of 'auto', 'yes', 'no'; got %q", field, v)
 	}
+}
+
+func validImageSupport(v string) (string, error) {
+	return validSupportSetting("image_support", v)
+}
+
+func validReasoningSupport(v string) (string, error) {
+	return validSupportSetting("reasoning_support", v)
+}
+
+func validReasoningMap(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	var values map[string]string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return fmt.Errorf("reasoning_map must be a JSON object: %w", err)
+	}
+	valid := map[string]bool{"off": true, "minimal": true, "low": true, "medium": true, "high": true, "xhigh": true}
+	for from, to := range values {
+		if !valid[from] || strings.TrimSpace(to) == "" {
+			return fmt.Errorf("reasoning_map keys must use off, minimal, low, medium, high, or xhigh and values must be non-empty; got %q: %q", from, to)
+		}
+	}
+	return nil
 }
 
 // TestModelRequest is the request body for testing a model
 type TestModelRequest struct {
-	ModelID         string `json:"model_id,omitempty"` // If provided, use stored API key
-	ProviderType    string `json:"provider_type"`
-	Endpoint        string `json:"endpoint"`
-	APIKey          string `json:"api_key"`
-	ModelName       string `json:"model_name"`
-	ReasoningEffort string `json:"reasoning_effort"`
+	ModelID          string  `json:"model_id,omitempty"` // If provided, use stored API key
+	ProviderType     string  `json:"provider_type"`
+	Endpoint         string  `json:"endpoint"`
+	APIKey           string  `json:"api_key"`
+	ModelName        string  `json:"model_name"`
+	ReasoningSupport string  `json:"reasoning_support"`
+	ReasoningMap     string  `json:"reasoning_map"`
+	ReasoningEffort  *string `json:"reasoning_effort,omitempty"`
 }
 
 func toModelAPI(m generated.Model) ModelAPI {
 	return ModelAPI{
-		ModelID:         m.ModelID,
-		DisplayName:     m.DisplayName,
-		ProviderType:    m.ProviderType,
-		Endpoint:        m.Endpoint,
-		APIKey:          m.ApiKey,
-		ModelName:       m.ModelName,
-		MaxTokens:       m.MaxTokens,
-		Tags:            m.Tags,
-		ReasoningEffort: m.ReasoningEffort,
-		ImageSupport:    m.ImageSupport,
-		SupportsImages:  models.ResolveSupportsImages(m.Endpoint, m.ModelName, m.ImageSupport),
+		ModelID:           m.ModelID,
+		DisplayName:       m.DisplayName,
+		ProviderType:      m.ProviderType,
+		Endpoint:          m.Endpoint,
+		APIKey:            m.ApiKey,
+		ModelName:         m.ModelName,
+		MaxTokens:         m.MaxTokens,
+		Tags:              m.Tags,
+		ReasoningEffort:   m.ReasoningEffort,
+		ImageSupport:      m.ImageSupport,
+		ReasoningSupport:  m.ReasoningSupport,
+		ReasoningMap:      m.ReasoningMap,
+		SupportsReasoning: models.ResolveSupportsReasoning(m.Endpoint, m.ModelName, m.ReasoningSupport),
+		SupportsImages:    models.ResolveSupportsImages(m.Endpoint, m.ModelName, m.ImageSupport),
 	}
 }
 
@@ -162,18 +199,29 @@ func (s *Server) handleCreateModel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	reasoningSupport, err := validReasoningSupport(req.ReasoningSupport)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validReasoningMap(req.ReasoningMap); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	model, err := s.db.CreateModel(r.Context(), generated.CreateModelParams{
-		ModelID:         modelID,
-		DisplayName:     req.DisplayName,
-		ProviderType:    req.ProviderType,
-		Endpoint:        req.Endpoint,
-		ApiKey:          req.APIKey,
-		ModelName:       req.ModelName,
-		MaxTokens:       req.MaxTokens,
-		Tags:            req.Tags,
-		ReasoningEffort: req.ReasoningEffort,
-		ImageSupport:    imageSupport,
+		ModelID:          modelID,
+		DisplayName:      req.DisplayName,
+		ProviderType:     req.ProviderType,
+		Endpoint:         req.Endpoint,
+		ApiKey:           req.APIKey,
+		ModelName:        req.ModelName,
+		MaxTokens:        req.MaxTokens,
+		Tags:             req.Tags,
+		ReasoningEffort:  req.ReasoningEffort,
+		ImageSupport:     imageSupport,
+		ReasoningSupport: reasoningSupport,
+		ReasoningMap:     req.ReasoningMap,
 	})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to create model: %v", err), http.StatusInternalServerError)
@@ -263,7 +311,7 @@ func (s *Server) handleUpdateModel(w http.ResponseWriter, r *http.Request, model
 		req.MaxTokens = 200000
 	}
 
-	// Empty image_support preserves the existing value; otherwise validate.
+	// Empty support settings preserve the existing values; otherwise validate.
 	imageSupport := existing.ImageSupport
 	if req.ImageSupport != "" {
 		v, err := validImageSupport(req.ImageSupport)
@@ -273,18 +321,37 @@ func (s *Server) handleUpdateModel(w http.ResponseWriter, r *http.Request, model
 		}
 		imageSupport = v
 	}
+	reasoningSupport := existing.ReasoningSupport
+	if req.ReasoningSupport != "" {
+		v, err := validReasoningSupport(req.ReasoningSupport)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		reasoningSupport = v
+	}
+	if err := validReasoningMap(req.ReasoningMap); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	reasoningEffort := existing.ReasoningEffort
+	if req.ReasoningEffort != nil {
+		reasoningEffort = *req.ReasoningEffort
+	}
 
 	model, err := s.db.UpdateModel(r.Context(), generated.UpdateModelParams{
-		DisplayName:     req.DisplayName,
-		ProviderType:    req.ProviderType,
-		Endpoint:        req.Endpoint,
-		ApiKey:          apiKey,
-		ModelName:       req.ModelName,
-		MaxTokens:       req.MaxTokens,
-		Tags:            req.Tags,
-		ReasoningEffort: req.ReasoningEffort,
-		ImageSupport:    imageSupport,
-		ModelID:         modelID,
+		DisplayName:      req.DisplayName,
+		ProviderType:     req.ProviderType,
+		Endpoint:         req.Endpoint,
+		ApiKey:           apiKey,
+		ModelName:        req.ModelName,
+		MaxTokens:        req.MaxTokens,
+		Tags:             req.Tags,
+		ReasoningEffort:  reasoningEffort,
+		ImageSupport:     imageSupport,
+		ReasoningSupport: reasoningSupport,
+		ReasoningMap:     req.ReasoningMap,
+		ModelID:          modelID,
 	})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to update model: %v", err), http.StatusInternalServerError)
@@ -350,16 +417,18 @@ func (s *Server) handleDuplicateModel(w http.ResponseWriter, r *http.Request, mo
 
 	// Create the duplicate with the same API key
 	model, err := s.db.CreateModel(r.Context(), generated.CreateModelParams{
-		ModelID:         newModelID,
-		DisplayName:     displayName,
-		ProviderType:    source.ProviderType,
-		Endpoint:        source.Endpoint,
-		ApiKey:          source.ApiKey, // Copy the API key!
-		ModelName:       source.ModelName,
-		MaxTokens:       source.MaxTokens,
-		Tags:            "", // Don't copy tags
-		ReasoningEffort: source.ReasoningEffort,
-		ImageSupport:    source.ImageSupport,
+		ModelID:          newModelID,
+		DisplayName:      displayName,
+		ProviderType:     source.ProviderType,
+		Endpoint:         source.Endpoint,
+		ApiKey:           source.ApiKey, // Copy the API key!
+		ModelName:        source.ModelName,
+		MaxTokens:        source.MaxTokens,
+		Tags:             "", // Don't copy tags
+		ReasoningEffort:  source.ReasoningEffort,
+		ImageSupport:     source.ImageSupport,
+		ReasoningSupport: source.ReasoningSupport,
+		ReasoningMap:     source.ReasoningMap,
 	})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to duplicate model: %v", err), http.StatusInternalServerError)
@@ -388,19 +457,31 @@ func (s *Server) handleTestModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If model_id is provided and api_key is empty, look up the stored key
-	if req.ModelID != "" && req.APIKey == "" {
+	// A model ID supplies hidden legacy configuration and, when omitted by the
+	// caller, its stored API key. The UI intentionally does not expose the
+	// legacy reasoning_effort field, but Test must still mirror runtime.
+	if req.ModelID != "" {
 		model, err := s.db.GetModel(r.Context(), req.ModelID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Model not found: %v", err), http.StatusNotFound)
 			return
 		}
-		req.APIKey = model.ApiKey
+		if req.APIKey == "" {
+			req.APIKey = model.ApiKey
+		}
+		if req.ReasoningEffort == nil {
+			req.ReasoningEffort = &model.ReasoningEffort
+		}
 	}
 
 	if req.ProviderType == "" || req.Endpoint == "" || req.APIKey == "" || req.ModelName == "" {
 		http.Error(w, "provider_type, endpoint, api_key, and model_name are required", http.StatusBadRequest)
 		return
+	}
+
+	reasoningEffort := ""
+	if req.ReasoningEffort != nil {
+		reasoningEffort = *req.ReasoningEffort
 	}
 
 	// Create the appropriate service based on provider type
@@ -415,8 +496,9 @@ func (s *Server) handleTestModel(w http.ResponseWriter, r *http.Request) {
 		}
 	case "openai":
 		service = &oai.Service{
-			APIKey:   req.APIKey,
-			ModelURL: req.Endpoint,
+			APIKey:          req.APIKey,
+			ModelURL:        req.Endpoint,
+			ReasoningEffort: reasoningEffort,
 			Model: oai.Model{
 				UserName:           "",
 				ModelName:          req.ModelName,
@@ -432,7 +514,7 @@ func (s *Server) handleTestModel(w http.ResponseWriter, r *http.Request) {
 			APIKey:          req.APIKey,
 			URL:             req.Endpoint,
 			Model:           req.ModelName,
-			ReasoningEffort: req.ReasoningEffort,
+			ReasoningEffort: reasoningEffort,
 		}
 	case "openai-responses":
 		service = &oai.ResponsesService{
@@ -449,12 +531,21 @@ func (s *Server) handleTestModel(w http.ResponseWriter, r *http.Request) {
 			// Match createServiceFromModel so Test reflects real runtime behavior:
 			// medium is the default when no explicit override is given.
 			ThinkingLevel:   llm.ThinkingLevelMedium,
-			ReasoningEffort: req.ReasoningEffort,
+			ReasoningEffort: reasoningEffort,
 		}
 	default:
 		http.Error(w, "Invalid provider_type", http.StatusBadRequest)
 		return
 	}
+	if _, err := validReasoningSupport(req.ReasoningSupport); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validReasoningMap(req.ReasoningMap); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	service = models.WrapReasoningConfig(service, req.Endpoint, req.ModelName, req.ReasoningSupport, req.ReasoningMap)
 
 	// Send a simple test request
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)

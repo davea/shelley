@@ -135,12 +135,12 @@
         </div>
       </div>
 
-      <!-- Reasoning Effort (OpenAI Responses API only) -->
+      <!-- Legacy provider default for OpenAI Responses models -->
       <div v-if="form.provider_type === 'openai-responses'" class="form-group">
         <label>{{ t("reasoningEffort") }}</label>
         <input
-          type="text"
           v-model="form.reasoning_effort"
+          type="text"
           :placeholder="t('reasoningEffortPlaceholder')"
           class="form-input"
           list="reasoning-effort-suggestions"
@@ -154,6 +154,41 @@
           />
         </datalist>
         <div class="form-hint">{{ t("reasoningEffortHint") }}</div>
+      </div>
+
+      <!-- Reasoning capability and generic level mapping -->
+      <div class="form-group">
+        <label>{{ t("supportsReasoning") }}</label>
+        <select v-model="form.reasoning_support" class="form-input">
+          <option value="auto">{{ t("reasoningSupportAuto") }}</option>
+          <option value="yes">{{ t("reasoningSupportYes") }}</option>
+          <option value="no">{{ t("reasoningSupportNo") }}</option>
+        </select>
+        <div class="form-hint">
+          {{ t("reasoningSupportHelp") }}
+        </div>
+      </div>
+      <div v-if="form.reasoning_support !== 'no'" class="form-group">
+        <label>{{ t("reasoningLevelMapping") }}</label>
+        <div class="reasoning-map-grid">
+          <label v-for="level in REASONING_LEVELS" :key="level" class="reasoning-map-row">
+            <span>{{ level }}</span>
+            <span class="reasoning-map-arrow" aria-hidden="true">→</span>
+            <input
+              v-model="form.reasoning_map[level]"
+              class="form-input reasoning-map-input"
+              :list="`reasoning-map-${level}`"
+              :placeholder="t('reasoningMappingUnsupported')"
+            />
+            <datalist :id="`reasoning-map-${level}`">
+              <option v-for="target in REASONING_LEVELS" :key="target" :value="target" />
+              <option value="none" />
+            </datalist>
+          </label>
+        </div>
+        <div class="form-hint">
+          {{ t("reasoningMappingHelp") }}
+        </div>
       </div>
 
       <!-- Tags -->
@@ -233,8 +268,10 @@ import {
 import {
   DEFAULT_ENDPOINTS,
   DEFAULT_MODELS,
+  DEFAULT_REASONING_MAP,
   PROVIDER_LABELS,
   REASONING_EFFORT_SUGGESTIONS,
+  REASONING_LEVELS,
   emptyForm,
   providerTypes,
   type FormData,
@@ -251,6 +288,33 @@ const error = ref<string | null>(null);
 const testing = ref(false);
 const testResult = ref<{ success: boolean; message: string } | null>(null);
 const showTagsTooltip = ref(false);
+
+function resetForm() {
+  Object.assign(form, emptyForm, { reasoning_map: { ...DEFAULT_REASONING_MAP } });
+}
+
+function serializeReasoningMap(): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      REASONING_LEVELS.flatMap((level) => {
+        const target = form.reasoning_map[level];
+        return target ? [[level, target]] : [];
+      }),
+    ),
+  );
+}
+
+function parseReasoningMap(raw: string) {
+  const result = { ...DEFAULT_REASONING_MAP };
+  if (!raw) return result;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    for (const level of REASONING_LEVELS) result[level] = parsed[level] || "";
+  } catch {
+    // Invalid stored mappings are rejected by the server; keep safe defaults.
+  }
+  return result;
+}
 
 // When editing a model whose image support is Auto, surface what auto() would
 // resolve to (from the model's stored endpoint/model + server verdict).
@@ -284,10 +348,12 @@ watch(
         max_tokens: m.max_tokens,
         tags: m.tags,
         reasoning_effort: m.reasoning_effort || "",
+        reasoning_support: m.reasoning_support || "auto",
+        reasoning_map: parseReasoningMap(m.reasoning_map),
         image_support: m.image_support ?? "auto",
       });
     } else {
-      Object.assign(form, emptyForm);
+      resetForm();
     }
   },
   { immediate: true },
@@ -328,6 +394,8 @@ async function handleTest() {
       api_key: form.api_key,
       model_name: form.model_name,
       reasoning_effort: form.reasoning_effort,
+      reasoning_support: form.reasoning_support,
+      reasoning_map: serializeReasoningMap(),
     };
     testResult.value = await customModelsApi.testCustomModel(request);
   } catch (err) {
@@ -356,6 +424,8 @@ async function handleSave() {
       max_tokens: form.max_tokens,
       tags: form.tags,
       reasoning_effort: form.reasoning_effort,
+      reasoning_support: form.reasoning_support,
+      reasoning_map: serializeReasoningMap(),
       image_support: form.image_support,
     };
     if (props.editModel) {

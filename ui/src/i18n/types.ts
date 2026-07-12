@@ -162,6 +162,14 @@ export interface TranslationKeys {
   reasoningEffort: string;
   reasoningEffortPlaceholder: string;
   reasoningEffortHint: string;
+  supportsReasoning: string;
+  reasoningSupportAuto: string;
+  reasoningSupportYes: string;
+  reasoningSupportNo: string;
+  reasoningSupportHelp: string;
+  reasoningLevelMapping: string;
+  reasoningMappingUnsupported: string;
+  reasoningMappingHelp: string;
   testButton: string;
   testingButton: string;
   save: string;

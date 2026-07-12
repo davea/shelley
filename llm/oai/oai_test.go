@@ -1985,6 +1985,9 @@ func TestServiceReasoningEffort(t *testing.T) {
 		{name: "svc off, svc verbatim wins", svcLevel: llm.ThinkingLevelOff, svcEffort: "verbatim", wantEffort: "verbatim"},
 		{name: "req override beats svc default", svcLevel: llm.ThinkingLevelMedium, reqLevel: llm.ThinkingLevelLow, wantEffort: "low"},
 		{name: "req off wins", svcLevel: llm.ThinkingLevelMedium, svcEffort: "v", reqLevel: llm.ThinkingLevelOff, wantEffort: ""},
+		{name: "req level overrides configured none", svcEffort: "none", reqLevel: llm.ThinkingLevelMedium, wantEffort: "medium"},
+		{name: "default uses configured none", svcEffort: "none", wantEffort: "none"},
+		{name: "req off sends configured none", svcEffort: "none", reqLevel: llm.ThinkingLevelOff, wantEffort: "none"},
 		{name: "req xhigh beats svc verbatim, clamped to high", svcLevel: llm.ThinkingLevelMedium, svcEffort: "v", reqLevel: llm.ThinkingLevelXHigh, wantEffort: "high"},
 	}
 	for _, tt := range tests {

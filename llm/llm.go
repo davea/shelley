@@ -32,6 +32,28 @@ type Service interface {
 	SupportsImages() bool
 }
 
+// ReasoningSupporter reports whether a service accepts reasoning controls and
+// which generic levels it exposes to callers. An empty level list means all
+// standard levels are supported.
+type ReasoningSupporter interface {
+	SupportsReasoning() bool
+	SupportedReasoningLevels() []ThinkingLevel
+}
+
+func SupportsReasoning(svc Service) bool {
+	if rs, ok := svc.(ReasoningSupporter); ok {
+		return rs.SupportsReasoning()
+	}
+	return true
+}
+
+func SupportedReasoningLevels(svc Service) []ThinkingLevel {
+	if rs, ok := svc.(ReasoningSupporter); ok {
+		return rs.SupportedReasoningLevels()
+	}
+	return nil
+}
+
 type SimplifiedPatcher interface {
 	// UseSimplifiedPatch reports whether the service should use the simplified patch input schema.
 	UseSimplifiedPatch() bool
@@ -129,6 +151,9 @@ type Request struct {
 	// the per-service default thinking level for this request. Use
 	// ThinkingLevelOff to explicitly disable reasoning for this turn.
 	ThinkingLevel ThinkingLevel
+	// ReasoningEffort is an optional provider-verbatim request override used by
+	// custom-model level mappings (for example mapping off to "none").
+	ReasoningEffort string
 	// OnStream is called with each streaming delta as the LLM generates content.
 	// If nil, no streaming callbacks are made. The full response is still returned from Do.
 	OnStream func(StreamDelta) `json:"-"`

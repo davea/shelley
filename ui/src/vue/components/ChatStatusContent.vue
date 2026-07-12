@@ -97,7 +97,13 @@
       <span class="status-field-label" title="Reasoning effort the model spends before answering">{{
         t("thinkingLabel")
       }}</span>
-      <ThinkingLevelPicker :value="thinkingLevel" :disabled="sending" @change="onThinkingChange" />
+      <ThinkingLevelPicker
+        :value="thinkingLevel"
+        :disabled="sending"
+        :supported="selectedModelInfo?.supports_reasoning !== false"
+        :levels="selectedModelInfo?.reasoning_levels"
+        @change="onThinkingChange"
+      />
       <div ref="advancedSettingsRef" class="advanced-settings-wrapper">
         <button
           :class="`advanced-settings-trigger${toolOverrideCount > 0 ? ' active' : ''}`"
@@ -227,7 +233,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from "vue";
+import { computed, ref, watch, onUnmounted } from "vue";
 import type { Conversation } from "../../types";
 import { tildifyPath } from "../../utils/tildify";
 import { useI18n } from "../composables/i18n";
@@ -243,6 +249,8 @@ type ModelInfo = {
   source?: string;
   ready: boolean;
   max_context_tokens?: number;
+  supports_reasoning?: boolean;
+  reasoning_levels?: Exclude<ThinkingLevel, "default">[];
 };
 type ToolInfo = { name: string; summary: string; default_on: boolean };
 
@@ -286,6 +294,7 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
+const selectedModelInfo = computed(() => props.models.find((m) => m.id === props.selectedModel));
 
 // Local advanced-settings popover state + outside-click close.
 const showAdvancedSettings = ref(false);

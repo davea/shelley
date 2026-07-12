@@ -163,7 +163,16 @@ export const vi: TranslationKeys = {
   reasoningEffort: "Mức độ suy nghĩ",
   reasoningEffortPlaceholder: "ví dụ: medium, high, xhigh, none — để trống là mức mặc định",
   reasoningEffortHint:
-    "Được gửi như reasoning.effort đến OpenAI Responses API. Các nhà cung cấp sẽ bổ sung tier mới định kỳ",
+    "Optional provider-specific default. Leave blank to use the provider default; explicit reasoning choices in a chat override it.",
+  supportsReasoning: "Supports reasoning",
+  reasoningSupportAuto: "Auto-detect",
+  reasoningSupportYes: "Supported",
+  reasoningSupportNo: "Not supported",
+  reasoningSupportHelp: "Auto uses the model catalog. Unknown custom models default to supported.",
+  reasoningLevelMapping: "Reasoning level mapping",
+  reasoningMappingUnsupported: "Unsupported",
+  reasoningMappingHelp:
+    "Controls which chat reasoning choices are offered and translates each choice to a level accepted by this model.",
   testButton: "Test",
   testingButton: "Đang test...",
   save: "Lưu",

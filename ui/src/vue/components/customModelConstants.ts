@@ -52,6 +52,13 @@ export const API_TYPE_LABELS: Record<string, string> = {
 
 export const REASONING_EFFORT_SUGGESTIONS = ["none", "minimal", "low", "medium", "high", "xhigh"];
 
+export const REASONING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ReasoningLevel = (typeof REASONING_LEVELS)[number];
+export type ReasoningMap = Record<ReasoningLevel, string>;
+export const DEFAULT_REASONING_MAP: ReasoningMap = Object.fromEntries(
+  REASONING_LEVELS.map((level) => [level, level]),
+) as ReasoningMap;
+
 export const providerTypes: ProviderType[] = ["anthropic", "openai", "openai-responses", "gemini"];
 
 export interface FormData {
@@ -64,6 +71,8 @@ export interface FormData {
   max_tokens: number;
   tags: string;
   reasoning_effort: string;
+  reasoning_support: "auto" | "yes" | "no";
+  reasoning_map: ReasoningMap;
   image_support: "auto" | "yes" | "no";
 }
 
@@ -77,5 +86,7 @@ export const emptyForm: FormData = {
   max_tokens: 200000,
   tags: "",
   reasoning_effort: "",
+  reasoning_support: "auto",
+  reasoning_map: { ...DEFAULT_REASONING_MAP },
   image_support: "auto",
 };

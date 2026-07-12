@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -388,3 +390,69 @@ func TestPreferredToolModelsAreRegistered(t *testing.T) {
 }
 
 func (m *mockLLMService) SupportsImages() bool { return true }
+
+func TestReasoningServiceMapping(t *testing.T) {
+	inner := &captureThinkingService{}
+	svc := WrapReasoningConfig(inner, "", "unknown", "yes", `{"off":"off","minimal":"low","medium":"high"}`)
+
+	levels := llm.SupportedReasoningLevels(svc)
+	if got := []string{levels[0].Name(), levels[1].Name(), levels[2].Name()}; !reflect.DeepEqual(got, []string{"off", "minimal", "medium"}) {
+		t.Fatalf("levels = %v", got)
+	}
+	if _, err := svc.Do(context.Background(), &llm.Request{ThinkingLevel: llm.ThinkingLevelMinimal}); err != nil {
+		t.Fatal(err)
+	}
+	if inner.got != llm.ThinkingLevelLow {
+		t.Fatalf("mapped level = %s, want low", inner.got.Name())
+	}
+}
+
+func TestReasoningServiceDisabled(t *testing.T) {
+	inner := &captureThinkingService{}
+	svc := WrapReasoningConfig(inner, "", "unknown", "no", "")
+	if llm.SupportsReasoning(svc) {
+		t.Fatal("disabled service reports reasoning support")
+	}
+	if _, err := svc.Do(context.Background(), &llm.Request{ThinkingLevel: llm.ThinkingLevelHigh}); err != nil {
+		t.Fatal(err)
+	}
+	if inner.got != llm.ThinkingLevelOff {
+		t.Fatalf("level = %s, want off", inner.got.Name())
+	}
+}
+
+type captureThinkingService struct {
+	mockLLMService
+	got llm.ThinkingLevel
+}
+
+func (s *captureThinkingService) Do(_ context.Context, req *llm.Request) (*llm.Response, error) {
+	s.got = req.ThinkingLevel
+	return &llm.Response{}, nil
+}
+
+func TestReasoningServiceRejectsUnsupportedLevel(t *testing.T) {
+	svc := WrapReasoningConfig(&captureThinkingService{}, "", "unknown", "yes", `{"low":"low"}`)
+	_, err := svc.Do(context.Background(), &llm.Request{ThinkingLevel: llm.ThinkingLevelHigh})
+	if err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("error = %v, want unsupported-level error", err)
+	}
+}
+
+func TestReasoningServiceMapsServiceDefault(t *testing.T) {
+	inner := &defaultThinkingService{captureThinkingService: captureThinkingService{}}
+	svc := WrapReasoningConfig(inner, "", "unknown", "yes", `{"medium":"low"}`)
+	if got := llm.ServiceDefaultReasoningLevel(svc); got != "low" {
+		t.Fatalf("default = %q, want low", got)
+	}
+	if _, err := svc.Do(context.Background(), &llm.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	if inner.got != llm.ThinkingLevelLow {
+		t.Fatalf("level = %s, want low", inner.got.Name())
+	}
+}
+
+type defaultThinkingService struct{ captureThinkingService }
+
+func (s *defaultThinkingService) DefaultReasoningLevel() string { return "medium" }

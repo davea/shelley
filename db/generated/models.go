@@ -52,18 +52,20 @@ type Message struct {
 }
 
 type Model struct {
-	ModelID         string    `json:"model_id"`
-	DisplayName     string    `json:"display_name"`
-	ProviderType    string    `json:"provider_type"`
-	Endpoint        string    `json:"endpoint"`
-	ApiKey          string    `json:"api_key"`
-	ModelName       string    `json:"model_name"`
-	MaxTokens       int64     `json:"max_tokens"`
-	Tags            string    `json:"tags"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	ReasoningEffort string    `json:"reasoning_effort"`
-	ImageSupport    string    `json:"image_support"`
+	ModelID          string    `json:"model_id"`
+	DisplayName      string    `json:"display_name"`
+	ProviderType     string    `json:"provider_type"`
+	Endpoint         string    `json:"endpoint"`
+	ApiKey           string    `json:"api_key"`
+	ModelName        string    `json:"model_name"`
+	MaxTokens        int64     `json:"max_tokens"`
+	Tags             string    `json:"tags"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	ReasoningEffort  string    `json:"reasoning_effort"`
+	ImageSupport     string    `json:"image_support"`
+	ReasoningSupport string    `json:"reasoning_support"`
+	ReasoningMap     string    `json:"reasoning_map"`
 }
 
 type NotificationChannel struct {

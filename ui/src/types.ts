@@ -69,6 +69,8 @@ export interface Model {
   max_context_tokens?: number;
   is_default?: boolean;
   supports_images?: boolean;
+  supports_reasoning?: boolean;
+  reasoning_levels?: ("off" | "minimal" | "low" | "medium" | "high" | "xhigh")[];
   // Reasoning level applied when a conversation carries no explicit
   // thinking_level override. Empty when the provider picks its own default.
   default_reasoning_level?: string;

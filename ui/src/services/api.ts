@@ -717,7 +717,10 @@ export interface CustomModel {
   model_name: string;
   max_tokens: number;
   tags: string; // Comma-separated tags (e.g., "slug" for slug generation)
-  reasoning_effort: string; // Free-form reasoning.effort for OpenAI Responses API
+  reasoning_effort: string; // Legacy provider-verbatim default
+  reasoning_support: "auto" | "yes" | "no";
+  reasoning_map: string;
+  supports_reasoning: boolean;
   image_support: "auto" | "yes" | "no";
   supports_images: boolean; // Resolved boolean that image_support evaluates to
 }
@@ -730,7 +733,9 @@ export interface CreateCustomModelRequest {
   model_name: string;
   max_tokens: number;
   tags: string; // Comma-separated tags
-  reasoning_effort: string; // Free-form reasoning.effort for OpenAI Responses API
+  reasoning_effort: string; // Legacy provider-verbatim default
+  reasoning_support: "auto" | "yes" | "no";
+  reasoning_map: string;
   image_support: "auto" | "yes" | "no";
 }
 
@@ -741,6 +746,8 @@ export interface TestCustomModelRequest {
   api_key: string;
   model_name: string;
   reasoning_effort?: string;
+  reasoning_support?: "auto" | "yes" | "no";
+  reasoning_map?: string;
 }
 
 class CustomModelsApi {

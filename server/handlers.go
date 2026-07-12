@@ -1183,6 +1183,10 @@ func (s *Server) handleChatConversation(w http.ResponseWriter, r *http.Request, 
 				http.Error(w, msg, http.StatusBadRequest)
 				return
 			}
+			if msg := validateModelReasoningLevel(findModelInfo(modelID, s.getModelList()), req.ConversationOptions.ThinkingLevel); msg != "" {
+				http.Error(w, msg, http.StatusBadRequest)
+				return
+			}
 			if err := s.db.UpdateConversationOptions(ctx, conversationID, *req.ConversationOptions); err != nil {
 				s.logger.Error("Failed to update draft options before promote", "conversationID", conversationID, "error", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -1365,6 +1369,10 @@ func (s *Server) handleNewConversation(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, msg, http.StatusBadRequest)
 			return
 		}
+		if msg := validateModelReasoningLevel(findModelInfo(modelID, s.getModelList()), convOpts.ThinkingLevel); msg != "" {
+			http.Error(w, msg, http.StatusBadRequest)
+			return
+		}
 	}
 
 	conversation, err := s.db.CreateConversation(ctx, nil, true, cwdPtr, &modelID, convOpts)
@@ -1403,6 +1411,8 @@ func (s *Server) handleNewConversation(w http.ResponseWriter, r *http.Request) {
 		newService, svcErr := s.llmManager.GetService(hookResult.Model)
 		if svcErr != nil {
 			s.logger.Error("Hook returned unsupported model, keeping original", "hookModel", hookResult.Model, "error", svcErr)
+		} else if msg := validateModelReasoningLevel(findModelInfo(hookResult.Model, s.getModelList()), convOpts.ThinkingLevel); msg != "" {
+			s.logger.Error("Hook returned model incompatible with reasoning level, keeping original", "hookModel", hookResult.Model, "error", msg)
 		} else {
 			modelID = hookResult.Model
 			llmService = newService
@@ -2134,15 +2144,17 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 
 // ModelInfo represents a model in the API response
 type ModelInfo struct {
-	ID               string `json:"id"`
-	DisplayName      string `json:"display_name,omitempty"`
-	Source           string `json:"source,omitempty"`   // Human-readable source (e.g., "exe.dev gateway", "$ANTHROPIC_API_KEY")
-	BaseURL          string `json:"base_url,omitempty"` // Upstream origin (e.g., "https://llm.int.exe.xyz")
-	APIType          string `json:"api_type,omitempty"` // Wire protocol (e.g., "anthropic-messages")
-	Ready            bool   `json:"ready"`
-	MaxContextTokens int    `json:"max_context_tokens,omitempty"`
-	IsDefault        bool   `json:"is_default,omitempty"`
-	SupportsImages   bool   `json:"supports_images"`
+	ID                string   `json:"id"`
+	DisplayName       string   `json:"display_name,omitempty"`
+	Source            string   `json:"source,omitempty"`   // Human-readable source (e.g., "exe.dev gateway", "$ANTHROPIC_API_KEY")
+	BaseURL           string   `json:"base_url,omitempty"` // Upstream origin (e.g., "https://llm.int.exe.xyz")
+	APIType           string   `json:"api_type,omitempty"` // Wire protocol (e.g., "anthropic-messages")
+	Ready             bool     `json:"ready"`
+	MaxContextTokens  int      `json:"max_context_tokens,omitempty"`
+	IsDefault         bool     `json:"is_default,omitempty"`
+	SupportsImages    bool     `json:"supports_images"`
+	SupportsReasoning bool     `json:"supports_reasoning"`
+	ReasoningLevels   []string `json:"reasoning_levels,omitempty"`
 	// DefaultReasoningLevel is the reasoning level a conversation gets when it
 	// carries no explicit thinking_level override. Lets the UI label
 	// conversations honestly (e.g. "Reasoning medium") instead of leaving the
@@ -2242,6 +2254,23 @@ func (s *Server) handleModelCommand(ctx context.Context, w http.ResponseWriter, 
 		if _, err := s.llmManager.GetService(newModel); err != nil || !isReadyModel(newModel, modelList) {
 			return reply(fmt.Sprintf("Unknown or unavailable model %q.\n\n%s", newModel, modelCommandStatus(currentModel, currentReasoning, modelList)))
 		}
+	}
+
+	// Validate/reset reasoning against the model that will be active after this
+	// command. A model switch with no explicit level falls back to that model's
+	// default when the current level is unavailable.
+	targetModel := currentModel
+	if modelSet {
+		targetModel = newModel
+	}
+	targetInfo := findModelInfo(targetModel, modelList)
+	if reasoningSet {
+		if msg := validateModelReasoningLevel(targetInfo, newReasoning); msg != "" {
+			return reply(msg)
+		}
+	} else if modelSet && validateModelReasoningLevel(targetInfo, currentReasoning) != "" {
+		reasoningSet = true
+		newReasoning = ""
 	}
 
 	// Reduce to the actual deltas: ignore no-op changes.
@@ -2425,7 +2454,7 @@ func writeModelCommandAccepted(w http.ResponseWriter) {
 func (s *Server) getModelList() []ModelInfo {
 	modelList := []ModelInfo{}
 	if s.predictableOnly {
-		modelList = append(modelList, ModelInfo{ID: "predictable", Ready: true, MaxContextTokens: 200000, SupportsImages: true})
+		modelList = append(modelList, ModelInfo{ID: "predictable", Ready: true, MaxContextTokens: 200000, SupportsImages: true, SupportsReasoning: true})
 	} else {
 		modelIDs := s.llmManager.GetAvailableModels()
 		for _, id := range modelIDs {
@@ -2436,13 +2465,19 @@ func (s *Server) getModelList() []ModelInfo {
 			svc, err := s.llmManager.GetService(id)
 			maxCtx := 0
 			supportsImages := false
+			supportsReasoning := false
+			var reasoningLevels []string
 			defaultReasoning := ""
 			if err == nil && svc != nil {
 				maxCtx = svc.TokenContextWindow()
 				supportsImages = svc.SupportsImages()
+				supportsReasoning = llm.SupportsReasoning(svc)
+				for _, level := range llm.SupportedReasoningLevels(svc) {
+					reasoningLevels = append(reasoningLevels, level.Name())
+				}
 				defaultReasoning = llm.ServiceDefaultReasoningLevel(svc)
 			}
-			info := ModelInfo{ID: id, Ready: err == nil, MaxContextTokens: maxCtx, SupportsImages: supportsImages, DefaultReasoningLevel: defaultReasoning}
+			info := ModelInfo{ID: id, Ready: err == nil, MaxContextTokens: maxCtx, SupportsImages: supportsImages, SupportsReasoning: supportsReasoning, ReasoningLevels: reasoningLevels, DefaultReasoningLevel: defaultReasoning}
 			// Add display name and source from model info
 			if modelInfo := s.llmManager.GetModelInfo(id); modelInfo != nil {
 				info.DisplayName = modelInfo.DisplayName
@@ -3497,6 +3532,33 @@ func (s *Server) startNewGeneration(ctx context.Context, conversationID string) 
 // validateConversationOptions runs the same checks the new-conversation
 // path applies. Returns ("", nil) when opts are valid; otherwise a 400
 // message suitable for the client.
+func findModelInfo(id string, models []ModelInfo) *ModelInfo {
+	for i := range models {
+		if models[i].ID == id {
+			return &models[i]
+		}
+	}
+	return nil
+}
+
+func validateModelReasoningLevel(model *ModelInfo, level string) string {
+	if level == "" || model == nil {
+		return ""
+	}
+	if !model.SupportsReasoning {
+		return fmt.Sprintf("Model %s does not support reasoning; use default.", model.ID)
+	}
+	if len(model.ReasoningLevels) == 0 {
+		return ""
+	}
+	for _, supported := range model.ReasoningLevels {
+		if level == supported {
+			return ""
+		}
+	}
+	return fmt.Sprintf("Model %s does not support reasoning level %s; choose one of: %s.", model.ID, level, strings.Join(model.ReasoningLevels, ", "))
+}
+
 func validateConversationOptions(opts db.ConversationOptions) string {
 	if opts.Type != "" && opts.Type != "normal" && opts.Type != "orchestrator" {
 		return fmt.Sprintf("Invalid conversation options type: %s", opts.Type)
@@ -3560,6 +3622,10 @@ func (s *Server) handleCreateDraft(w http.ResponseWriter, r *http.Request) {
 	if req.ConversationOptions != nil {
 		convOpts = *req.ConversationOptions
 		if msg := validateConversationOptions(convOpts); msg != "" {
+			http.Error(w, msg, http.StatusBadRequest)
+			return
+		}
+		if msg := validateModelReasoningLevel(findModelInfo(modelID, s.getModelList()), convOpts.ThinkingLevel); msg != "" {
 			http.Error(w, msg, http.StatusBadRequest)
 			return
 		}

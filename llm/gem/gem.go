@@ -381,6 +381,8 @@ func (s *Service) thinkingConfig(req *llm.Request) *gemini.ThinkingConfig {
 	if strings.HasPrefix(model, "gemini-3") {
 		var effort string
 		switch {
+		case req != nil && req.ReasoningEffort != "":
+			effort = req.ReasoningEffort
 		case reqLevel == llm.ThinkingLevelOff:
 			// Gemini doesn't really have an "off" for 3.x; smallest is "low".
 			effort = "low"

@@ -540,6 +540,8 @@ func (s *ResponsesService) Do(ctx context.Context, ir *llm.Request) (*llm.Respon
 	level := llm.EffectiveThinkingLevel(s.ThinkingLevel, ir.ThinkingLevel)
 	var effort string
 	switch {
+	case ir.ReasoningEffort != "":
+		effort = ir.ReasoningEffort
 	case ir.ThinkingLevel == llm.ThinkingLevelOff:
 		effort = ""
 	case ir.ThinkingLevel != llm.ThinkingLevelDefault:

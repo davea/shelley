@@ -1258,8 +1258,13 @@ func (s *Service) Do(ctx context.Context, ir *llm.Request) (*llm.Response, error
 	//   3. s.ThinkingLevel (service-level default)
 	level := llm.EffectiveThinkingLevel(s.ThinkingLevel, ir.ThinkingLevel)
 	switch {
+	case ir.ReasoningEffort != "":
+		req.ReasoningEffort = ir.ReasoningEffort
 	case ir.ThinkingLevel == llm.ThinkingLevelOff:
-		// explicit off: don't emit
+		// Some providers require an explicit value to disable reasoning.
+		if s.ReasoningEffort == "none" {
+			req.ReasoningEffort = s.ReasoningEffort
+		}
 	case ir.ThinkingLevel != llm.ThinkingLevelDefault:
 		req.ReasoningEffort = ir.ThinkingLevel.ThinkingEffort()
 	case s.ReasoningEffort != "":

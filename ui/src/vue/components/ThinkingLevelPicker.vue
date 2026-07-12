@@ -7,10 +7,10 @@
 <template>
   <Select
     :model-value="value"
-    :options="THINKING_LEVELS"
+    :options="availableLevels"
     option-label="label"
     option-value="value"
-    :disabled="disabled"
+    :disabled="disabled || !supported"
     fluid
     size="small"
     :dt="statusPickerDt"
@@ -33,10 +33,20 @@ const props = withDefaults(
   defineProps<{
     value: ThinkingLevel;
     disabled?: boolean;
+    supported?: boolean;
+    levels?: ThinkingLevel[];
   }>(),
-  { disabled: false },
+  { disabled: false, supported: true, levels: () => [] },
 );
 const emit = defineEmits<{ (e: "change", level: ThinkingLevel): void }>();
+
+const availableLevels = computed(() => {
+  if (!props.supported) return THINKING_LEVELS.filter((level) => level.value === "default");
+  if (props.levels.length === 0) return THINKING_LEVELS;
+  return THINKING_LEVELS.filter(
+    (level) => level.value === "default" || props.levels.includes(level.value),
+  );
+});
 
 const current = computed(
   () =>

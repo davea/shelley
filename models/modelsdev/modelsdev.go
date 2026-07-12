@@ -18,6 +18,7 @@ import (
 var apiJSON []byte
 
 type modelEntry struct {
+	Reasoning  bool `json:"reasoning"`
 	Modalities struct {
 		Input  []string `json:"input"`
 		Output []string `json:"output"`
@@ -118,20 +119,29 @@ func hostOf(raw string) string {
 //  1. the best-path-matching provider whose host matches the endpoint host
 //  2. the "openrouter" catalog (full "vendor/model" slugs), as a last resort
 func LookupImageSupport(endpoint, modelName string) (supported, found bool) {
+	m, found := lookup(endpoint, modelName)
+	return entryHasImage(m), found
+}
+
+// LookupReasoningSupport reports whether models.dev says the model supports
+// reasoning. The second return value is false when the model is unknown.
+func LookupReasoningSupport(endpoint, modelName string) (supported, found bool) {
+	m, found := lookup(endpoint, modelName)
+	return m.Reasoning, found
+}
+
+func lookup(endpoint, modelName string) (modelEntry, bool) {
 	data := load()
 	if host := hostOf(endpoint); host != "" {
 		if p, ok := bestProviderForPath(hostIndex[host], pathSegments(endpoint), modelName); ok {
-			m, _ := lookupInProvider(p, modelName)
-			return entryHasImage(m), true
+			return lookupInProvider(p, modelName)
 		}
 	}
 	// Last-resort: OpenRouter keeps a full slug catalog.
 	if p, ok := data["openrouter"]; ok {
-		if m, ok := lookupInProvider(p, modelName); ok {
-			return entryHasImage(m), true
-		}
+		return lookupInProvider(p, modelName)
 	}
-	return false, false
+	return modelEntry{}, false
 }
 
 // bestProviderForPath picks, among providers that carry modelName, the one
