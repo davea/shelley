@@ -1140,6 +1140,45 @@ func (q *Queries) SetConversationAgentWorking(ctx context.Context, arg SetConver
 	return err
 }
 
+const setConversationGeneration = `-- name: SetConversationGeneration :one
+UPDATE conversations
+SET current_generation = ?, updated_at = CURRENT_TIMESTAMP
+WHERE conversation_id = ?
+RETURNING conversation_id, slug, user_initiated, created_at, updated_at, cwd, archived, parent_conversation_id, model, conversation_options, current_generation, agent_working, tags, is_draft, draft, queued_messages
+`
+
+type SetConversationGenerationParams struct {
+	CurrentGeneration int64  `json:"current_generation"`
+	ConversationID    string `json:"conversation_id"`
+}
+
+// Used to roll back a failed compaction: the generation counter is bumped
+// before summarization runs, so on failure we restore the previous value to
+// keep the old (intact) generation active.
+func (q *Queries) SetConversationGeneration(ctx context.Context, arg SetConversationGenerationParams) (Conversation, error) {
+	row := q.db.QueryRowContext(ctx, setConversationGeneration, arg.CurrentGeneration, arg.ConversationID)
+	var i Conversation
+	err := row.Scan(
+		&i.ConversationID,
+		&i.Slug,
+		&i.UserInitiated,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Cwd,
+		&i.Archived,
+		&i.ParentConversationID,
+		&i.Model,
+		&i.ConversationOptions,
+		&i.CurrentGeneration,
+		&i.AgentWorking,
+		&i.Tags,
+		&i.IsDraft,
+		&i.Draft,
+		&i.QueuedMessages,
+	)
+	return i, err
+}
+
 const unarchiveConversation = `-- name: UnarchiveConversation :one
 UPDATE conversations
 SET archived = FALSE

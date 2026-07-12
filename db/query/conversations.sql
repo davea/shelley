@@ -241,6 +241,15 @@ SET current_generation = current_generation + 1, updated_at = CURRENT_TIMESTAMP
 WHERE conversation_id = ?
 RETURNING *;
 
+-- name: SetConversationGeneration :one
+-- Used to roll back a failed compaction: the generation counter is bumped
+-- before summarization runs, so on failure we restore the previous value to
+-- keep the old (intact) generation active.
+UPDATE conversations
+SET current_generation = ?, updated_at = CURRENT_TIMESTAMP
+WHERE conversation_id = ?
+RETURNING *;
+
 -- name: DeleteConversation :exec
 DELETE FROM conversations
 WHERE conversation_id = ?;

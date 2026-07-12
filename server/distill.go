@@ -158,12 +158,16 @@ func (s *Server) broadcastEstimatedContextSize(ctx context.Context, conversation
 		return
 	}
 
-	var latestGen int64
-	for i := range messages {
-		if messages[i].Generation > latestGen {
-			latestGen = messages[i].Generation
-		}
+	// Estimate over the conversation's CURRENT generation, not the max
+	// generation present in the table: a rolled-back compaction leaves
+	// abandoned higher-generation rows behind, and estimating those would
+	// show a near-empty context for an intact conversation.
+	conv, err := s.db.GetConversationByID(ctx, conversationID)
+	if err != nil {
+		s.logger.Error("Failed to load conversation for context estimate", "conversationID", conversationID, "error", err)
+		return
 	}
+	latestGen := conv.CurrentGeneration
 
 	var estimate int64
 	for i := range messages {
@@ -265,6 +269,32 @@ func (s *Server) handleDistillNewGeneration(w http.ResponseWriter, r *http.Reque
 	if modelID == "" {
 		modelID = s.effectiveDefaultModel(s.getModelList())
 	}
+	// Validate before mutating: the model is force-written onto the
+	// conversation below, so an unknown model would otherwise brick the
+	// conversation (every subsequent chat rejects the stored model).
+	if _, err := s.llmManager.GetService(modelID); err != nil {
+		http.Error(w, fmt.Sprintf("unknown model %q: %v", modelID, err), http.StatusBadRequest)
+		return
+	}
+
+	manager, err := s.getOrCreateConversationManager(ctx, req.SourceConversationID, "")
+	if err != nil {
+		s.logger.Error("Failed to create conversation manager for distill-new-generation", "conversationID", req.SourceConversationID, "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	// Acquire the distilling state before any mutation so a rejected
+	// concurrent request has no side effects.
+	if !manager.BeginDistillingSetup() {
+		http.Error(w, "Distillation already in progress", http.StatusConflict)
+		return
+	}
+	setupComplete := false
+	defer func() {
+		if !setupComplete {
+			manager.SetDistilling(false)
+		}
+	}()
 
 	if req.Cwd != "" && (sourceConv.Cwd == nil || *sourceConv.Cwd != req.Cwd) {
 		if err := s.db.UpdateConversationCwd(ctx, req.SourceConversationID, req.Cwd); err != nil {
@@ -280,20 +310,6 @@ func (s *Server) handleDistillNewGeneration(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-
-	manager, err := s.getOrCreateConversationManager(ctx, req.SourceConversationID, "")
-	if err != nil {
-		s.logger.Error("Failed to create conversation manager for distill-new-generation", "conversationID", req.SourceConversationID, "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	manager.BeginDistillingSetup()
-	setupComplete := false
-	defer func() {
-		if !setupComplete {
-			manager.SetDistilling(false)
-		}
-	}()
 
 	conversation, err := db.WithTxRes(s.db, ctx, func(q *generated.Queries) (generated.Conversation, error) {
 		return q.IncrementConversationGeneration(ctx, req.SourceConversationID)
@@ -326,6 +342,9 @@ func (s *Server) handleDistillNewGeneration(w http.ResponseWriter, r *http.Reque
 	})
 	if err != nil {
 		s.logger.Error("Failed to create status message", "conversationID", req.SourceConversationID, "error", err)
+		// WithoutCancel: a client disconnect mid-setup must not strand the
+		// conversation on the just-created empty generation.
+		s.rollbackCompactionFailure(context.WithoutCancel(ctx), s.logger, req.SourceConversationID, "Compaction failed during setup", sourceGeneration)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -333,6 +352,9 @@ func (s *Server) handleDistillNewGeneration(w http.ResponseWriter, r *http.Reque
 
 	if err := manager.Hydrate(ctx); err != nil {
 		s.logger.Error("Failed to hydrate new generation", "conversationID", req.SourceConversationID, "error", err)
+		// WithoutCancel: a client disconnect mid-setup must not strand the
+		// conversation on the just-created empty generation.
+		s.rollbackCompactionFailure(context.WithoutCancel(ctx), s.logger, req.SourceConversationID, "Compaction failed during setup", sourceGeneration)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}

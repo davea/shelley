@@ -550,3 +550,263 @@ func TestDistillRejectsUnknownMethod(t *testing.T) {
 		}
 	})
 }
+
+// TestPiDistillFailureRollsBackGeneration verifies that when the
+// summarization model returns an empty result (e.g. a refusal), the
+// conversation is rolled back to its pre-compaction generation — keeping the
+// original context intact and forks non-empty — and a loud error message is
+// inserted. (The generation counter is bumped before summarization runs, so
+// without the rollback a failure would leave an empty new generation.)
+func TestPiDistillFailureRollsBackGeneration(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h := NewTestHarness(t)
+		defer stopActiveConversationLoops(h.server)
+		// Force summarization of the older slice.
+		h.server.piDistillKeepRecentTokens = 1
+
+		// The sentinel in the message text propagates into the summarization
+		// transcript, making the predictable service return an empty response,
+		// which generatePiSummary treats as a failure.
+		h.NewConversation("echo: PREDICTABLE_EMPTY_RESPONSE marker one", "")
+		h.WaitResponse()
+		synctest.Wait()
+		h.Chat("echo: PREDICTABLE_EMPTY_RESPONSE marker two")
+		h.WaitResponse()
+		synctest.Wait()
+		convID := h.convID
+		ctx := context.Background()
+
+		before, err := h.db.GetConversationByID(ctx, convID)
+		if err != nil {
+			t.Fatalf("GetConversationByID: %v", err)
+		}
+
+		reqBody := DistillNewGenerationRequest{
+			SourceConversationID: convID,
+			Model:                "predictable",
+			Method:               distillMethodCompact,
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("POST", "/api/conversations/distill-new-generation", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.server.handleDistillNewGeneration(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		waitForConversationDistillingToClear(t, h.server, convID)
+		synctest.Wait()
+
+		after, err := h.db.GetConversationByID(ctx, convID)
+		if err != nil {
+			t.Fatalf("GetConversationByID: %v", err)
+		}
+		// The failed compaction must roll the generation back to its
+		// pre-compaction value.
+		if after.CurrentGeneration != before.CurrentGeneration {
+			t.Fatalf("generation = %d, want rollback to %d", after.CurrentGeneration, before.CurrentGeneration)
+		}
+
+		msgs, err := h.db.ListMessages(ctx, convID)
+		if err != nil {
+			t.Fatalf("ListMessages: %v", err)
+		}
+		var sawError, sawFirst, sawSecond bool
+		for _, m := range msgs {
+			if m.Generation != after.CurrentGeneration {
+				continue
+			}
+			if m.Type == string(db.MessageTypeError) {
+				sawError = true
+			}
+			if m.LlmData != nil && strings.Contains(*m.LlmData, "marker one") {
+				sawFirst = true
+			}
+			if m.LlmData != nil && strings.Contains(*m.LlmData, "marker two") {
+				sawSecond = true
+			}
+		}
+		if !sawError {
+			t.Fatalf("expected a distillation error message in the restored generation")
+		}
+		if !sawFirst || !sawSecond {
+			t.Fatalf("expected original messages still in active generation (first=%v second=%v)", sawFirst, sawSecond)
+		}
+
+		// The conversation must still be usable: a new turn should work against
+		// the restored generation.
+		h.Chat("echo: post-rollback turn")
+		h.WaitResponse()
+		synctest.Wait()
+
+		// A fork taken after the failed compaction must not be empty.
+		latest, err := h.db.GetLatestMessage(ctx, convID)
+		if err != nil {
+			t.Fatalf("GetLatestMessage: %v", err)
+		}
+		forked, err := h.db.ForkConversation(ctx, convID, latest.SequenceID)
+		if err != nil {
+			t.Fatalf("ForkConversation: %v", err)
+		}
+		copied, err := h.db.ListMessages(ctx, forked.ConversationID)
+		if err != nil {
+			t.Fatalf("list forked messages: %v", err)
+		}
+		if len(copied) == 0 {
+			t.Fatalf("fork after failed compaction is empty")
+		}
+	})
+}
+
+// refusingService wraps an llm.Service and always returns an empty-content
+// response, simulating a model that refuses summarization prompts (e.g. fable
+// returning stop_reason=refusal with no text).
+type refusingService struct {
+	llm.Service
+}
+
+func (r *refusingService) Do(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	return &llm.Response{
+		Type:       "message",
+		Role:       llm.MessageRoleAssistant,
+		StopReason: llm.StopReasonRefusal,
+	}, nil
+}
+
+// refusingModelProvider serves the refusing service for one model ID and
+// delegates everything else to the wrapped provider.
+type refusingModelProvider struct {
+	LLMProvider
+	refusingModelID string
+}
+
+func (p *refusingModelProvider) GetService(modelID string) (llm.Service, error) {
+	svc, err := p.LLMProvider.GetService(modelID)
+	if err != nil {
+		return nil, err
+	}
+	if modelID == p.refusingModelID {
+		return &refusingService{Service: svc}, nil
+	}
+	return svc, nil
+}
+
+// TestPiDistillRetriesWithDefaultModelOnRefusal verifies that when the
+// conversation's model refuses the summarization request, compaction retries
+// once with the server's default model and succeeds.
+func TestPiDistillRetriesWithDefaultModelOnRefusal(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h := NewTestHarness(t)
+		defer stopActiveConversationLoops(h.server)
+		// Force summarization of the older slice.
+		h.server.piDistillKeepRecentTokens = 1
+		// The conversation's model "refuser" always returns empty content; the
+		// server default ("predictable") works. Compaction should fall back.
+		h.server.llmManager = &refusingModelProvider{LLMProvider: h.server.llmManager, refusingModelID: "refuser"}
+
+		h.NewConversation("echo: alpha", "")
+		h.WaitResponse()
+		synctest.Wait()
+		h.Chat("echo: beta")
+		h.WaitResponse()
+		synctest.Wait()
+		convID := h.convID
+		ctx := context.Background()
+
+		before, err := h.db.GetConversationByID(ctx, convID)
+		if err != nil {
+			t.Fatalf("GetConversationByID: %v", err)
+		}
+
+		reqBody := DistillNewGenerationRequest{
+			SourceConversationID: convID,
+			Model:                "refuser",
+			Method:               distillMethodCompact,
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("POST", "/api/conversations/distill-new-generation", strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.server.handleDistillNewGeneration(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		waitForConversationDistillingToClear(t, h.server, convID)
+		synctest.Wait()
+
+		after, err := h.db.GetConversationByID(ctx, convID)
+		if err != nil {
+			t.Fatalf("GetConversationByID: %v", err)
+		}
+		if after.CurrentGeneration != before.CurrentGeneration+1 {
+			t.Fatalf("generation = %d, want %d (fallback retry should have succeeded)", after.CurrentGeneration, before.CurrentGeneration+1)
+		}
+
+		// A distilled summary message must exist in the new generation.
+		msgs, err := h.db.ListMessages(ctx, convID)
+		if err != nil {
+			t.Fatalf("ListMessages: %v", err)
+		}
+		var sawSummary, sawNotice bool
+		for _, m := range msgs {
+			if m.Generation != after.CurrentGeneration {
+				continue
+			}
+			if m.LlmData != nil && strings.Contains(*m.LlmData, "the summary was generated by") {
+				sawNotice = true
+			}
+			if m.UserData == nil {
+				continue
+			}
+			var ud map[string]string
+			if json.Unmarshal([]byte(*m.UserData), &ud) == nil && ud["distilled"] == "true" {
+				sawSummary = true
+			}
+		}
+		if !sawSummary {
+			t.Fatalf("expected a distilled summary in the new generation after fallback retry")
+		}
+		if !sawNotice {
+			t.Fatalf("expected a user-visible notice that the fallback model wrote the summary")
+		}
+	})
+}
+
+// TestDistillNewGenerationRejectsConcurrent verifies that a second
+// distill-new-generation request is rejected with 409 while one is already in
+// flight. Overlapping compactions would race on the generation counter (and a
+// rollback could clobber the other attempt's generation).
+func TestDistillNewGenerationRejectsConcurrent(t *testing.T) {
+	t.Parallel()
+	h := NewTestHarness(t)
+	defer stopActiveConversationLoops(h.server)
+
+	h.NewConversation("echo: hello", "")
+	h.WaitResponse()
+
+	manager, err := h.server.getOrCreateConversationManager(context.Background(), h.convID, "")
+	if err != nil {
+		t.Fatalf("getOrCreateConversationManager: %v", err)
+	}
+	// Simulate an in-flight distillation.
+	if !manager.BeginDistillingSetup() {
+		t.Fatal("first BeginDistillingSetup should succeed")
+	}
+	defer manager.SetDistilling(false)
+
+	reqBody := DistillNewGenerationRequest{
+		SourceConversationID: h.convID,
+		Model:                "predictable",
+		Method:               distillMethodCompact,
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest("POST", "/api/conversations/distill-new-generation", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.server.handleDistillNewGeneration(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}

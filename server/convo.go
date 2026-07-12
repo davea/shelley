@@ -464,15 +464,21 @@ func (cm *ConversationManager) SetDistilling(distilling bool) {
 	}
 }
 
-func (cm *ConversationManager) BeginDistillingSetup() {
+// BeginDistillingSetup marks the conversation as distilling and reports
+// whether it acquired the distilling state. It returns false when a
+// distillation is already in flight, so callers can reject concurrent
+// attempts (overlapping compactions would race on the generation counter).
+func (cm *ConversationManager) BeginDistillingSetup() bool {
 	cm.mu.Lock()
-	if !cm.distilling {
-		cm.distilling = true
+	defer cm.mu.Unlock()
+	if cm.distilling {
+		return false
 	}
+	cm.distilling = true
 	if cm.distillSetupDone == nil {
 		cm.distillSetupDone = make(chan struct{})
 	}
-	cm.mu.Unlock()
+	return true
 }
 
 func (cm *ConversationManager) FinishDistillingSetup() {

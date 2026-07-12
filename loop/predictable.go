@@ -288,6 +288,13 @@ func (s *PredictableService) Do(ctx context.Context, req *llm.Request) (*llm.Res
 			return s.makeResponse(fmt.Sprintf("Delayed for %s seconds", delayStr), inputTokens), nil
 		}
 
+		// An input mentioning this sentinel anywhere (e.g. embedded in a
+		// summarization transcript) yields an empty-text response, used to test
+		// handling of models that return no content (e.g. refusals).
+		if strings.Contains(inputText, "PREDICTABLE_EMPTY_RESPONSE") {
+			return s.makeResponse("", inputTokens), nil
+		}
+
 		// Default response for undefined inputs
 		return s.makeResponse("edit predictable.go to add a response for that one...", inputTokens), nil
 	}
