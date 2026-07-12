@@ -715,8 +715,14 @@ func applyAnthropicThinking(req *request, model string, level llm.ThinkingLevel,
 	}
 	if useAdaptiveThinking(model) {
 		// Only Claude Opus 4.7+ uses adaptive thinking and supports "xhigh".
+		// The adaptive-thinking API only accepts low/medium/high/xhigh/max;
+		// it rejects "minimal" outright.
+		if level == llm.ThinkingLevelMinimal {
+			level = llm.ThinkingLevelLow
+		}
+		effort := level.ThinkingEffort()
 		req.Thinking = &thinking{Type: "adaptive"}
-		req.OutputConfig = &outputConfig{Effort: level.ThinkingEffort()}
+		req.OutputConfig = &outputConfig{Effort: effort}
 		return
 	}
 	budget := level.ThinkingBudgetTokens()
