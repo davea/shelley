@@ -26,7 +26,7 @@ type CopyMessagesForForkParams struct {
 	SourceGeneration     int64  `json:"source_generation"`
 }
 
-// Copies the messages of a source conversation's current generation, up to and
+// Copies the messages of a source conversation's given generation, up to and
 // including a cutoff sequence_id, into a destination conversation. The copies
 // are renumbered to generation 1 (the destination starts a fresh generation
 // history), get new message_ids, and preserve content, ordering, and original
@@ -170,6 +170,27 @@ WHERE message_id = ?
 func (q *Queries) DeleteMessage(ctx context.Context, messageID string) error {
 	_, err := q.db.ExecContext(ctx, deleteMessage, messageID)
 	return err
+}
+
+const getGenerationAtOrBeforeSequence = `-- name: GetGenerationAtOrBeforeSequence :one
+SELECT generation FROM messages
+WHERE conversation_id = ? AND sequence_id <= ?
+ORDER BY sequence_id DESC LIMIT 1
+`
+
+type GetGenerationAtOrBeforeSequenceParams struct {
+	ConversationID string `json:"conversation_id"`
+	SequenceID     int64  `json:"sequence_id"`
+}
+
+// Returns the generation of the last message at or before a sequence_id.
+// Used by fork to copy the generation that was active at the fork point,
+// which may be older than the conversation's current_generation.
+func (q *Queries) GetGenerationAtOrBeforeSequence(ctx context.Context, arg GetGenerationAtOrBeforeSequenceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getGenerationAtOrBeforeSequence, arg.ConversationID, arg.SequenceID)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
 }
 
 const getLatestMessage = `-- name: GetLatestMessage :one

@@ -221,3 +221,50 @@ func TestForkConversationOnlyCopiesCurrentGeneration(t *testing.T) {
 		}
 	}
 }
+
+// TestForkConversationAtOlderGenerationMessage verifies that forking at a
+// message from a PREVIOUS generation copies that generation up to the cutoff,
+// rather than producing an empty fork (the fork point predates the current
+// generation, so filtering by current_generation would match nothing).
+func TestForkConversationAtOlderGenerationMessage(t *testing.T) {
+	t.Parallel()
+	_, database, _ := newTestServer(t)
+	ctx := context.Background()
+	sourceID, gen1Msgs := seedForkConversation(t, database)
+
+	// Bump the source to generation 2 and add a message there.
+	if err := database.QueriesTx(ctx, func(q *generated.Queries) error {
+		_, err := q.IncrementConversationGeneration(ctx, sourceID)
+		return err
+	}); err != nil {
+		t.Fatalf("increment generation: %v", err)
+	}
+	if _, err := database.CreateMessage(ctx, db.CreateMessageParams{
+		ConversationID: sourceID,
+		Type:           db.MessageTypeUser,
+		LLMData:        makeForkTestMessage("gen2 message"),
+	}); err != nil {
+		t.Fatalf("create gen2 message: %v", err)
+	}
+
+	// Fork at the second generation-1 message.
+	forked, err := database.ForkConversation(ctx, sourceID, gen1Msgs[1].SequenceID)
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+	copied, err := database.ListMessages(ctx, forked.ConversationID)
+	if err != nil {
+		t.Fatalf("list forked messages: %v", err)
+	}
+	if len(copied) != 2 {
+		t.Fatalf("expected 2 copied generation-1 messages, got %d", len(copied))
+	}
+	for i, m := range copied {
+		if m.Generation != 1 {
+			t.Fatalf("copied message %d generation = %d, want 1", i, m.Generation)
+		}
+		if *m.ForkedFromMessageID != gen1Msgs[i].MessageID {
+			t.Fatalf("copied message %d forked_from = %q, want %q", i, *m.ForkedFromMessageID, gen1Msgs[i].MessageID)
+		}
+	}
+}

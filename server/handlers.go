@@ -3276,6 +3276,10 @@ func (s *Server) handleForkConversation(w http.ResponseWriter, r *http.Request, 
 	}
 
 	forked, err := s.db.ForkConversation(ctx, conversationID, cutoff)
+	if errors.Is(err, db.ErrInvalidForkPoint) {
+		http.Error(w, "Invalid fork point: no message at or before the requested cutoff", http.StatusBadRequest)
+		return
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "Conversation not found", http.StatusNotFound)
 		return

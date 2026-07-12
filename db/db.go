@@ -1565,11 +1565,19 @@ func (db *DB) DeleteConversation(ctx context.Context, conversationID string) err
 }
 
 // ForkConversation creates a new top-level conversation that copies the source
-// conversation's current-generation messages up to and including
-// cutoffSequenceID. The copies are renumbered to generation 1 so the fork
-// starts a fresh generation history (compaction etc. begin anew). The new
-// conversation inherits the source's cwd, model, and options. Its slug starts
-// nil; the caller assigns one. Returns the new conversation.
+// conversation's messages up to and including cutoffSequenceID. It copies the
+// generation that was ACTIVE AT THE FORK POINT (the generation of the last
+// message at or before the cutoff), not the source's current generation —
+// forking at a message from an older generation must copy that older
+// generation, or the fork would be empty. The copies are renumbered to
+// generation 1 so the fork starts a fresh generation history (compaction etc.
+// begin anew). The new conversation inherits the source's cwd, model, and
+// options. Its slug starts nil; the caller assigns one. Returns the new
+// conversation.
+// ErrInvalidForkPoint is returned by ForkConversation when no message exists
+// at or before the requested cutoff sequence.
+var ErrInvalidForkPoint = errors.New("no message at or before fork point")
+
 func (db *DB) ForkConversation(ctx context.Context, sourceConversationID string, cutoffSequenceID int64) (*generated.Conversation, error) {
 	conversationID, err := generateConversationID()
 	if err != nil {
@@ -1593,14 +1601,24 @@ func (db *DB) ForkConversation(ctx context.Context, sourceConversationID string,
 		if err != nil {
 			return fmt.Errorf("failed to create forked conversation: %w", err)
 		}
-		// Copy only the source's active (current) generation, renumbered to
+		// Copy the generation active at the fork point, renumbered to
 		// generation 1 in the fork. The new conversation keeps CreateConversation's
 		// default current_generation of 1.
+		forkGeneration, err := q.GetGenerationAtOrBeforeSequence(ctx, generated.GetGenerationAtOrBeforeSequenceParams{
+			ConversationID: sourceConversationID,
+			SequenceID:     cutoffSequenceID,
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrInvalidForkPoint
+		}
+		if err != nil {
+			return fmt.Errorf("failed to resolve fork-point generation: %w", err)
+		}
 		if err := q.CopyMessagesForFork(ctx, generated.CopyMessagesForForkParams{
 			DestConversationID:   conversationID,
 			SourceConversationID: sourceConversationID,
 			CutoffSequenceID:     cutoffSequenceID,
-			SourceGeneration:     source.CurrentGeneration,
+			SourceGeneration:     forkGeneration,
 		}); err != nil {
 			return fmt.Errorf("failed to copy messages: %w", err)
 		}
