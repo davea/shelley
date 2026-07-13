@@ -2778,6 +2778,10 @@ func (s *Server) handleRenameConversation(w http.ResponseWriter, r *http.Request
 
 	conversation, err := s.db.UpdateConversationSlug(ctx, conversationID, sanitized)
 	if err != nil {
+		if isUniqueConstraintErr(err) {
+			http.Error(w, "A conversation with that slug already exists", http.StatusConflict)
+			return
+		}
 		s.logger.Error("Failed to rename conversation", "conversationID", conversationID, "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return

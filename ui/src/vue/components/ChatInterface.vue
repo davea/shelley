@@ -1182,7 +1182,9 @@ async function cancelQueuedMessage(queuedId: string) {
 
 // Ghost pending messages derived from the open conversation's queued_messages
 // JSON array (not messages rows). Rendered at the bottom of the conversation.
-const queuedGhosts = computed(() => parseQueuedMessages(props.currentConversation?.queued_messages));
+const queuedGhosts = computed(() =>
+  parseQueuedMessages(props.currentConversation?.queued_messages),
+);
 
 // Build the conversation_options bundle from the current composer selection
 // (orchestrator mode, tool overrides, thinking level). thinkingLevel always
@@ -1287,6 +1289,35 @@ async function sendMessage(message: string) {
   }
   if (trimmedMessage === SLASH_COMMANDS.ARCHIVE.command) {
     await archiveFromMenu();
+    return;
+  }
+  if (
+    trimmedMessage === SLASH_COMMANDS.RENAME.command ||
+    trimmedMessage.startsWith(`${SLASH_COMMANDS.RENAME.command} `)
+  ) {
+    const requestedSlug = trimmedMessage.slice(SLASH_COMMANDS.RENAME.command.length).trim();
+    if (!props.conversationId) {
+      const err = new Error("Start a conversation before renaming it.");
+      error.value = err.message;
+      throw err;
+    }
+    if (!requestedSlug) {
+      const err = new Error("Usage: /rename <new slug>");
+      error.value = err.message;
+      throw err;
+    }
+    try {
+      sending.value = true;
+      error.value = null;
+      const conversation = await api.renameConversation(props.conversationId, requestedSlug);
+      props.onConversationUpdate?.(conversation);
+    } catch (err) {
+      console.error("Failed to run /rename:", err);
+      error.value = err instanceof Error ? err.message : "Failed to rename conversation";
+      throw err;
+    } finally {
+      sending.value = false;
+    }
     return;
   }
   // /compact and its legacy alias /distill both run compaction.

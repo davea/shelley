@@ -371,6 +371,20 @@ func TestHandleRenameConversation(t *testing.T) {
 		t.Errorf("Expected status code %d, got %d", http.StatusBadRequest, w.Code)
 	}
 
+	// Test duplicate slug
+	duplicateSlug := "duplicate-slug"
+	if _, err := h.db.CreateConversation(ctx, &duplicateSlug, true, nil, nil, db.ConversationOptions{}); err != nil {
+		t.Fatalf("Failed to create duplicate-slug conversation: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/conversation/%s/rename", conv.ConversationID), bytes.NewBufferString(`{"slug": "duplicate-slug"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	h.server.handleRenameConversation(w, req, conv.ConversationID)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("Expected status code %d, got %d: %s", http.StatusConflict, w.Code, w.Body.String())
+	}
+
 	// Test with invalid conversation ID
 	req = httptest.NewRequest(http.MethodPost, "/conversation/invalid-id/rename", bytes.NewBufferString(`{"slug": "test"}`))
 	req.Header.Set("Content-Type", "application/json")

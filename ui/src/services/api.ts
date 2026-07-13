@@ -566,7 +566,8 @@ class ApiService {
       body: JSON.stringify({ slug }),
     });
     if (!response.ok) {
-      throw new Error(`Failed to rename conversation: ${response.statusText}`);
+      const text = await response.text();
+      throw new Error(text.trim() || `Failed to rename conversation: ${response.statusText}`);
     }
     return response.json();
   }

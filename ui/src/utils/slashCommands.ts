@@ -41,4 +41,9 @@ export const SLASH_COMMANDS = {
     description: "archives this conversation",
     takesArgs: false,
   },
+  RENAME: {
+    command: "/rename",
+    description: "renames this conversation",
+    takesArgs: true,
+  },
 } as const satisfies Record<string, SlashCommand>;
