@@ -167,6 +167,7 @@ func cmdChat(cc *clientConfig, args []string) {
 	model := fs.String("model", "", "Model to use (server default if empty)")
 	cwd := fs.String("cwd", "", "Working directory for the conversation")
 	ephemeral := fs.Bool("ephemeral", false, "Wait for end of turn, then archive the conversation (for cron-style cleanup)")
+	noNotify := fs.Bool("disable-notifications", false, "Disable end-of-turn notifications for this conversation (new conversations only)")
 	fs.Parse(args)
 
 	if *prompt == "" {
@@ -190,12 +191,21 @@ func cmdChat(cc *clientConfig, args []string) {
 		}
 	}
 
-	reqBody := map[string]string{"message": *prompt}
+	reqBody := map[string]any{"message": *prompt}
 	if *model != "" {
 		reqBody["model"] = *model
 	}
 	if effectiveCwd != "" {
 		reqBody["cwd"] = effectiveCwd
+	}
+	// Conversation options are applied only at creation time, so
+	// -disable-notifications is meaningful only for new conversations (no -c).
+	if *noNotify {
+		if *convID != "" {
+			fmt.Fprintf(os.Stderr, "Error: -disable-notifications only applies to new conversations (omit -c)\n")
+			os.Exit(1)
+		}
+		reqBody["conversation_options"] = map[string]any{"disable_notifications": true}
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -700,12 +710,14 @@ Flags:
   -H HEADER    Extra HTTP header "Name: Value" (can be repeated)
 
 Subcommands:
-  chat -p PROMPT [-c CONVERSATION_ID] [-model MODEL] [-cwd DIR] [-ephemeral]
+  chat -p PROMPT [-c CONVERSATION_ID] [-model MODEL] [-cwd DIR] [-ephemeral] [-disable-notifications]
       Send a message. Creates a new conversation unless -c is given.
       Prints JSON with conversation_id to stdout.
       With -ephemeral, waits for the agent turn to end and then archives
       the conversation (useful for cron-style invocations that clean up
       after themselves).
+      With -disable-notifications, disables end-of-turn notifications (push,
+      email, discord, ntfy) for the conversation. New conversations only.
 
   read [-wait] CONVERSATION_ID
       Read all messages in a conversation as JSON lines.

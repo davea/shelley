@@ -1491,8 +1491,13 @@ func (s *Server) publishConversationState(state ConversationState) {
 	if !state.Working {
 		conv, convErr := s.db.GetConversationByID(context.Background(), state.ConversationID)
 		isSubagent := convErr == nil && conv.ParentConversationID != nil
+		// Honor an explicit per-conversation opt-out: conversations created
+		// with disable_notifications suppress all end-of-turn notifications
+		// (push, email, discord, ntfy) and hooks, same as subagents.
+		notifyDisabled := convErr == nil && db.ParseConversationOptions(conv.ConversationOptions).DisableNotifications
+		suppressNotify := isSubagent || notifyDisabled
 		var hooks []db.ConversationHook
-		if !isSubagent {
+		if !suppressNotify {
 			s.mu.Lock()
 			manager := s.activeConversations[state.ConversationID]
 			s.mu.Unlock()
@@ -1538,7 +1543,7 @@ func (s *Server) publishConversationState(state ConversationState) {
 			Timestamp:      time.Now(),
 			Payload:        payload,
 		}
-		if !isSubagent {
+		if !suppressNotify {
 			s.notifDispatcher.Dispatch(context.Background(), event)
 			for _, hook := range hooks {
 				go s.sendEndOfTurnHook(context.Background(), hook, event)

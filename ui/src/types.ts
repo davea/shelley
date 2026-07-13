@@ -84,6 +84,7 @@ export interface ChatRequest {
     tool_overrides?: Record<string, "on" | "off">;
     disable_all_tools?: boolean;
     thinking_level?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+    disable_notifications?: boolean;
   };
   queue?: boolean;
 }

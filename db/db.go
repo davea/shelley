@@ -260,6 +260,10 @@ type ConversationOptions struct {
 	// One of "off", "minimal", "low", "medium", "high", "xhigh". Empty string
 	// means "use the service default". See llm.ParseThinkingLevel.
 	ThinkingLevel string `json:"thinking_level,omitempty"`
+	// DisableNotifications suppresses end-of-turn notifications (push, email,
+	// discord, ntfy) for this conversation. Useful for cron-style or
+	// self-invoked conversations that shouldn't ping the user.
+	DisableNotifications bool `json:"disable_notifications,omitempty"`
 }
 
 // IsOrchestrator returns true if the conversation is in orchestrator mode.
