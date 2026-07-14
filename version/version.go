@@ -5,8 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"runtime/debug"
-
-	"shelley.exe.dev/ui"
 )
 
 // Version and Tag are set at build time via ldflags
@@ -14,6 +12,16 @@ var (
 	Version = "dev"
 	Tag     = ""
 )
+
+var buildInfoFS fs.FS
+
+// RegisterBuildInfoFS registers an optional filesystem containing
+// dist/build-info.json. Packages that already depend on the embedded UI can
+// call this to preserve the fallback without making all version consumers
+// compile the UI bundle.
+func RegisterBuildInfoFS(fsys fs.FS) {
+	buildInfoFS = fsys
+}
 
 // Capabilities advertises optional, additive features that clients can
 // opt into when present. Capabilities are non-breaking: a client that
@@ -44,7 +52,7 @@ type Info struct {
 }
 
 // GetInfo returns build information using runtime/debug.ReadBuildInfo,
-// falling back to the embedded build-info.json from the UI build.
+// falling back to a registered build-info.json filesystem when available.
 // The SHELLEY_VERSION_OVERRIDE environment variable can override the tag for testing.
 func GetInfo() Info {
 	tag := Tag
@@ -69,9 +77,10 @@ func GetInfo() Info {
 		}
 	}
 
-	// If we didn't get vcs info from debug.ReadBuildInfo, try the embedded build-info.json
-	if info.Commit == "" {
-		if data, err := fs.ReadFile(ui.Dist, "dist/build-info.json"); err == nil {
+	// If we didn't get vcs info from debug.ReadBuildInfo, try the registered
+	// build-info.json filesystem.
+	if info.Commit == "" && buildInfoFS != nil {
+		if data, err := fs.ReadFile(buildInfoFS, "dist/build-info.json"); err == nil {
 			var buildJSON struct {
 				Commit     string `json:"commit"`
 				CommitTime string `json:"commitTime"`
