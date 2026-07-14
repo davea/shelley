@@ -3,14 +3,16 @@
      #container slot reproduces the legacy markup so the DOM/ARIA contract is
      unchanged: classes (.modal-overlay on the mask, .modal, .modal-header,
      .modal-title, .modal-title-right, .modal-body, .btn-icon) and the
-     aria-label "Close modal". PrimeVue owns Escape + backdrop-click closing.
-     Use the #title-right slot for titleRight. -->
+     aria-label "Close modal". PrimeVue owns backdrop-click closing; Escape is
+     handled by a shared stack (modalEscapeStack) so that when modals are
+     stacked only the topmost one closes. Use the #title-right slot for
+     titleRight. -->
 <template>
   <Dialog
     :visible="isOpen"
     modal
     :dismissable-mask="true"
-    :close-on-escape="true"
+    :close-on-escape="false"
     :show-header="false"
     append-to="body"
     :pt="{ root: { class: 'modal-dialog-root' }, mask: { class: 'modal-overlay' } }"
@@ -45,15 +47,31 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, useId } from "vue";
+import { nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
 import Dialog from "primevue/dialog";
+import { popModalEscape, pushModalEscape } from "../composables/modalEscapeStack";
 
-defineProps<{
+const props = defineProps<{
   isOpen: boolean;
   title: string;
   className?: string;
 }>();
 const emit = defineEmits<{ (e: "close"): void }>();
+
+// Route Escape through a shared stack so that with stacked modals only the
+// topmost one closes. PrimeVue's per-dialog Escape is disabled (close-on-escape
+// above) because it isn't stacking-aware. Register while open, unregister on
+// close/unmount.
+const requestClose = () => emit("close");
+watch(
+  () => props.isOpen,
+  (open) => {
+    popModalEscape(requestClose);
+    if (open) pushModalEscape(requestClose);
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => popModalEscape(requestClose));
 
 const panelRef = ref<HTMLDivElement | null>(null);
 
@@ -63,8 +81,9 @@ const panelRef = ref<HTMLDivElement | null>(null);
 // real .modal-title instead.
 const titleId = useId();
 
-// PrimeVue drives visibility internally; relay every request to close (Escape,
-// dismissable mask click) up to the parent, which owns isOpen.
+// PrimeVue drives visibility internally; relay every request to close
+// (dismissable mask click; Escape is handled by the stack above) up to the
+// parent, which owns isOpen.
 function onVisibleChange(visible: boolean) {
   if (!visible) emit("close");
 }

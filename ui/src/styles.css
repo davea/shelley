@@ -2886,6 +2886,10 @@ button {
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
   max-width: 28rem;
   width: 100%;
+  /* As a flex item, the default `min-width: auto` lets wide content (e.g. the
+     models table) push the modal past the viewport. Allow it to shrink so
+     `width: 100%` / `max-width` are honored and inner content scrolls. */
+  min-width: 0;
   max-height: 80vh;
   overflow: hidden;
 }
@@ -2920,6 +2924,82 @@ button {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+}
+
+/* Keep the Refresh / Add Model buttons on a single line each; on narrow
+   viewports they were wrapping ("+ Add" / "Model") and inflating the header. */
+.models-header-actions .btn-sm {
+  white-space: nowrap;
+}
+
+/* When the Manage Models list is showing, the table (a PrimeVue DataTable)
+   renders its own header row and fills the modal, so the modal-body padding is
+   just dead space above the column labels and a gap below the last row. Make
+   the modal a flex column and let the table fill it edge-to-edge (also lets
+   scroll-height="flex" work — it needs a definite-height flex ancestor).
+   Scoped to .modal-xwide, which only this modal uses; the form/empty views
+   keep their normal padding since they don't add .models-modal-list. */
+.modal.modal-xwide {
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-xwide .modal-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* max-height is handled by the flex parent (.modal, capped at 80vh). */
+  max-height: none;
+}
+
+/* List state: drop wrapper padding so the table spans the modal fully. */
+.modal-xwide .modal-body:has(.models-modal-list) {
+  padding: 0;
+}
+
+.modal-xwide .models-modal-list {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.modal-xwide .models-modal-list .models-datatable {
+  margin: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+/* On phones the title + both action buttons + close can't share one row, so
+   the title wrapped ("Manage / Models") and ballooned the header. Stack it:
+   title + close on the first row, the two actions full-width on the second. */
+@media (max-width: 520px) {
+  .modal-xwide .modal-header {
+    flex-wrap: wrap;
+    padding: 0.75rem 1rem;
+  }
+
+  .modal-xwide .modal-title {
+    flex: 1;
+    font-size: 1.125rem;
+    white-space: nowrap;
+  }
+
+  .modal-xwide .modal-title-right {
+    order: 1;
+    flex-basis: 100%;
+    margin: 0.5rem 0 0;
+  }
+
+  .modal-xwide .models-header-actions {
+    width: 100%;
+  }
+
+  .modal-xwide .models-header-actions .btn-sm {
+    flex: 1;
+  }
 }
 
 .modal-body {
@@ -6663,110 +6743,85 @@ svg {
   margin: 0.25rem 0;
 }
 
-.models-table {
-  width: 100%;
-  /* `border-collapse: separate` keeps `position: sticky` working on the
-     thead cells (browsers don't honor sticky on collapsed-border <th>). */
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 0.875rem;
-  margin-bottom: 1rem;
+/* Manage Models list is a PrimeVue DataTable (see ModelsModal.vue); most of
+   its look comes from modelsTableDt design tokens. These rules pull the modal
+   body padding to the edges, keep the header row sticky, and style the cell
+   content wrappers for a compact, data-dense layout. */
+.models-datatable {
+  /* Pull to the modal-body edges so the table spans the full width. */
+  margin: 0 -1rem;
+  font-size: 0.8125rem;
 }
 
-.models-table thead th {
-  text-align: left;
-  font-weight: 500;
-  font-size: 0.75rem;
+/* Keep the header visible while the body scrolls. size="small" + tokens set
+   padding; this just makes the labels compact and uppercase like before. */
+.models-datatable .p-datatable-column-title {
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-tertiary);
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  white-space: nowrap;
 }
 
-/* The models modal scrolls inside its own wrapper, not inside .modal-body.
-   Otherwise rows would scroll into .modal-body's padding-top and visibly
-   bleed above the sticky thead. */
-.models-modal-scroll {
-  overflow-y: auto;
-  max-height: calc(80vh - 8rem);
-  margin: 0 -1rem;
+/* Keep every row a single line tall. Without this, cells like the API-shape
+   label ("OpenAI (Responses API)") wrap and blow up row height, wasting
+   vertical space; the table scrolls horizontally to reveal the full text. */
+.models-datatable .p-datatable-tbody > tr > td,
+.models-datatable .p-datatable-thead > tr > th {
+  white-space: nowrap;
 }
 
-.models-table tbody td {
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  vertical-align: middle;
-  color: var(--text-primary);
-}
-
-.models-table-row:hover td {
-  background: var(--bg-secondary);
-}
-
-.models-table-row-builtin td {
-  color: var(--text-secondary);
-}
-
-.models-table-name {
+.models-cell-name {
   font-weight: 500;
   white-space: nowrap;
 }
 
-.models-table-mono {
+.models-cell-mono {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--text-secondary);
   white-space: nowrap;
 }
 
-.models-table-muted {
+.models-cell-muted {
   color: var(--text-tertiary);
 }
 
-.models-table-endpoint {
+.models-cell-endpoint {
+  display: inline-block;
   font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--text-secondary);
-  max-width: 18rem;
+  max-width: 16rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  vertical-align: bottom;
 }
 
-.models-table-tags {
-  max-width: 12rem;
+.models-cell-tags {
+  display: inline-block;
+  max-width: 10rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  vertical-align: bottom;
 }
 
-.models-table-actions {
+/* Right-align the images + actions columns and keep them from growing. */
+.models-col-images,
+.models-col-actions {
+  width: 1%;
   white-space: nowrap;
-  text-align: right;
 }
 
-.models-table-actions .btn-icon {
-  display: inline-flex;
-  margin-left: 0.125rem;
-}
-
-.models-table-actions-col {
-  width: 1%;
-}
-
-.models-table-images-col {
-  width: 1%;
+.models-col-images {
   text-align: center;
 }
 
-.models-table-images {
-  text-align: center;
-  white-space: nowrap;
+.models-cell-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.125rem;
 }
 
 .models-table-image-yes {
@@ -7121,13 +7176,8 @@ svg {
   width: 100%;
 }
 
-/* Model Form */
-.model-form h3 {
-  margin: 0 0 0.75rem 0;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
+/* Model Form (rendered inside ModelFormModal's stacked dialog; the dialog
+   title replaces the old inline <h3>). */
 .form-group {
   margin-bottom: 0.75rem;
 }
@@ -11319,6 +11369,10 @@ kbd {
   box-shadow: none;
   max-width: none;
   max-height: none;
+  /* As a flex item in the centering mask, the default `min-width: auto` lets
+     wide inner content (e.g. the models table) push this wrapper past the
+     viewport. Allow it to shrink so the inner .modal can scroll instead. */
+  min-width: 0;
 }
 
 /* We move focus to the .modal panel on open so PrimeVue's focus trap engages,
