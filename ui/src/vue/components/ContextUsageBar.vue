@@ -1,16 +1,16 @@
-<!-- Vue port of the ContextUsageBar inner component from ChatInterface.tsx.
-     Preserves the context-usage-bar / chat-context-popup / chat-distill-*
-     class contract. Auto-opens once per browser on the long-conversation
-     threshold; closes on outside click. -->
+<!-- Vue port of the ContextUsageBar inner component from ChatInterface.tsx,
+     now backed by PrimeVue Popover (outside-click dismissal and positioning
+     come for free — the manual document click listener and fixed-position
+     math are gone). Preserves the context-usage-bar / chat-context-popup /
+     chat-distill-* class contract. Auto-opens once per browser on the
+     long-conversation threshold. -->
 <template>
   <div ref="barRef">
-    <div
-      v-if="showPopup && popupPosition"
-      class="chat-context-popup"
-      :style="{
-        bottom: popupPosition.bottom + 'px',
-        right: popupPosition.right + 'px',
-        maxWidth: `calc(100vw - ${popupPosition.right + 8}px)`,
+    <Popover
+      ref="popoverRef"
+      :pt="{
+        root: { class: 'chat-context-popup' },
+        content: { class: 'chat-context-popup-content' },
       }"
     >
       <div v-if="modelName" class="chat-popup-model-name">{{ modelName }}</div>
@@ -48,7 +48,7 @@
           Start New Generation
         </button>
       </div>
-    </div>
+    </Popover>
     <div class="context-usage-bar-container">
       <span
         v-if="showLongConversationWarning"
@@ -60,7 +60,7 @@
       <div
         class="context-usage-bar"
         :title="`Context: ${formatTokens(contextWindowSize)} / ${formatTokens(maxContextTokens)} tokens (${percentage.toFixed(1)}%)`"
-        @click="showPopup = !showPopup"
+        @click="popoverRef?.toggle($event)"
       >
         <div
           class="context-usage-fill"
@@ -72,7 +72,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
+import Popover from "primevue/popover";
 import type { UsageEntry } from "../../utils/tokenCostGraph";
 import { useFeatureFlag } from "../composables/featureFlags";
 import TokenCostGraph from "./TokenCostGraph.vue";
@@ -90,11 +91,10 @@ const props = defineProps<{
 
 const tokenGraphEnabled = useFeatureFlag("token-cost-graph");
 
-const showPopup = ref(false);
 const distilling = ref(false);
 const barRef = ref<HTMLDivElement | null>(null);
+const popoverRef = ref<InstanceType<typeof Popover> | null>(null);
 let hasAutoOpened = false;
-const popupPosition = ref<{ bottom: number; right: number } | null>(null);
 
 const percentage = computed(() =>
   props.maxContextTokens > 0 ? (props.contextWindowSize / props.maxContextTokens) * 100 : 0,
@@ -115,6 +115,8 @@ function formatTokens(tokens: number): string {
 }
 
 // Auto-open popup once per browser at the long-conversation threshold.
+// Programmatic open: PrimeVue's show() anchors to event.currentTarget, so pass
+// the usage bar element explicitly as the target.
 watch(
   [showLongConversationWarning, () => props.agentWorking, () => props.conversationId],
   () => {
@@ -128,42 +130,26 @@ watch(
       localStorage.getItem("shelley_long_convo_popup_shown") !== "1"
     ) {
       hasAutoOpened = true;
-      localStorage.setItem("shelley_long_convo_popup_shown", "1");
-      showPopup.value = true;
+      // Wait a tick: with { immediate: true } this can fire before mount,
+      // when barRef/popoverRef are still null. Only burn the once-per-browser
+      // localStorage flag if the popup actually opens.
+      void nextTick(() => {
+        const anchor = barRef.value?.querySelector<HTMLElement>(".context-usage-bar");
+        if (!anchor || !popoverRef.value) return;
+        localStorage.setItem("shelley_long_convo_popup_shown", "1");
+        popoverRef.value.show(new Event("click"), anchor);
+      });
     }
   },
   { immediate: true },
 );
-
-function handleClickOutside(e: MouseEvent) {
-  if (barRef.value && !barRef.value.contains(e.target as Node)) {
-    showPopup.value = false;
-  }
-}
-
-// Close on outside click + compute fixed popup position when shown.
-watch(showPopup, (open) => {
-  document.removeEventListener("click", handleClickOutside);
-  if (open) {
-    document.addEventListener("click", handleClickOutside);
-    if (barRef.value) {
-      const rect = barRef.value.getBoundingClientRect();
-      popupPosition.value = {
-        bottom: window.innerHeight - rect.top + 4,
-        right: window.innerWidth - rect.right,
-      };
-    }
-  } else {
-    popupPosition.value = null;
-  }
-});
 
 async function handleDistillNewGeneration() {
   if (distilling.value || !props.onDistillNewGeneration) return;
   distilling.value = true;
   try {
     await props.onDistillNewGeneration();
-    showPopup.value = false;
+    popoverRef.value?.hide();
   } finally {
     distilling.value = false;
   }
@@ -174,16 +160,9 @@ async function handleStartNewGeneration() {
   distilling.value = true;
   try {
     await props.onStartNewGeneration();
-    showPopup.value = false;
+    popoverRef.value?.hide();
   } finally {
     distilling.value = false;
   }
 }
-
-// The outside-click listener is added/removed as showPopup toggles, but if the
-// component unmounts while the popup is open the listener would leak (React's
-// useEffect cleanup removes it on unmount). Mirror that here.
-onUnmounted(() => {
-  document.removeEventListener("click", handleClickOutside);
-});
 </script>

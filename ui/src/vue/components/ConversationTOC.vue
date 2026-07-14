@@ -1,18 +1,18 @@
 <!-- Vue port of components/ConversationTOC.tsx. Floating table-of-contents
-     button + popover. Preserves the toc-* class contract and the aria labels
-     "Conversation table of contents" (button) and "Table of contents"
-     (popover dialog), plus the "Jump to…" header. `containerRef` is passed as
-     a plain HTMLElement (or null) instead of a React ref object.
-     scrollToFragment is exported for parity with the React module. -->
+     button + popover, now backed by PrimeVue Popover (outside-click dismissal,
+     Escape, viewport-aware positioning come for free — the manual
+     getBoundingClientRect math and document listeners are gone). Preserves the
+     toc-* class contract and the aria labels "Conversation table of contents"
+     (button) and "Table of contents" (popover dialog), plus the "Jump to…"
+     header. `containerRef` is passed as a plain HTMLElement (or null). -->
 <template>
   <button
-    ref="buttonRef"
     :class="`toc-button${open ? ' toc-button-open' : ''}`"
     aria-label="Conversation table of contents"
     aria-haspopup="true"
     :aria-expanded="open"
     title="Table of contents"
-    @click="open = !open"
+    @click="popoverRef?.toggle($event)"
   >
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="toc-button-icon">
       <line x1="8" y1="6" x2="20" y2="6" :stroke-width="2" stroke-linecap="round" />
@@ -24,15 +24,14 @@
     </svg>
   </button>
 
-  <div
-    v-if="open"
+  <Popover
     ref="popoverRef"
-    class="toc-popover"
-    role="dialog"
-    aria-label="Table of contents"
-    :style="
-      popoverPos ? { bottom: `${popoverPos.bottom}px`, right: `${popoverPos.right}px` } : undefined
-    "
+    :pt="{
+      root: { class: 'toc-popover', 'aria-label': 'Table of contents' },
+      content: { class: 'toc-popover-content' },
+    }"
+    @show="open = true"
+    @hide="open = false"
   >
     <div class="toc-popover-header">
       <span class="toc-popover-title">Jump to…</span>
@@ -53,11 +52,12 @@
         <span class="toc-entry-label">{{ entry.label }}</span>
       </button>
     </div>
-  </div>
+  </Popover>
 </template>
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
+import Popover from "primevue/popover";
 import type { Message, LLMMessage, LLMContent } from "../../types";
 
 interface TOCEntry {
@@ -76,9 +76,7 @@ const props = defineProps<{
 
 const open = ref(false);
 const activeId = ref<string | null>(null);
-const popoverRef = ref<HTMLDivElement | null>(null);
-const buttonRef = ref<HTMLButtonElement | null>(null);
-const popoverPos = ref<{ bottom: number; right: number } | null>(null);
+const popoverRef = ref<InstanceType<typeof Popover> | null>(null);
 
 function extractMessageLabel(message: Message, maxLen = 70): string {
   if (!message.llm_data) return "";
@@ -249,49 +247,10 @@ function detachScroll() {
 
 watch([() => props.containerRef, entries], attachScroll, { immediate: true });
 
-// Popover positioning.
-function updatePos() {
-  const btn = buttonRef.value;
-  if (!btn) return;
-  const rect = btn.getBoundingClientRect();
-  popoverPos.value = {
-    bottom: window.innerHeight - rect.top + 8,
-    right: window.innerWidth - rect.right,
-  };
-}
-
-function onDown(e: MouseEvent) {
-  const t = e.target as Node;
-  if (popoverRef.value?.contains(t)) return;
-  if (buttonRef.value?.contains(t)) return;
-  open.value = false;
-}
-function onKey(e: KeyboardEvent) {
-  if (e.key === "Escape") open.value = false;
-}
-
-function detachOpen() {
-  window.removeEventListener("resize", updatePos);
-  window.removeEventListener("scroll", updatePos, true);
-  document.removeEventListener("mousedown", onDown);
-  document.removeEventListener("keydown", onKey);
-}
-
-watch(open, (isOpen) => {
-  detachOpen();
-  if (isOpen) {
-    updatePos();
-    window.addEventListener("resize", updatePos);
-    window.addEventListener("scroll", updatePos, true);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-  }
-});
-
 function handleGoto(entry: TOCEntry) {
   const container = props.containerRef;
   if (!container) return;
-  open.value = false;
+  popoverRef.value?.hide();
   if (entry.kind === "top") {
     container.scrollTo({ top: 0, behavior: "smooth" });
     history.replaceState(null, "", window.location.pathname + window.location.search);
@@ -365,7 +324,6 @@ window.addEventListener("hashchange", onHashChange);
 
 onUnmounted(() => {
   detachScroll();
-  detachOpen();
   window.removeEventListener("hashchange", onHashChange);
 });
 </script>

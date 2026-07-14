@@ -3746,21 +3746,36 @@ svg {
   height: 1.125rem;
 }
 
-/* TOC popover — anchored to viewport (positioned in JS relative to button) */
-.toc-popover {
-  position: fixed;
-  bottom: 4rem; /* JS overrides at runtime; this is the fallback */
-  right: 1rem;
+/* TOC popover — PrimeVue Popover surface. PrimeVue owns positioning (absolute
+   + inline top/left, flipped to fit the viewport), so unlike the old
+   hand-rolled version we must NOT set position/bottom/right here. */
+.toc-popover.p-popover {
   width: min(28rem, calc(100vw - 2rem));
-  max-height: min(60vh, 32rem);
   background: var(--bg-base);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-  z-index: 20;
+  overflow: hidden;
+}
+/* Popover has no placement prop: it always aligns below the target unless it
+   would overflow the viewport (then it adds .p-popover-flipped and positions
+   above). The TOC button floats just above the message input, so "below"
+   covers the input; shift the panel above the button (own height + the
+   2.5rem button + gap). When PrimeVue flipped it is already above. This also
+   suppresses the p-popover scaleY enter transform, which is fine. */
+.toc-popover.p-popover:not(.p-popover-flipped) {
+  transform: translateY(calc(-100% - 3rem));
+}
+/* No arrow for this panel; PrimeVue draws one via :before/:after. */
+.toc-popover.p-popover:before,
+.toc-popover.p-popover:after {
+  display: none;
+}
+.toc-popover .toc-popover-content {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  max-height: min(60vh, 32rem);
+  padding: 0;
 }
 .toc-popover-header {
   display: flex;
@@ -3844,12 +3859,12 @@ svg {
   font-weight: 500;
 }
 
-/* Mobile: full-width drawer-ish popover */
+/* Mobile: near-full-width popover */
 @media (max-width: 640px) {
-  .toc-popover {
-    left: 0.5rem;
-    right: 0.5rem !important;
-    width: auto;
+  .toc-popover.p-popover {
+    width: calc(100vw - 1rem);
+  }
+  .toc-popover .toc-popover-content {
     max-height: 70vh;
   }
 }
@@ -8429,17 +8444,29 @@ kbd {
 
 /* ChatInterface styles */
 
-/* Context usage popup - static styles (dynamic position stays inline) */
-.chat-context-popup {
-  position: fixed;
-  padding: 6px 10px;
+/* Context usage popup — PrimeVue Popover surface. PrimeVue owns positioning
+   (absolute + inline top/left), so no position/bottom/right here. */
+.chat-context-popup.p-popover {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   font-size: 0.75rem;
   color: var(--text-secondary);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 100;
+  max-width: calc(100vw - 1rem);
+}
+.chat-context-popup.p-popover:before,
+.chat-context-popup.p-popover:after {
+  display: none;
+}
+/* Same flip caveat as .toc-popover: Popover defaults to "below the target",
+   which for the status-bar usage bar means covering the message input. Shift
+   it above the 6px bar (+4px gap) unless PrimeVue already flipped it. */
+.chat-context-popup.p-popover:not(.p-popover-flipped) {
+  transform: translateY(calc(-100% - 10px));
+}
+.chat-context-popup .chat-context-popup-content {
+  padding: 6px 10px;
 }
 
 .chat-popup-model-name {
