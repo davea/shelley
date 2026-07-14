@@ -2,7 +2,14 @@
 //
 // Run via `pnpm test` (see scripts/run-tests.mjs).
 
-import { loadCachedDraft, saveCachedDraft, clearCachedDraft, pickDraft } from "./draftCache";
+import {
+  loadCachedDraft,
+  saveCachedDraft,
+  clearCachedDraft,
+  pickDraft,
+  reconcileComposerDraft,
+  type ComposerReconcileInput,
+} from "./draftCache";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`Assertion failed: ${msg}`);
@@ -92,6 +99,136 @@ run("pickDraft keeps a brand-new-view local draft (empty basedOn)", () => {
   const server = { value: "", updatedAt: "" };
   const local = { value: "composing something", basedOn: "" };
   assert(pickDraft(server, local).value === "composing something", "new-view local wins");
+});
+
+// --- reconcileComposerDraft: the ChatInterface reconcile watch's pure core ---
+// These pin the fix for the Safari "cursor jumps to end / text rewritten as I
+// type" bug: on a slow network the autosave PUT-ack and the conversation-row
+// echo arrive out of order, so a same-session echo must never overwrite the
+// composer while the user is mid-keystroke.
+
+function reconcileInput(over: Partial<ComposerReconcileInput>): ComposerReconcileInput {
+  return {
+    conversationId: "c1",
+    lazyDraftId: null,
+    isDraft: true,
+    serverDraft: "",
+    serverUpdatedAt: "2026-01-01T00:00:05Z",
+    cached: null,
+    composerValue: "",
+    lastSeededSession: undefined,
+    lastSeededValue: "",
+    ...over,
+  };
+}
+
+run("reconcile seeds the composer on first entry into a session", () => {
+  const r = reconcileComposerDraft(
+    reconcileInput({ serverDraft: "hello from server", lastSeededSession: undefined }),
+  );
+  assert(r !== null && r.value === "hello from server", "first entry seeds");
+  assert(r!.seededSession === "c1", "records seeded session");
+});
+
+run("reconcile leaves the composer untouched during a lazy-draft flip", () => {
+  // conversationId flipped null->draftId for the same input session.
+  const r = reconcileComposerDraft(
+    reconcileInput({ conversationId: "draft9", lazyDraftId: "draft9", composerValue: "typing" }),
+  );
+  assert(r === null, "lazy-draft flip is a no-op");
+});
+
+run("reconcile does NOT clobber in-progress typing on a stale server echo", () => {
+  // The user is mid-keystroke ("my new text"); a delayed echo carries an OLDER
+  // server snapshot (out-of-order autosave over a slow link). Applying it would
+  // rewrite the textarea and jump the caret to the end — the reported bug.
+  const r = reconcileComposerDraft(
+    reconcileInput({
+      serverDraft: "stale server snapshot",
+      composerValue: "my new text",
+      lastSeededSession: "c1",
+      lastSeededValue: "my ne",
+    }),
+  );
+  assert(r === null, "stale echo must not overwrite live keystrokes");
+});
+
+run("reconcile applies a same-session echo when the composer is untouched", () => {
+  // No local edits since our last seed (composer still holds the seeded value):
+  // a server-driven change (e.g. edit from another tab) may safely apply.
+  const r = reconcileComposerDraft(
+    reconcileInput({
+      serverDraft: "updated from another tab",
+      serverUpdatedAt: "2026-01-01T00:00:09Z",
+      composerValue: "seeded",
+      lastSeededSession: "c1",
+      lastSeededValue: "seeded",
+    }),
+  );
+  assert(r !== null && r.value === "updated from another tab", "untouched composer accepts echo");
+});
+
+run("reconcile is a no-op when the echo already matches the composer", () => {
+  const r = reconcileComposerDraft(
+    reconcileInput({
+      serverDraft: "same text",
+      composerValue: "same text",
+      lastSeededSession: "c1",
+      lastSeededValue: "different-seed",
+    }),
+  );
+  assert(r === null, "echo equal to composer is a no-op");
+});
+
+run("reconcile prefers unacked local keystrokes when first seeding a draft", () => {
+  // Reload after a dropped connection: server frozen at t5, cache stamped t5
+  // with newer text. First seed must restore the user's text, not the server's.
+  const r = reconcileComposerDraft(
+    reconcileInput({
+      serverDraft: "saved at t5",
+      serverUpdatedAt: "2026-01-01T00:00:05Z",
+      cached: { value: "typed after t5", basedOn: "2026-01-01T00:00:05Z" },
+      lastSeededSession: undefined,
+    }),
+  );
+  assert(r !== null && r.value === "typed after t5", "unacked local restored on seed");
+});
+
+run("reconcile seeds the new-conversation view from its local mirror", () => {
+  const r = reconcileComposerDraft(
+    reconcileInput({
+      conversationId: null,
+      isDraft: false,
+      cached: { value: "unsent new draft", basedOn: "" },
+      lastSeededSession: undefined,
+    }),
+  );
+  assert(r !== null && r.value === "unsent new draft", "new-view seeds from cache");
+  assert(r!.seededSession === null, "new-view session id is null");
+});
+
+run("reconcile seeds a non-draft conversation from its authoritative cache once", () => {
+  const first = reconcileComposerDraft(
+    reconcileInput({
+      conversationId: "sent1",
+      isDraft: false,
+      cached: { value: "next message", basedOn: "" },
+      lastSeededSession: undefined,
+    }),
+  );
+  assert(first !== null && first.value === "next message", "non-draft first entry seeds");
+  // A later updated_at echo (new agent message) must not wipe the edit.
+  const echo = reconcileComposerDraft(
+    reconcileInput({
+      conversationId: "sent1",
+      isDraft: false,
+      cached: { value: "next message", basedOn: "" },
+      composerValue: "next message and more",
+      lastSeededSession: "sent1",
+      lastSeededValue: "next message",
+    }),
+  );
+  assert(echo === null, "non-draft echo does not clobber edits");
 });
 
 console.log("draftCache: all tests passed");

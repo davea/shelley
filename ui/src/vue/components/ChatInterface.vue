@@ -369,7 +369,7 @@ import {
   loadCachedDraft,
   saveCachedDraft,
   clearCachedDraft,
-  pickDraft,
+  reconcileComposerDraft,
 } from "../../services/draftCache";
 import { setFaviconStatus } from "../../services/favicon";
 import { useMarkdownMode } from "../composables/markdownMode";
@@ -1599,6 +1599,7 @@ function handleDraftSendStarted() {
 }
 function handleDraftCleared() {
   draftValue.value = "";
+  lastSeededValue = "";
   draftAutosave.cancel();
   // Draft is gone (sent or deleted): drop the local mirror so a later visit
   // doesn't resurrect it. Clear both the live id and the `null` new-view slot.
@@ -1965,12 +1966,21 @@ watch([() => props.conversationId, lazyDraftId], () => {
 // messages), which would wipe in-progress local edits. "" sentinel != any real
 // id and != the null new-view session, so the first run always seeds.
 let lastSeededSession: string | null | undefined = undefined;
+// The exact value we last programmatically wrote into the composer. Lets the
+// reconcile watch tell an untouched seeded composer (safe to re-seed on a
+// server echo) from one the user has since edited (must not clobber).
+let lastSeededValue = "";
 
 // Initialize draftValue from the conversation row when switching conversations.
 // Drafts and the new-conversation view reconcile the server copy with the
 // localStorage mirror via updated_at; non-draft conversations have no
 // server-side next-message draft, so their localStorage mirror is
 // authoritative (client-side only).
+//
+// reconcileComposerDraft() is the pure, unit-tested core; it returns null when
+// the composer must be left untouched (same session, would clobber live
+// keystrokes) — the guard that fixes the Safari "cursor jumps to end / text
+// rewritten as I type" bug on slow networks (out-of-order autosave echoes).
 watch(
   [
     () => props.conversationId,
@@ -1980,30 +1990,22 @@ watch(
     lazyDraftId,
   ],
   () => {
-    if (props.conversationId === lazyDraftId.value && lazyDraftId.value !== null) return;
-    if (props.currentConversation?.is_draft) {
-      // Reconcile the server's copy with any locally-cached keystrokes that
-      // never reached (or outraced) the server.
-      const serverUpdatedAt = props.currentConversation.updated_at || "";
-      const picked = pickDraft(
-        { value: props.currentConversation.draft || "", updatedAt: serverUpdatedAt },
-        loadCachedDraft(props.conversationId),
-      );
-      draftSyncedAt = serverUpdatedAt;
-      draftValue.value = picked.value;
-      lastSeededSession = props.conversationId;
-    } else if (!props.conversationId) {
-      const picked = pickDraft({ value: "", updatedAt: "" }, loadCachedDraft(null));
-      draftSyncedAt = "";
-      draftValue.value = picked.value;
-      lastSeededSession = null;
-    } else if (lastSeededSession !== props.conversationId) {
-      // Non-draft conversation, first entry: the cache is authoritative; seed
-      // from it (or empty) exactly once so echoes don't clobber local edits.
-      draftSyncedAt = "";
-      draftValue.value = loadCachedDraft(props.conversationId)?.value ?? "";
-      lastSeededSession = props.conversationId;
-    }
+    const result = reconcileComposerDraft({
+      conversationId: props.conversationId ?? null,
+      lazyDraftId: lazyDraftId.value,
+      isDraft: !!props.currentConversation?.is_draft,
+      serverDraft: props.currentConversation?.draft || "",
+      serverUpdatedAt: props.currentConversation?.updated_at || "",
+      cached: loadCachedDraft(props.conversationId ?? null),
+      composerValue: draftValue.value,
+      lastSeededSession,
+      lastSeededValue,
+    });
+    if (result === null) return;
+    draftSyncedAt = result.draftSyncedAt;
+    draftValue.value = result.value;
+    lastSeededValue = result.value;
+    lastSeededSession = result.seededSession;
   },
   { immediate: true },
 );

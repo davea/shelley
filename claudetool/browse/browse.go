@@ -1068,6 +1068,14 @@ func (b *BrowseTools) readImageRun(ctx context.Context, input readImageInput) ll
 		return llm.ErrorfToolOut("file is not an image: %s", detectedType)
 	}
 
+	// Fully decode to reject truncated/corrupt images (e.g. an upload cut short
+	// by a flaky connection) whose header still sniffs as a valid image. Sending
+	// such bytes to the model makes the provider 400 the whole request, which
+	// permanently wedges the conversation; failing here keeps it recoverable.
+	if err := imageutil.Validate(imageData); err != nil {
+		return llm.ErrorfToolOut("image file appears corrupt or truncated (%s); re-upload or pick a different file: %v", input.Path, err)
+	}
+
 	// Fit the image inside the model's per-image limits. Dimension overflow
 	// is fixed transparently by downscaling; byte overflow that can't be
 	// fixed by downscaling becomes a tool error so we never send a request

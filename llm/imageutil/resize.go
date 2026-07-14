@@ -3,6 +3,7 @@ package imageutil
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -20,6 +21,31 @@ func DecodeDimensions(data []byte) (width, height int, err error) {
 		return 0, 0, fmt.Errorf("decode image config: %w", err)
 	}
 	return cfg.Width, cfg.Height, nil
+}
+
+// Validate fully decodes data to confirm it is a complete, well-formed image.
+// Unlike DecodeDimensions (header-only) and http.DetectContentType (magic-byte
+// sniff), this walks every pixel chunk, so it catches truncated or otherwise
+// corrupt files whose header still looks valid. A partial upload over a flaky
+// link is the motivating case: its PNG header advertises the right dimensions
+// but the pixel data is cut short. Embedding such bytes in a message makes the
+// provider reject the whole request (400 "could not process image"), which
+// wedges the conversation permanently. Validating here turns that into a
+// recoverable tool error instead.
+//
+// Formats without a decoder registered in this binary (currently anything but
+// PNG and JPEG — e.g. WebP or GIF) surface as image.ErrFormat; we cannot
+// verify those here, so we let them through rather than reject a valid image
+// we simply can't decode. Only a genuine decode failure of a recognized format
+// (the truncation case) is reported as an error.
+func Validate(data []byte) error {
+	if _, _, err := image.Decode(bytes.NewReader(data)); err != nil {
+		if errors.Is(err, image.ErrFormat) {
+			return nil
+		}
+		return fmt.Errorf("decode image: %w", err)
+	}
+	return nil
 }
 
 // ResizeImage resizes an image if any dimension exceeds maxDimension.

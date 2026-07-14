@@ -177,3 +177,49 @@ func TestDecodeDimensions(t *testing.T) {
 		t.Errorf("DecodeDimensions(garbage) succeeded; want error")
 	}
 }
+
+func TestValidate(t *testing.T) {
+	// A complete PNG validates.
+	if err := Validate(createTestPNG(t, 32, 24)); err != nil {
+		t.Errorf("Validate(good png) = %v, want nil", err)
+	}
+
+	// A complete JPEG validates.
+	var jbuf bytes.Buffer
+	if err := jpeg.Encode(&jbuf, image.NewNRGBA(image.Rect(0, 0, 20, 20)), nil); err != nil {
+		t.Fatalf("jpeg.Encode: %v", err)
+	}
+	if err := Validate(jbuf.Bytes()); err != nil {
+		t.Errorf("Validate(good jpeg) = %v, want nil", err)
+	}
+
+	// A truncated PNG — valid header, cut-short pixel data (the flaky-upload
+	// case) — must be rejected. This is the regression: such bytes sniff as a
+	// PNG and even expose dimensions, but decoding them (or sending them to a
+	// model) fails.
+	full := createTestPNG(t, 64, 64)
+	truncated := full[:len(full)/2]
+	if _, _, derr := DecodeDimensions(truncated); derr != nil {
+		t.Fatalf("precondition: truncated PNG should still expose dimensions, got %v", derr)
+	}
+	if err := Validate(truncated); err == nil {
+		t.Errorf("Validate(truncated png) = nil, want error")
+	}
+
+	// Non-image garbage surfaces as image.ErrFormat (no decoder claims it), the
+	// same signal as an unsupported-but-valid format. Validate deliberately
+	// lets that through — the read_image caller already rejects non-images via
+	// http.DetectContentType before ever calling Validate, whose sole job is to
+	// catch a *recognized* format with corrupt/truncated payload.
+	if err := Validate([]byte("definitely not an image")); err != nil {
+		t.Errorf("Validate(garbage) = %v, want nil (ErrFormat is not our concern)", err)
+	}
+
+	// A format with no decoder registered in this binary (a minimal RIFF/WEBP
+	// header) must NOT be rejected: we can't verify it, so we let it through
+	// rather than falsely flag a valid image as corrupt.
+	webp := append([]byte("RIFF\x00\x00\x00\x00WEBPVP8 "), make([]byte, 16)...)
+	if err := Validate(webp); err != nil {
+		t.Errorf("Validate(undecodable format) = %v, want nil (can't verify, allow)", err)
+	}
+}

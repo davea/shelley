@@ -101,3 +101,104 @@ export function pickDraft(server: DraftCandidate, local: CachedDraft | null): Dr
   }
   return server;
 }
+
+// reconcileComposerDraft decides what (if anything) the message composer should
+// be (re)seeded with when the focused conversation, its draft text, or its
+// server `updated_at` changes. It is the pure core of ChatInterface's draft
+// reconcile watch, extracted so the ordering-sensitive logic can be unit tested.
+//
+// The bug this guards against: on a slow network the autosave round-trip (PUT
+// /draft) and the conversation-row echo that streams the new `updated_at`/draft
+// back can arrive out of order. In that window the localStorage mirror's
+// `basedOn` still points at the *previous* server state, so pickDraft() looks
+// stale and returns the OLDER server snapshot. If we blindly wrote that into the
+// composer while the user was mid-keystroke, their text got rewritten and the
+// caret jumped to the end (reported on Safari over a high-latency link).
+//
+// Fix: a session's composer is seeded once on entry; after that a same-session
+// echo may only update the composer when doing so cannot clobber in-progress
+// typing — either the candidate equals what's already shown, or the user has
+// not edited since our last seed (the composer still holds the seeded value).
+export interface ComposerReconcileInput {
+  // Focused conversation id; null is the new-conversation view.
+  conversationId: string | null;
+  // Id of a lazily-created draft for the current input session, if any.
+  lazyDraftId: string | null;
+  // Whether the focused conversation row is a draft.
+  isDraft: boolean;
+  // The focused conversation row's server draft text and `updated_at`.
+  serverDraft: string;
+  serverUpdatedAt: string;
+  // The localStorage mirror for this session (null if none).
+  cached: CachedDraft | null;
+  // The composer's live value right now (latest keystrokes).
+  composerValue: string;
+  // The session id we last seeded the composer for (undefined before any seed).
+  lastSeededSession: string | null | undefined;
+  // The value we last programmatically wrote into the composer.
+  lastSeededValue: string;
+}
+
+export interface ComposerReconcileResult {
+  // The value to write into the composer.
+  value: string;
+  // The server `updated_at` this value is reconciled against ("" when none).
+  draftSyncedAt: string;
+  // The session id to record as seeded.
+  seededSession: string | null;
+}
+
+export function reconcileComposerDraft(
+  input: ComposerReconcileInput,
+): ComposerReconcileResult | null {
+  const {
+    conversationId,
+    lazyDraftId,
+    isDraft,
+    serverDraft,
+    serverUpdatedAt,
+    cached,
+    composerValue,
+    lastSeededSession,
+    lastSeededValue,
+  } = input;
+
+  // A brand-new conversation auto-saving a draft flips conversationId
+  // null->draftId mid-typing. That is the same input session, not a switch, so
+  // leave the composer (and the user's keystrokes) untouched.
+  if (conversationId !== null && conversationId === lazyDraftId) return null;
+
+  const sessionId = conversationId; // null == new-conversation view
+
+  // Compute the candidate value + sync stamp for this session.
+  let value: string;
+  let draftSyncedAt: string;
+  if (isDraft) {
+    const picked = pickDraft({ value: serverDraft, updatedAt: serverUpdatedAt }, cached);
+    value = picked.value;
+    draftSyncedAt = serverUpdatedAt;
+  } else if (conversationId === null) {
+    const picked = pickDraft({ value: "", updatedAt: "" }, cached);
+    value = picked.value;
+    draftSyncedAt = "";
+  } else {
+    // Non-draft conversation: no server-side next-message draft, the local
+    // mirror is authoritative.
+    value = cached?.value ?? "";
+    draftSyncedAt = "";
+  }
+
+  // First entry into a session always seeds.
+  if (lastSeededSession !== sessionId) {
+    return { value, draftSyncedAt, seededSession: sessionId };
+  }
+
+  // Same session: this is a server echo. Applying it must not clobber
+  // in-progress keystrokes. Safe only when the candidate is already what the
+  // composer shows, or the user hasn't edited since our last seed.
+  if (value === composerValue) return null;
+  if (composerValue === lastSeededValue) {
+    return { value, draftSyncedAt, seededSession: sessionId };
+  }
+  return null;
+}
