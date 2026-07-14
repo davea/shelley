@@ -6221,8 +6221,10 @@ svg {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 90%;
-  max-width: 500px;
+  /* Grow to fit the quoted line, within reason; the pre scrolls beyond that. */
+  width: max-content;
+  min-width: min(500px, 90%);
+  max-width: 90%;
   background: var(--bg-base);
   border: 1px solid var(--border-color);
   border-radius: 0.5rem;
