@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 
 	"shelley.exe.dev/gitstate"
 	"shelley.exe.dev/llm"
+	"shelley.exe.dev/llm/llmhttp"
 )
 
 func TestNewLoop(t *testing.T) {
@@ -1678,6 +1681,7 @@ func TestIsRetryableError(t *testing.T) {
 		{"connection reset", fmt.Errorf("connection reset by peer"), true},
 		{"connection refused", fmt.Errorf("connection refused"), true},
 		{"timeout", fmt.Errorf("i/o timeout"), true},
+		{"idle stall timeout", fmt.Errorf("stream: %w", llmhttp.ErrIdleTimeout), true},
 		{"rate limit not in tight set", fmt.Errorf("rate limit exceeded"), false},
 		{"503 not in tight set", fmt.Errorf("upstream returned 503"), false},
 		{"generic error", fmt.Errorf("something went wrong"), false},
@@ -1708,6 +1712,7 @@ func TestIsRetryableLLMError(t *testing.T) {
 		{"gateway proxy error retryable", fmt.Errorf("gateway proxy error: dial tcp ..."), true},
 		{"upstream connect error retryable", fmt.Errorf("upstream connect error or disconnect/reset before headers"), true},
 		{"deadline exceeded retryable", fmt.Errorf("context deadline exceeded"), true},
+		{"idle stall timeout retryable", fmt.Errorf("stream: %w", llmhttp.ErrIdleTimeout), true},
 		{"deployment scaling retryable", fmt.Errorf("DEPLOYMENT_SCALING_UP scale-up in progress"), true},
 		{"credits exhausted not retryable", fmt.Errorf("LLM credits exhausted; credits refresh over time"), false},
 		{"invalid api key not retryable", fmt.Errorf("invalid api key"), false},
@@ -2621,3 +2626,48 @@ func (e *errorLLMService) SupportsImages() bool     { return true }
 func (r *retryableLLMService) SupportsImages() bool { return true }
 func (s *switchableLLM) SupportsImages() bool       { return true }
 func (p *pauseLLMService) SupportsImages() bool     { return true }
+
+func TestUserFacingLLMError(t *testing.T) {
+	idleErr := fmt.Errorf("stream: %w after 3m0s: context canceled", llmhttp.ErrIdleTimeout)
+
+	// Idle/stall timeout is explained, not surfaced as a raw deadline error.
+	msg := userFacingLLMError(idleErr, nil)
+	if !strings.Contains(msg, "idle/stall timeout") {
+		t.Errorf("idle error message missing explanation: %q", msg)
+	}
+	if strings.Contains(msg, "context deadline exceeded") {
+		t.Errorf("idle error message should not surface opaque deadline text: %q", msg)
+	}
+	if !strings.Contains(msg, llmhttp.DefaultIdleTimeout.String()) {
+		t.Errorf("idle error message missing timeout duration %s: %q", llmhttp.DefaultIdleTimeout, msg)
+	}
+
+	// A non-idle error falls through to its raw text.
+	generic := userFacingLLMError(fmt.Errorf("boom"), nil)
+	if !strings.Contains(generic, "boom") {
+		t.Errorf("generic error message = %q, want it to contain the cause", generic)
+	}
+
+	// Trace ids are appended when present.
+	ctx, trace := llmhttp.WithRequestTrace(context.Background())
+	_ = ctx
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req_abc")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL, nil)
+	resp, err := llmhttp.NewClient(nil).Do(req)
+	if err != nil {
+		t.Fatalf("seed request: %v", err)
+	}
+	resp.Body.Close()
+
+	withIDs := userFacingLLMError(idleErr, trace)
+	if !strings.Contains(withIDs, "req_abc") {
+		t.Errorf("error message missing upstream request id: %q", withIDs)
+	}
+	if !strings.Contains(withIDs, trace.ShelleyRequestID()) {
+		t.Errorf("error message missing shelley request id: %q", withIDs)
+	}
+}

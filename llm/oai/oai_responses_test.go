@@ -3,14 +3,17 @@ package oai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"shelley.exe.dev/llm"
+	"shelley.exe.dev/llm/llmhttp"
 )
 
 func TestResponsesServiceBasic(t *testing.T) {
@@ -1201,5 +1204,51 @@ func TestResponsesServiceRequestLevelThinking(t *testing.T) {
 				t.Errorf("effort = %q, want %q", gotReasoning.Effort, tt.wantEffort)
 			}
 		})
+	}
+}
+
+// TestResponsesServiceStallTimeout verifies that when the upstream stream
+// stalls mid-response (headers + a delta sent, then silence), the idle-timeout
+// client aborts the request with an ErrIdleTimeout-wrapped error rather than
+// hanging or capping on a fixed total deadline.
+func TestResponsesServiceStallTimeout(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		f, _ := w.(http.Flusher)
+		fmt.Fprint(w, "event: response.output_text.delta\n")
+		fmt.Fprint(w, `data: {"type":"response.output_text.delta","delta":"partial","content_index":0}`)
+		fmt.Fprint(w, "\n\n")
+		if f != nil {
+			f.Flush()
+		}
+		// Stall: never send response.completed.
+		<-release
+	}))
+	defer server.Close()
+	defer close(release)
+
+	svc := &ResponsesService{
+		APIKey:   "test-api-key",
+		Model:    GPT41,
+		ModelURL: server.URL,
+		HTTPC:    llmhttp.NewClientWithIdleTimeout(nil, 150*time.Millisecond),
+	}
+
+	// Bound the test so a regression (no idle timeout) fails fast instead of
+	// hanging the suite. The responses client retries stream failures with
+	// backoff, so this deadline also caps how long those retries run.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := svc.Do(ctx, &llm.Request{
+		Messages: []llm.Message{{Role: llm.MessageRoleUser, Content: []llm.Content{{Type: llm.ContentTypeText, Text: "Hello!"}}}},
+	})
+	if err == nil {
+		t.Fatalf("expected stall error, got nil")
+	}
+	if !errors.Is(err, llmhttp.ErrIdleTimeout) {
+		t.Fatalf("error = %v, want errors.Is(err, llmhttp.ErrIdleTimeout)", err)
 	}
 }

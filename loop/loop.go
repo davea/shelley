@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,7 +13,17 @@ import (
 
 	"shelley.exe.dev/gitstate"
 	"shelley.exe.dev/llm"
+	"shelley.exe.dev/llm/llmhttp"
 )
+
+// maxTurnDuration is an absolute backstop on a single LLM request (including
+// its inner transport retries). The primary bound on a stuck stream is the
+// transport idle/stall timeout (llmhttp.DefaultIdleTimeout); this ceiling only
+// exists to stop a provider that keeps the connection warm with
+// heartbeats/keepalives (which reset the idle timer) from hanging a turn
+// indefinitely. It is deliberately far larger than the idle window so that
+// genuinely long, steadily-streaming turns are unaffected.
+const maxTurnDuration = 15 * time.Minute
 
 // MessageRecordFunc is called to record new messages to persistent storage.
 type MessageRecordFunc func(ctx context.Context, message llm.Message, usage llm.Usage) error
@@ -325,11 +336,28 @@ func (l *Loop) processLLMRequest(ctx context.Context) error {
 		// sendWithRetry issues a single LLM request, retrying transient transport
 		// failures (EOF, connection reset). Provider-internal retries own
 		// user-visible retry warnings; this outer retry catches transport failures
-		// that escape the provider without adding noise. Each call gets its own
-		// timeout to prevent indefinite hangs.
+		// that escape the provider without adding noise.
+		//
+		// Timeouts are layered:
+		//   - The primary bound is the transport-level idle/stall timeout (see
+		//     llmhttp.Transport.IdleTimeout), which aborts only when no bytes
+		//     arrive for the idle window. This lets a slow-but-progressing turn
+		//     (a long high-reasoning response, or a slow ChatGPT-subscription
+		//     proxy hop) run to completion instead of dying at a fixed cap.
+		//   - maxTurnDuration is a generous absolute backstop so a provider that
+		//     keeps the socket warm with heartbeats/keepalives while otherwise
+		//     wedged (which would keep resetting the idle timer) can't hang the
+		//     turn forever. It is intentionally far larger than the idle window.
+		// User cancellation still flows through ctx.
+		// requestTrace collects correlation ids (Shelley's own request id, plus
+		// any upstream provider request id) for this turn so we can surface them
+		// in a user-facing error — including on the idle/stall-timeout path, where
+		// there is no successful response to read an id from.
+		var requestTrace *llmhttp.RequestTrace
 		sendWithRetry := func(req *llm.Request) (*llm.Response, error) {
-			llmCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			llmCtx, cancel := context.WithTimeout(ctx, maxTurnDuration)
 			defer cancel()
+			llmCtx, requestTrace = llmhttp.WithRequestTrace(llmCtx)
 			const maxRetries = 2
 			var resp *llm.Response
 			var err error
@@ -385,7 +413,7 @@ func (l *Loop) processLLMRequest(ctx context.Context) error {
 				Content: []llm.Content{
 					{
 						Type: llm.ContentTypeText,
-						Text: fmt.Sprintf("LLM request failed: %v", err),
+						Text: userFacingLLMError(err, requestTrace),
 					},
 				},
 				EndOfTurn:      true,
@@ -941,6 +969,35 @@ func (l *Loop) insertMissingToolResults(req *llm.Request) {
 	}
 }
 
+// userFacingLLMError renders an LLM request failure into a message shown in
+// the conversation. For the idle/stall timeout it explains what happened and
+// what to do, rather than surfacing an opaque "context deadline exceeded".
+// Other errors fall through to their raw text. When trace carries any
+// correlation ids (Shelley's own request id and/or an upstream provider id),
+// they are appended so users can quote them to support.
+func userFacingLLMError(err error, trace *llmhttp.RequestTrace) string {
+	var msg string
+	if errors.Is(err, llmhttp.ErrIdleTimeout) {
+		msg = fmt.Sprintf(
+			"LLM request timed out: the model stopped sending data for %s "+
+				"(idle/stall timeout), so the request was aborted. This usually "+
+				"means the provider or upstream connection stalled mid-response, "+
+				"not that your turn was too long — a slow but steadily streaming "+
+				"response is allowed to finish. Press Retry to try again.\n\n"+
+				"Details: %v",
+			llmhttp.DefaultIdleTimeout, err,
+		)
+	} else {
+		msg = fmt.Sprintf("LLM request failed: %v", err)
+	}
+	if trace != nil {
+		if ids := trace.String(); ids != "" {
+			msg += "\n\n(" + ids + ")"
+		}
+	}
+	return msg
+}
+
 // isRetryableError checks if an LLM request error should be retried by the
 // loop's tight inner-retry loop (max 2 attempts, ~1s sleep). Keep this set
 // narrow: this is for transport-level hiccups that have a good chance of
@@ -952,6 +1009,11 @@ func isRetryableError(err error) bool {
 		return false
 	}
 	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		return true
+	}
+	// A stalled stream (no bytes within the idle window) is a transport-level
+	// hiccup: a fresh attempt often succeeds immediately.
+	if errors.Is(err, llmhttp.ErrIdleTimeout) {
 		return true
 	}
 	lower := strings.ToLower(err.Error())
@@ -989,6 +1051,11 @@ func IsRetryableLLMError(err error) bool {
 		return false
 	}
 	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		return true
+	}
+	// Idle/stall timeout: the stream went silent mid-flight. Re-sending the
+	// same conversation state is safe and usually succeeds.
+	if errors.Is(err, llmhttp.ErrIdleTimeout) {
 		return true
 	}
 	lower := strings.ToLower(err.Error())
