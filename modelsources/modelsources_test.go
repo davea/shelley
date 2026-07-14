@@ -34,14 +34,14 @@ func TestPredictableBuilds(t *testing.T) {
 }
 
 func TestEnvSourceBuildsAllProviders(t *testing.T) {
-	src := Env("a", "o", "g", "f", "x")
+	src := Env("a", "o", "g", "f")
 	bs := Build(models.All(), []Source{src}, &http.Client{}, nil)
 	// Order must match catalog order.
 	var expected []string
 	for _, m := range models.All() {
-		// Env source covers Anthropic/OpenAI/Gemini/Fireworks/xAI only.
+		// Env source covers Anthropic/OpenAI/Gemini/Fireworks only.
 		switch m.Provider {
-		case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderGemini, models.ProviderFireworks, models.ProviderXAI:
+		case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderGemini, models.ProviderFireworks:
 			expected = append(expected, m.ID)
 		}
 	}
@@ -56,7 +56,7 @@ func TestEnvSourceBuildsAllProviders(t *testing.T) {
 }
 
 func TestEnvSourceLabels(t *testing.T) {
-	bs := Build(models.All(), []Source{Env("a", "o", "g", "f", "x")}, &http.Client{}, nil)
+	bs := Build(models.All(), []Source{Env("a", "o", "g", "f")}, &http.Client{}, nil)
 	for _, tt := range []struct {
 		id, want string
 	}{
@@ -64,7 +64,6 @@ func TestEnvSourceLabels(t *testing.T) {
 		{"gpt-5.5", "$OPENAI_API_KEY"},
 		{"gemini-3-pro", "$GEMINI_API_KEY"},
 		{"gpt-oss-20b-fireworks", "$FIREWORKS_API_KEY"},
-		{"grok-4.5", "$XAI_API_KEY"},
 	} {
 		b := findBuilt(bs, tt.id)
 		if b == nil {
@@ -79,7 +78,7 @@ func TestEnvSourceLabels(t *testing.T) {
 
 func TestGatewaySourceLabels(t *testing.T) {
 	// Plain gateway.
-	bs := Build(models.All(), []Source{Gateway("https://gw.example.com", "", "", "", "")}, &http.Client{}, nil)
+	bs := Build(models.All(), []Source{Gateway("https://gw.example.com", "", "", "")}, &http.Client{}, nil)
 	if b := findBuilt(bs, "claude-opus-4.6"); b == nil || b.Source != "exe.dev gateway" {
 		t.Errorf("claude-opus-4.6 with plain gateway: %+v", b)
 	}
@@ -91,7 +90,7 @@ func TestGatewaySourceLabels(t *testing.T) {
 	}
 
 	// Gateway with explicit anthropic key: provider label switches.
-	bs = Build(models.All(), []Source{Gateway("https://gw.example.com", "real-key", "", "", "")}, &http.Client{}, nil)
+	bs = Build(models.All(), []Source{Gateway("https://gw.example.com", "real-key", "", "")}, &http.Client{}, nil)
 	if b := findBuilt(bs, "claude-opus-4.6"); b == nil || b.Source != "$ANTHROPIC_API_KEY" {
 		t.Errorf("claude-opus-4.6 with explicit anthropic key: %+v", b)
 	}
@@ -286,7 +285,7 @@ func TestMultipleLLMIntegrationsUnionWithSuffix(t *testing.T) {
 
 func TestBuiltBaseURLResolution(t *testing.T) {
 	// Env source supplies no URL: BaseURL should be the catalog default.
-	bs := Build(models.All(), []Source{Env("a", "o", "g", "f", "x")}, &http.Client{}, nil)
+	bs := Build(models.All(), []Source{Env("a", "o", "g", "f")}, &http.Client{}, nil)
 	for _, tt := range []struct {
 		id, want string
 	}{
@@ -294,7 +293,6 @@ func TestBuiltBaseURLResolution(t *testing.T) {
 		{"gpt-5.5", "https://api.openai.com"},
 		{"gpt-oss-20b-fireworks", "https://api.fireworks.ai/inference"},
 		{"gemini-3-pro", "https://generativelanguage.googleapis.com"},
-		{"grok-4.5", "https://api.x.ai"},
 	} {
 		b := findBuilt(bs, tt.id)
 		if b == nil {
@@ -324,7 +322,7 @@ func TestBuiltBaseURLResolution(t *testing.T) {
 }
 
 func TestBuiltAPITypePopulated(t *testing.T) {
-	bs := Build(models.All(), []Source{Env("a", "o", "g", "f", "x"), Predictable()}, &http.Client{}, nil)
+	bs := Build(models.All(), []Source{Env("a", "o", "g", "f"), Predictable()}, &http.Client{}, nil)
 	for _, tt := range []struct {
 		id   string
 		want models.APIType
@@ -332,7 +330,6 @@ func TestBuiltAPITypePopulated(t *testing.T) {
 		{"claude-opus-4.6", models.APITypeAnthropicMessages},
 		{"gpt-5.5", models.APITypeOpenAIResponses},
 		{"gpt-oss-20b-fireworks", models.APITypeOpenAIChat},
-		{"grok-4.5", models.APITypeOpenAIResponses},
 		{"gemini-3-pro", models.APITypeGemini},
 		{"predictable", models.APITypeBuiltIn},
 	} {

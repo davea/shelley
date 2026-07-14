@@ -38,7 +38,6 @@ const (
 	GeminiAPIKeyEnv    = "GEMINI_API_KEY"
 	MistralAPIKeyEnv   = "MISTRAL_API_KEY"
 	MoonshotAPIKeyEnv  = "MOONSHOT_API_KEY"
-	XAIAPIKeyEnv       = "XAI_API_KEY"
 )
 
 //exe:completeinit
@@ -346,7 +345,7 @@ var (
 		UserName:           "grok-4.5",
 		ModelName:          "grok-4.5",
 		URL:                XAIURL,
-		APIKeyEnv:          XAIAPIKeyEnv,
+		APIKeyEnv:          "", // gateway-only; no direct XAI_API_KEY env support
 		IsReasoningModel:   true,
 		UseSimplifiedPatch: false,
 		SupportsImages:     true,

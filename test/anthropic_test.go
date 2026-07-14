@@ -50,7 +50,6 @@ func TestWithAnthropicAPI(t *testing.T) {
 		os.Getenv("OPENAI_API_KEY"),
 		os.Getenv("GEMINI_API_KEY"),
 		os.Getenv("FIREWORKS_API_KEY"),
-		os.Getenv("XAI_API_KEY"),
 	)}
 	llmConfig := &server.LLMConfig{
 		Models: modelsources.Build(models.All(), srcs, nil, logger),

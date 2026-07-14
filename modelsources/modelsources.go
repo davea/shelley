@@ -76,7 +76,7 @@ func Predictable() Source {
 // Anthropic, OpenAI, Fireworks, and xAI but not Gemini; Gemini models must
 // come from an env-var or LLM-integration source. Any non-empty
 // explicit per-provider key overrides the gateway's implicit credential.
-func Gateway(gatewayURL, anthropicKey, openAIKey, fireworksKey, xaiKey string) Source {
+func Gateway(gatewayURL, anthropicKey, openAIKey, fireworksKey string) Source {
 	key := func(k string) string {
 		if k != "" {
 			return k
@@ -89,15 +89,17 @@ func Gateway(gatewayURL, anthropicKey, openAIKey, fireworksKey, xaiKey string) S
 			models.ProviderAnthropic: {baseURL: gatewayURL + "/anthropic", apiKey: key(anthropicKey)},
 			models.ProviderOpenAI:    {baseURL: gatewayURL + "/openai", apiKey: key(openAIKey)},
 			models.ProviderFireworks: {baseURL: gatewayURL + "/fireworks/inference", apiKey: key(fireworksKey)},
-			models.ProviderXAI:       {baseURL: gatewayURL + "/xai", apiKey: key(xaiKey)},
+			// xAI is served by the gateway with an implicit (edge-injected)
+			// credential only. Direct XAI_API_KEY env support was removed.
+			models.ProviderXAI: {baseURL: gatewayURL + "/xai", apiKey: "implicit"},
 		},
-		providerLabels: explicitEnvLabels(anthropicKey, openAIKey, fireworksKey, xaiKey),
+		providerLabels: explicitEnvLabels(anthropicKey, openAIKey, fireworksKey),
 	}
 }
 
 // Env returns a Source for direct-to-provider env-var credentials. Only
 // providers with a non-empty key are included.
-func Env(anthropicKey, openAIKey, geminiKey, fireworksKey, xaiKey string) Source {
+func Env(anthropicKey, openAIKey, geminiKey, fireworksKey string) Source {
 	prov := map[models.Provider]*providerConn{}
 	labels := map[models.Provider]string{}
 	add := func(p models.Provider, k, env string) {
@@ -111,7 +113,6 @@ func Env(anthropicKey, openAIKey, geminiKey, fireworksKey, xaiKey string) Source
 	add(models.ProviderOpenAI, openAIKey, "OPENAI_API_KEY")
 	add(models.ProviderGemini, geminiKey, "GEMINI_API_KEY")
 	add(models.ProviderFireworks, fireworksKey, "FIREWORKS_API_KEY")
-	add(models.ProviderXAI, xaiKey, "XAI_API_KEY")
 	return Source{label: "env", providers: prov, providerLabels: labels}
 }
 
@@ -143,7 +144,7 @@ func LLMIntegration(integ *LLMIntegrationConfig, idSuffix string) Source {
 // explicitEnvLabels returns providerLabels that overlay env-var-style
 // labels on top of a gateway source for any provider whose key was set
 // explicitly. Gemini is omitted because the gateway never serves it.
-func explicitEnvLabels(anthropic, openAI, fireworks, xai string) map[models.Provider]string {
+func explicitEnvLabels(anthropic, openAI, fireworks string) map[models.Provider]string {
 	labels := map[models.Provider]string{}
 	if anthropic != "" {
 		labels[models.ProviderAnthropic] = "$ANTHROPIC_API_KEY"
@@ -153,9 +154,6 @@ func explicitEnvLabels(anthropic, openAI, fireworks, xai string) map[models.Prov
 	}
 	if fireworks != "" {
 		labels[models.ProviderFireworks] = "$FIREWORKS_API_KEY"
-	}
-	if xai != "" {
-		labels[models.ProviderXAI] = "$XAI_API_KEY"
 	}
 	return labels
 }

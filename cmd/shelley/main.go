@@ -412,7 +412,6 @@ func buildLLMModelSources(ctx context.Context, global GlobalConfig, logger *slog
 	openAIKey := os.Getenv("OPENAI_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	fireworksKey := os.Getenv("FIREWORKS_API_KEY")
-	xaiKey := os.Getenv("XAI_API_KEY")
 
 	var sources []modelsources.Source
 
@@ -459,23 +458,24 @@ func buildLLMModelSources(ctx context.Context, global GlobalConfig, logger *slog
 	}
 
 	// 2. Gateway (Anthropic, OpenAI, Fireworks, xAI). Per-provider env vars
-	// override the gateway's implicit credential for those providers.
+	// override the gateway's implicit credential for those providers; xAI is
+	// gateway-only (no direct env-var credential).
 	if gateway != "" && llmIntegrationFound {
 		logger.Info("Skipping LLM gateway because an exe.dev LLM integration was discovered")
-		if geminiKey != "" || xaiKey != "" {
-			sources = append(sources, modelsources.Env("", "", geminiKey, "", xaiKey))
+		if geminiKey != "" {
+			sources = append(sources, modelsources.Env("", "", geminiKey, ""))
 		}
 	} else if gateway != "" {
 		logger.Info("Using LLM gateway", "gateway", gateway)
-		sources = append(sources, modelsources.Gateway(gateway, anthropicKey, openAIKey, fireworksKey, xaiKey))
+		sources = append(sources, modelsources.Gateway(gateway, anthropicKey, openAIKey, fireworksKey))
 		// 2b. Gemini is not served by the gateway; let GEMINI_API_KEY,
 		// when set, supply Gemini models alongside the gateway.
 		if geminiKey != "" {
-			sources = append(sources, modelsources.Env("", "", geminiKey, "", ""))
+			sources = append(sources, modelsources.Env("", "", geminiKey, ""))
 		}
-	} else if anthropicKey != "" || openAIKey != "" || geminiKey != "" || fireworksKey != "" || xaiKey != "" {
+	} else if anthropicKey != "" || openAIKey != "" || geminiKey != "" || fireworksKey != "" {
 		// 3. Env vars.
-		sources = append(sources, modelsources.Env(anthropicKey, openAIKey, geminiKey, fireworksKey, xaiKey))
+		sources = append(sources, modelsources.Env(anthropicKey, openAIKey, geminiKey, fireworksKey))
 	}
 
 	// 4. Predictable always available.
