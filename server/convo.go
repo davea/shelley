@@ -371,7 +371,7 @@ func (cm *ConversationManager) setAgentWorking(working, persist bool) {
 	// onDone for it too, and do NOT record it as a suppressed finish (no
 	// waiter is owed a deferred notification for a turn that was cut short).
 	suppressDone := cm.subagentWaitOwners > 0 || cm.cancelling
-	if !working && cm.subagentWaitOwners > 0 {
+	if !working && cm.subagentWaitOwners > 0 && !cm.cancelling {
 		cm.subagentFinishSuppressed = true
 	}
 	cm.mu.Unlock()

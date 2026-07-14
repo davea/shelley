@@ -666,6 +666,50 @@ func (s *Server) lastAgentText(ctx context.Context, conversationID string) (stri
 // Ensure SubagentRunner implements claudetool.SubagentRunner.
 var _ claudetool.SubagentRunner = (*SubagentRunner)(nil)
 
+// cancelSubagentTree cancels the active turns of all subagent conversations
+// beneath parentID (children, grandchildren, ...). When the user cancels a
+// conversation they mean "stop all of this work", including work delegated to
+// subagents — leaving those running would waste tokens on results nobody will
+// consume (the parent's tool call awaiting them was just torn down).
+//
+// Only actively-working subagents are cancelled: an idle manager may still
+// hold a hydrated loop, and CancelConversation would record a spurious
+// "[Operation cancelled]" end-of-turn message on a turn that already
+// finished.
+func (s *Server) cancelSubagentTree(ctx context.Context, parentID string) {
+	visited := map[string]bool{parentID: true}
+	queue := []string{parentID}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+
+		children, err := s.db.GetSubagents(ctx, id)
+		if err != nil {
+			s.logger.Error("Failed to list subagents for cancellation", "conversationID", id, "error", err)
+			continue
+		}
+		for _, child := range children {
+			if visited[child.ConversationID] {
+				continue
+			}
+			visited[child.ConversationID] = true
+			queue = append(queue, child.ConversationID)
+
+			s.mu.Lock()
+			mgr, active := s.activeConversations[child.ConversationID]
+			s.mu.Unlock()
+			if !active || !mgr.IsAgentWorking() {
+				continue
+			}
+			if err := mgr.CancelConversation(ctx); err != nil {
+				s.logger.Error("Failed to cancel subagent conversation", "conversationID", child.ConversationID, "parent", id, "error", err)
+				continue
+			}
+			s.logger.Info("Cancelled subagent conversation", "conversationID", child.ConversationID, "parent", id)
+		}
+	}
+}
+
 // handleGetSubagents returns the list of subagents for a conversation.
 func (s *Server) handleGetSubagents(w http.ResponseWriter, r *http.Request, conversationID string) {
 	if r.Method != "GET" {

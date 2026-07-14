@@ -1541,17 +1541,23 @@ func (s *Server) handleCancelConversation(w http.ResponseWriter, r *http.Request
 	manager, exists := s.activeConversations[conversationID]
 	s.mu.Unlock()
 
+	// Cancel the conversation itself first (so it stops issuing new subagent
+	// work), then propagate to any actively-working subagents beneath it. The
+	// subagent tree is cancelled even when the parent has no active loop:
+	// the parent may have gone idle (or been evicted) while its subagents
+	// keep working, and the user's cancel means "stop all of this work".
+	if exists {
+		if err := manager.CancelConversation(ctx); err != nil {
+			s.logger.Error("Failed to cancel conversation", "conversationID", conversationID, "error", err)
+			http.Error(w, "Failed to cancel conversation", http.StatusInternalServerError)
+			return
+		}
+	}
+	s.cancelSubagentTree(ctx, conversationID)
+
 	if !exists {
-		// No active conversation to cancel
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "no_active_conversation"})
-		return
-	}
-
-	// Cancel the conversation
-	if err := manager.CancelConversation(ctx); err != nil {
-		s.logger.Error("Failed to cancel conversation", "conversationID", conversationID, "error", err)
-		http.Error(w, "Failed to cancel conversation", http.StatusInternalServerError)
 		return
 	}
 
