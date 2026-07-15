@@ -124,3 +124,35 @@ func TestLookupReasoningSupport(t *testing.T) {
 		}
 	}
 }
+
+func TestLookupCost(t *testing.T) {
+	cases := []struct {
+		name      string
+		endpoint  string
+		model     string
+		wantFound bool
+		wantIn    float64
+		wantOut   float64
+	}{
+		// First-party models resolve by name alone even when the endpoint is
+		// an unknown gateway host.
+		{"anthropic via gateway", "https://llm.int.exe.xyz/v1/messages", "claude-opus-4-6", true, 5, 25},
+		{"anthropic dated", "", "claude-sonnet-4-5-20250929", true, 3, 15},
+		// OpenAI snapshot names carry a date suffix that models.dev omits.
+		{"openai dated", "https://llm.int.exe.xyz/v1/responses", "gpt-5.5-2026-04-23", true, 5, 30},
+		{"openai undated", "", "gpt-5.3-codex", true, 1.75, 14},
+		{"fireworks full path", "", "accounts/fireworks/models/kimi-k2p6", true, 0.95, 4},
+		{"unknown model", "", "predictable-v1", false, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, found := LookupCost(tc.endpoint, tc.model)
+			if found != tc.wantFound {
+				t.Fatalf("LookupCost(%q, %q) found = %v, want %v", tc.endpoint, tc.model, found, tc.wantFound)
+			}
+			if c.Input != tc.wantIn || c.Output != tc.wantOut {
+				t.Errorf("LookupCost(%q, %q) = %+v, want input=%v output=%v", tc.endpoint, tc.model, c, tc.wantIn, tc.wantOut)
+			}
+		})
+	}
+}

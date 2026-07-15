@@ -698,6 +698,58 @@ export const featureFlagsApi = {
   },
 };
 
+// models.dev pricing, USD per million tokens. null = model known but unpriced.
+export interface ModelCostDTO {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+
+// Module-level cache so reopening the context popup doesn't refetch.
+// Models whose fetch failed stay uncached and are retried next call.
+const modelCostCache = new Map<string, ModelCostDTO | null>();
+
+export const modelCostsApi = {
+  async lookup(
+    models: { model: string; url: string }[],
+  ): Promise<Record<string, ModelCostDTO | null>> {
+    const missing = models.filter((m) => !modelCostCache.has(m.model));
+    if (missing.length > 0) {
+      const r = await fetch("/api/model-costs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Shelley-Request": "1" },
+        body: JSON.stringify({ models: missing }),
+      });
+      if (!r.ok) throw new Error(`Failed to load model costs: ${r.statusText}`);
+      const data = (await r.json()) as { costs: Record<string, ModelCostDTO | null> };
+      for (const m of missing) modelCostCache.set(m.model, data.costs[m.model] ?? null);
+    }
+    const out: Record<string, ModelCostDTO | null> = {};
+    for (const m of models) out[m.model] = modelCostCache.get(m.model) ?? null;
+    return out;
+  },
+};
+
+// Aggregated LLM usage across a conversation's subagents (recursive).
+export interface SubagentUsageDTO {
+  llm_calls: number;
+  estimated_usd: number;
+  reported_usd: number;
+  unpriced_models: string[];
+  unpriced_calls: number;
+}
+
+export const subagentUsageApi = {
+  async get(conversationId: string): Promise<SubagentUsageDTO> {
+    const r = await fetch(`/api/conversation/${conversationId}/subagent-usage`, {
+      headers: { "X-Shelley-Request": "1" },
+    });
+    if (!r.ok) throw new Error(`Failed to load subagent usage: ${r.statusText}`);
+    return (await r.json()) as SubagentUsageDTO;
+  },
+};
+
 // Custom models API
 export interface CustomModel {
   model_id: string;

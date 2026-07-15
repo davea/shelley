@@ -359,6 +359,8 @@ import {
   type Conversation,
   type ChatRequest,
   type ToolProgress,
+  type Usage,
+  type LLMContent,
   isDistillStatusMessage,
   distillStatus,
   parseQueuedMessages,
@@ -384,6 +386,7 @@ import { handleModifiedNavClick } from "../utils/openInNewTab";
 import { isAutoExpandTool } from "../../utils/toolMeta";
 import { formatDay } from "../../utils/messageTime";
 import { SLASH_COMMANDS } from "../../utils/slashCommands";
+import type { UsageEntry } from "../../utils/tokenCostGraph";
 import { coalesceMessages, type CoalescedItem } from "./coalesce";
 import type { RenderNode, GenerationBlock } from "./renderNode";
 import type { EphemeralTerminal } from "./terminalTypes";
@@ -464,6 +467,7 @@ const props = withDefaults(
 const { t } = useI18n();
 const { markdownMode } = useMarkdownMode();
 const toolPillsEnabled = useFeatureFlag("tool-pills");
+const tokenCostGraphEnabled = useFeatureFlag("token-cost-graph");
 const {
   hasUpdate,
   versionInfo,
@@ -784,6 +788,129 @@ const selectedModelDisplayName = computed(() => {
 
 const selectedModelInfo = computed(() => models.value.find((m) => m.id === selectedModel.value));
 const maxContextTokens = computed(() => selectedModelInfo.value?.max_context_tokens || 200000);
+
+// Content type constants mirror llm/llm.go.
+const LLM_TYPE_TEXT = 2;
+const LLM_TYPE_TOOL_USE = 5;
+const LLM_TYPE_TOOL_RESULT = 6;
+
+// Short excerpt of an agent message for the token-cost-graph hover readout:
+// first text block, or the first tool call when the message is tools-only.
+// Cached by message_id: llm_data can be large and messages with usage data
+// are complete, so their snippet never changes.
+const snippetCache = new Map<string, string>();
+function messageSnippet(m: Message): string {
+  const cached = snippetCache.get(m.message_id);
+  if (cached !== undefined) return cached;
+  let snippet = "";
+  if (m.llm_data) {
+    try {
+      const llm = typeof m.llm_data === "string" ? JSON.parse(m.llm_data) : m.llm_data;
+      const content: LLMContent[] = llm?.Content || [];
+      for (const c of content) {
+        if (c.Type === LLM_TYPE_TEXT && c.Text?.trim()) {
+          snippet = c.Text.trim().slice(0, 100);
+          break;
+        }
+      }
+      if (!snippet) {
+        for (const c of content) {
+          if (c.Type === LLM_TYPE_TOOL_USE && c.ToolName) {
+            snippet = `→ ${c.ToolName}`;
+            break;
+          }
+        }
+      }
+    } catch {
+      /* ignore malformed llm_data */
+    }
+  }
+  snippetCache.set(m.message_id, snippet);
+  return snippet;
+}
+
+// True for user messages typed by a human (not tool results, which are also
+// type "user" on the wire). Cached by message_id: parsing llm_data is costly
+// and messages are immutable.
+const humanUserCache = new Map<string, boolean>();
+function isHumanUserMessage(m: Message): boolean {
+  if (m.type !== "user") return false;
+  const cached = humanUserCache.get(m.message_id);
+  if (cached !== undefined) return cached;
+  let human = true;
+  if (m.llm_data) {
+    try {
+      const llm = typeof m.llm_data === "string" ? JSON.parse(m.llm_data) : m.llm_data;
+      const content: LLMContent[] = llm?.Content || [];
+      human = !content.some((c) => c.Type === LLM_TYPE_TOOL_RESULT);
+    } catch {
+      /* ignore malformed llm_data */
+    }
+  }
+  humanUserCache.set(m.message_id, human);
+  return human;
+}
+
+// Per-LLM-call usage entries (in order) for the token-cost-graph feature
+// flag. Includes every generation: the graph shows cumulative conversation
+// cost, not just the live context window. All-zero records (e.g. error
+// placeholders) are skipped. Empty while the flag is off so the default path
+// doesn't JSON.parse usage for every message on each stream update.
+const usageEntries = computed<UsageEntry[]>(() => {
+  if (!tokenCostGraphEnabled.value) return [];
+  const out: UsageEntry[] = [];
+  // A turn starts at the first call, after a human user message, or after an
+  // agent message that declared end_of_turn. Tool results also arrive as
+  // "user" messages; those don't start turns.
+  let nextStartsTurn = true;
+  // Timestamp of the message that triggered the pending turn; anchors the
+  // first call's duration (created_at only marks call completion).
+  let turnStartTs = 0;
+  for (const m of messages.value) {
+    if (isHumanUserMessage(m)) {
+      nextStartsTurn = true;
+      turnStartTs = Date.parse(m.created_at) || 0;
+      continue;
+    }
+    if (m.type !== "agent") continue;
+    // end_of_turn doesn't depend on usage; honor it even for agent messages
+    // without (or with malformed) usage data. Read it up front, but apply it
+    // after this call so the call itself stays in its own turn.
+    const endsTurn = !!m.end_of_turn;
+    if (m.usage_data) {
+      try {
+        const u: Usage =
+          typeof m.usage_data === "string" ? JSON.parse(m.usage_data) : m.usage_data;
+        if (
+          (u.input_tokens || 0) +
+            (u.cache_creation_input_tokens || 0) +
+            (u.cache_read_input_tokens || 0) +
+            (u.output_tokens || 0) >
+          0
+        ) {
+          out.push({
+            ...u,
+            snippet: messageSnippet(m),
+            generation: m.generation,
+            timestamp: Date.parse(m.created_at) || 0,
+            startsTurn: nextStartsTurn,
+            turnStartTimestamp: nextStartsTurn && turnStartTs ? turnStartTs : undefined,
+          });
+          nextStartsTurn = false;
+        }
+      } catch {
+        /* ignore malformed usage */
+      }
+    }
+    if (endsTurn) {
+      nextStartsTurn = true;
+      // No anchor until a human message triggers the next turn; anchoring to
+      // this agent message would count idle time as active.
+      turnStartTs = 0;
+    }
+  }
+  return out;
+});
 
 watch(
   selectedModelInfo,
@@ -1787,6 +1914,7 @@ const statusContentProps = computed(() => ({
   selectedCwd: selectedCwd.value,
   contextWindowSize: contextWindowSize.value,
   maxContextTokens: maxContextTokens.value,
+  usageEntries: usageEntries.value,
   selectedModelDisplayName: selectedModelDisplayName.value,
   hostname,
   models: models.value,

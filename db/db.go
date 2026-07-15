@@ -1681,6 +1681,19 @@ func (db *DB) CreateSubagentConversation(ctx context.Context, slug, parentID str
 	return &conversation, err
 }
 
+// GetSubagentUsage aggregates LLM usage across all descendant conversations
+// of parentID (recursively), grouped by model.
+func (db *DB) GetSubagentUsage(ctx context.Context, parentID string) ([]generated.GetSubagentUsageRow, error) {
+	var rows []generated.GetSubagentUsageRow
+	err := db.pool.Rx(ctx, func(ctx context.Context, rx *Rx) error {
+		q := generated.New(rx.Conn())
+		var err error
+		rows, err = q.GetSubagentUsage(ctx, &parentID)
+		return err
+	})
+	return rows, err
+}
+
 // GetSubagentCounts returns a map of parent_conversation_id -> subagent count.
 func (db *DB) GetSubagentCounts(ctx context.Context) (map[string]int64, error) {
 	var rows []generated.GetSubagentCountsRow

@@ -17,6 +17,11 @@
       {{ formatTokens(contextWindowSize) }} / {{ formatTokens(maxContextTokens) }} ({{
         percentage.toFixed(1)
       }}%) tokens used
+      <TokenCostGraph
+        v-if="tokenGraphEnabled"
+        :entries="usageEntries || []"
+        :conversation-id="conversationId"
+      />
       <div v-if="showLongConversationWarning" class="chat-popup-warning">
         This conversation is getting long.
         <br />
@@ -42,12 +47,6 @@
         >
           Start New Generation
         </button>
-        <div
-          class="chat-distill-info"
-          title="Yeah, we're trying some stuff. Come to discord and talk about it with us!"
-        >
-          ⓘ Yeah, we're trying some stuff. Come to discord and talk about it with us!
-        </div>
       </div>
     </div>
     <div class="context-usage-bar-container">
@@ -74,16 +73,22 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
+import type { UsageEntry } from "../../utils/tokenCostGraph";
+import { useFeatureFlag } from "../composables/featureFlags";
+import TokenCostGraph from "./TokenCostGraph.vue";
 
 const props = defineProps<{
   contextWindowSize: number;
   maxContextTokens: number;
   conversationId?: string | null;
   modelName?: string;
+  usageEntries?: UsageEntry[];
   onDistillNewGeneration?: () => Promise<void> | void;
   onStartNewGeneration?: () => Promise<void> | void;
   agentWorking?: boolean;
 }>();
+
+const tokenGraphEnabled = useFeatureFlag("token-cost-graph");
 
 const showPopup = ref(false);
 const distilling = ref(false);

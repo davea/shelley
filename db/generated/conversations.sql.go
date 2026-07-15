@@ -377,6 +377,74 @@ func (q *Queries) GetSubagentCounts(ctx context.Context) ([]GetSubagentCountsRow
 	return items, nil
 }
 
+const getSubagentUsage = `-- name: GetSubagentUsage :many
+WITH RECURSIVE descendants(conversation_id) AS (
+  SELECT p.conversation_id FROM conversations p WHERE p.parent_conversation_id = ?
+  UNION ALL
+  SELECT c.conversation_id FROM conversations c
+  JOIN descendants d ON c.parent_conversation_id = d.conversation_id
+)
+SELECT
+  m.model_name,
+  m.llm_api_url,
+  COUNT(*) AS llm_calls,
+  CAST(COALESCE(SUM(m.usage_data ->> 'input_tokens'), 0) AS INTEGER) AS input_tokens,
+  CAST(COALESCE(SUM(m.usage_data ->> 'cache_creation_input_tokens'), 0) AS INTEGER) AS cache_creation_input_tokens,
+  CAST(COALESCE(SUM(m.usage_data ->> 'cache_read_input_tokens'), 0) AS INTEGER) AS cache_read_input_tokens,
+  CAST(COALESCE(SUM(m.usage_data ->> 'output_tokens'), 0) AS INTEGER) AS output_tokens,
+  CAST(COALESCE(SUM(m.usage_data ->> 'cost_usd'), 0) AS REAL) AS cost_usd
+FROM messages m
+JOIN descendants d ON m.conversation_id = d.conversation_id
+WHERE m.type = 'agent' AND m.usage_data IS NOT NULL
+GROUP BY m.model_name, m.llm_api_url
+`
+
+type GetSubagentUsageRow struct {
+	ModelName                *string `json:"model_name"`
+	LlmApiUrl                *string `json:"llm_api_url"`
+	LlmCalls                 int64   `json:"llm_calls"`
+	InputTokens              int64   `json:"input_tokens"`
+	CacheCreationInputTokens int64   `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int64   `json:"cache_read_input_tokens"`
+	OutputTokens             int64   `json:"output_tokens"`
+	CostUsd                  float64 `json:"cost_usd"`
+}
+
+// Aggregate LLM usage across all descendant conversations (subagents,
+// recursively), grouped by model. Powers the "plus $X for subagents" line
+// in the token-cost graph; the parent's own usage is not included.
+func (q *Queries) GetSubagentUsage(ctx context.Context, parentConversationID *string) ([]GetSubagentUsageRow, error) {
+	rows, err := q.db.QueryContext(ctx, getSubagentUsage, parentConversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetSubagentUsageRow{}
+	for rows.Next() {
+		var i GetSubagentUsageRow
+		if err := rows.Scan(
+			&i.ModelName,
+			&i.LlmApiUrl,
+			&i.LlmCalls,
+			&i.InputTokens,
+			&i.CacheCreationInputTokens,
+			&i.CacheReadInputTokens,
+			&i.OutputTokens,
+			&i.CostUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSubagents = `-- name: GetSubagents :many
 SELECT conversation_id, slug, user_initiated, created_at, updated_at, cwd, archived, parent_conversation_id, model, conversation_options, current_generation, agent_working, tags, is_draft, draft, queued_messages FROM conversations
 WHERE parent_conversation_id = ?

@@ -10,6 +10,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -23,7 +24,20 @@ type modelEntry struct {
 		Input  []string `json:"input"`
 		Output []string `json:"output"`
 	} `json:"modalities"`
+	Cost Cost `json:"cost"`
 }
+
+// Cost is a model's pricing in USD per million tokens, as recorded by
+// models.dev. CacheRead/CacheWrite are zero for providers that don't price
+// caching separately.
+type Cost struct {
+	Input      float64 `json:"input"`
+	Output     float64 `json:"output"`
+	CacheRead  float64 `json:"cache_read"`
+	CacheWrite float64 `json:"cache_write"`
+}
+
+func (c Cost) isZero() bool { return c == Cost{} }
 
 type providerEntry struct {
 	// API is the provider's base URL (the "api" field in models.dev), e.g.
@@ -129,6 +143,63 @@ func LookupReasoningSupport(endpoint, modelName string) (supported, found bool) 
 	m, found := lookup(endpoint, modelName)
 	return m.Reasoning, found
 }
+
+// LookupCost returns models.dev pricing (USD per million tokens) for
+// (endpoint, modelName). The second return value is false when the model is
+// unknown or has no pricing.
+//
+// Cost lookups are more permissive than capability lookups: Shelley usually
+// reaches first-party models through gateway hosts models.dev has never heard
+// of, and providers snapshot model names with date suffixes (e.g.
+// "gpt-5.5-2026-04-23") that models.dev omits. Each strategy — endpoint host,
+// then first-party catalogs by name, then the OpenRouter catalog — is tried
+// with the full name and with a trailing -YYYY-MM-DD stripped.
+func LookupCost(endpoint, modelName string) (Cost, bool) {
+	data := load()
+	names := []string{modelName}
+	if stripped := dateSuffixRe.ReplaceAllString(modelName, ""); stripped != modelName {
+		names = append(names, stripped)
+	}
+	tryProvider := func(p providerEntry, n string) (Cost, bool) {
+		if m, ok := lookupInProvider(p, n); ok && !m.Cost.isZero() {
+			return m.Cost, true
+		}
+		return Cost{}, false
+	}
+	for _, n := range names {
+		if host := hostOf(endpoint); host != "" {
+			if p, ok := bestProviderForPath(hostIndex[host], pathSegments(endpoint), n); ok {
+				if c, ok := tryProvider(p, n); ok {
+					return c, true
+				}
+			}
+		}
+	}
+	for _, n := range names {
+		for _, pk := range firstPartyProviders {
+			if p, ok := data[pk]; ok {
+				if c, ok := tryProvider(p, n); ok {
+					return c, true
+				}
+			}
+		}
+	}
+	for _, n := range names {
+		if p, ok := data["openrouter"]; ok {
+			if c, ok := tryProvider(p, n); ok {
+				return c, true
+			}
+		}
+	}
+	return Cost{}, false
+}
+
+// firstPartyProviders are the models.dev catalogs scanned by bare model name
+// for cost lookups, in preference order.
+var firstPartyProviders = []string{"anthropic", "openai", "google", "fireworks-ai", "xai"}
+
+// dateSuffixRe matches provider snapshot date suffixes like "-2026-04-23".
+var dateSuffixRe = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
 
 func lookup(endpoint, modelName string) (modelEntry, bool) {
 	data := load()

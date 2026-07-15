@@ -29,7 +29,7 @@ export interface LLMMessage {
 
 export interface LLMContent {
   ID: string;
-  Type: number; // 2 = text, 3 = tool_use, 4 = tool_result, 5 = thinking
+  Type: number; // llm.go ContentType: 2=text, 3=thinking, 4=redacted_thinking, 5=tool_use, 6=tool_result
   Text?: string;
   ToolName?: string;
   ToolInput?: unknown;

@@ -287,6 +287,30 @@ SELECT * FROM conversations
 WHERE parent_conversation_id = ?
 ORDER BY created_at ASC;
 
+-- name: GetSubagentUsage :many
+-- Aggregate LLM usage across all descendant conversations (subagents,
+-- recursively), grouped by model. Powers the "plus $X for subagents" line
+-- in the token-cost graph; the parent's own usage is not included.
+WITH RECURSIVE descendants(conversation_id) AS (
+  SELECT p.conversation_id FROM conversations p WHERE p.parent_conversation_id = ?
+  UNION ALL
+  SELECT c.conversation_id FROM conversations c
+  JOIN descendants d ON c.parent_conversation_id = d.conversation_id
+)
+SELECT
+  m.model_name,
+  m.llm_api_url,
+  COUNT(*) AS llm_calls,
+  CAST(COALESCE(SUM(m.usage_data ->> 'input_tokens'), 0) AS INTEGER) AS input_tokens,
+  CAST(COALESCE(SUM(m.usage_data ->> 'cache_creation_input_tokens'), 0) AS INTEGER) AS cache_creation_input_tokens,
+  CAST(COALESCE(SUM(m.usage_data ->> 'cache_read_input_tokens'), 0) AS INTEGER) AS cache_read_input_tokens,
+  CAST(COALESCE(SUM(m.usage_data ->> 'output_tokens'), 0) AS INTEGER) AS output_tokens,
+  CAST(COALESCE(SUM(m.usage_data ->> 'cost_usd'), 0) AS REAL) AS cost_usd
+FROM messages m
+JOIN descendants d ON m.conversation_id = d.conversation_id
+WHERE m.type = 'agent' AND m.usage_data IS NOT NULL
+GROUP BY m.model_name, m.llm_api_url;
+
 -- name: GetConversationBySlugAndParent :one
 SELECT * FROM conversations
 WHERE slug = ? AND parent_conversation_id = ?;

@@ -8453,6 +8453,155 @@ kbd {
   color: var(--warning-text, #f59e0b);
 }
 
+/* Token cost graph (token-cost-graph feature flag) */
+.token-cost-graph {
+  margin-top: 8px;
+  width: 280px;
+  max-width: 100%;
+}
+
+.token-cost-controls {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.token-cost-toggle {
+  font-size: 0.65rem;
+  line-height: 1.4;
+  padding: 1px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.token-cost-toggle-active {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
+.token-cost-graph-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+}
+
+.token-cost-axis {
+  stroke: var(--border-color);
+  stroke-width: 1;
+}
+
+.token-cost-gridline {
+  stroke: var(--border-color);
+  stroke-width: 0.5;
+  opacity: 0.6;
+}
+
+.token-cost-hover-line {
+  stroke: var(--text-secondary);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  pointer-events: none;
+}
+
+.token-cost-gen-line {
+  stroke: var(--text-primary);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.token-cost-label {
+  font-size: 9px;
+  fill: var(--text-secondary);
+}
+
+.token-cost-hover-readout {
+  margin-top: 2px;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  min-height: 2.7em;
+}
+
+.token-cost-hover-snippet {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+}
+
+.token-cost-legend {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.token-cost-model-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-top: 3px;
+}
+
+.token-cost-model-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.token-cost-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+}
+
+.token-cost-chip {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.token-cost-legend-label {
+  flex: 1;
+}
+
+.token-cost-legend-tokens {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.token-cost-legend-unit {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 58px;
+  text-align: right;
+}
+
+.token-cost-legend-cost {
+  min-width: 52px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.token-cost-graph-note {
+  margin-top: 4px;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+
 .chat-distill-container {
   display: flex;
   flex-direction: column;
@@ -8482,13 +8631,6 @@ kbd {
   background-color: var(--bg-secondary, #2a2a2a);
   border: 1px solid var(--blue-text);
   color: var(--blue-text);
-}
-
-.chat-distill-info {
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  line-height: 1.25;
-  margin-top: 2px;
 }
 
 .generation-section {

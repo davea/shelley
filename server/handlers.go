@@ -944,6 +944,10 @@ func (s *Server) conversationMux() *http.ServeMux {
 	mux.Handle("GET /{id}", gzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.handleGetConversation(w, r, r.PathValue("id"))
 	})))
+	// GET /api/conversation/<id>/subagent-usage - aggregated subagent cost
+	mux.HandleFunc("GET /{id}/subagent-usage", func(w http.ResponseWriter, r *http.Request) {
+		s.handleSubagentUsage(w, r, r.PathValue("id"))
+	})
 	// GET /api/conversation/<id>/stream - legacy SSE stream. Compression is
 	// negotiated inside the handler (zstd/gzip per Accept-Encoding) with a
 	// compressor flush after every event so messages stream promptly.

@@ -453,6 +453,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("/api/conversation/", http.StripPrefix("/api/conversation", s.conversationMux()))
 	mux.Handle("/api/conversation-by-slug/", gzipHandler(http.HandlerFunc(s.handleConversationBySlug)))
 	mux.Handle("/api/validate-cwd", http.HandlerFunc(s.handleValidateCwd)) // Small response
+	mux.Handle("POST /api/model-costs", http.HandlerFunc(s.handleModelCosts))
 	mux.Handle("/api/list-directory", gzipHandler(http.HandlerFunc(s.handleListDirectory)))
 	mux.Handle("/api/create-directory", http.HandlerFunc(s.handleCreateDirectory))
 	mux.Handle("/api/git/repos", gzipHandler(http.HandlerFunc(s.handleGitRepos)))
