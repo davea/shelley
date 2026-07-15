@@ -7,6 +7,7 @@
 <template>
   <div
     :class="`conversation-item ${isActive ? 'active' : ''}${isNew ? ' conversation-item-enter' : ''}`"
+    :data-conversation-id="conversation.conversation_id"
     style="cursor: pointer"
     @click="onRowClick"
     @auxclick="ctx.handleAuxClick($event, conversation)"

@@ -141,27 +141,34 @@ func TestNewPageDraftKeepsInputFocused(t *testing.T) {
 // exact failure mode deterministically: install a fetch shim that makes the
 // conversation-detail GET hang forever, then select the draft and assert it
 // renders its composer immediately with no spinner.
+//
+// The shared test server accumulates drafts from the sibling draft tests, so we
+// must reopen THIS test's own draft, not just "the first draft row" — hence we
+// capture the draft's id from its URL and click the row carrying that
+// data-conversation-id. Selecting a random sibling draft would open a
+// conversation whose composer holds different text and fail the seed check.
 func TestNewPageDraftOpensWithoutSpinner(t *testing.T) {
 	lazyTest(t, `Reproduces the "open a draft, get a forever spinner" bug, which only surfaces on a COLD message cache. Perform these steps in order, exactly as described; do not add extra steps.
 1. Navigate to /new.
 2. Wait for the message input (data-testid "message-input") to be visible.
 3. Fill the message input (data-testid "message-input") with the value "draft body text". This lazily creates a draft.
 4. Wait for the URL to contain "/c/".
-5. Sleep about 1 second.
-6. Navigate to /new.
-7. Wait for the message input (data-testid "message-input") to be visible.
-8. Eval: delete the message cache. Expression: "(function(){try{indexedDB.deleteDatabase('shelley-messages');}catch(e){}return 'cleared';})()". Expect "cleared".
-9. Sleep about 1 second.
-10. Navigate to /new (a fresh load with the now-empty cache).
-11. Wait for the message input (data-testid "message-input") to be visible.
-12. Eval: install a fetch shim so the conversation-detail GET hangs forever. Expression: "(function(){var o=window.fetch;window.fetch=function(u,opt){var s=(typeof u==='string')?u:u.url;if(/\/api\/conversation\/[^\/]+$/.test(s)&&(!opt||!opt.method||opt.method==='GET')){return new Promise(function(){});}return o(u,opt);};return 'stalled';})()". Expect "stalled".
-13. Click the button with aria-label "Open conversations".
-14. Wait for a draft row (selector ".conversation-title-draft") to be visible.
-15. Eval: click the draft row. Expression: "(function(){var el=document.querySelector('.conversation-title-draft');el.closest('.conversation-item').click();return 'clicked';})()". Expect "clicked".
-16. Sleep about 1.5 seconds.
-17. Wait for the URL to contain "/c/" (the app should have switched to the draft).
-18. Assert that selector ".spinner" matches 0 elements (no loading spinner, despite the stalled fetch).
-19. Eval: confirm the composer is usable and seeded with the draft text. Expression: "(function(){var el=document.querySelector('[data-testid=\"message-input\"]');return (!!el)&&(!el.disabled)&&el.value.indexOf('draft body text')>=0 ? 'true' : 'false';})()". Expect "true".`)
+5. Eval: remember THIS draft's id (from its URL) so we can reopen exactly this draft later, since the shared server also holds other tests' drafts. Expression: "(function(){var m=location.pathname.match(/\/c\/(.+)$/);sessionStorage.setItem('draftSpinnerTargetId', m?m[1]:'');return m?'saved':'nourl';})()". Expect "saved".
+6. Sleep about 1 second.
+7. Navigate to /new.
+8. Wait for the message input (data-testid "message-input") to be visible.
+9. Eval: delete the message cache. Expression: "(function(){try{indexedDB.deleteDatabase('shelley-messages');}catch(e){}return 'cleared';})()". Expect "cleared".
+10. Sleep about 1 second.
+11. Navigate to /new (a fresh load with the now-empty cache).
+12. Wait for the message input (data-testid "message-input") to be visible.
+13. Eval: install a fetch shim so the conversation-detail GET hangs forever. Expression: "(function(){var o=window.fetch;window.fetch=function(u,opt){var s=(typeof u==='string')?u:u.url;if(/\/api\/conversation\/[^\/]+$/.test(s)&&(!opt||!opt.method||opt.method==='GET')){return new Promise(function(){});}return o(u,opt);};return 'stalled';})()". Expect "stalled".
+14. Click the button with aria-label "Open conversations".
+15. Wait for a draft row (selector ".conversation-title-draft") to be visible.
+16. Eval: click THIS test's own draft row, matched by the id captured earlier, so a sibling test's draft in the shared list can't be opened by mistake. Expression: "(function(){var id=sessionStorage.getItem('draftSpinnerTargetId');var el=document.querySelector('.conversation-item[data-conversation-id=\"'+id+'\"]');if(!el)return 'notfound';el.click();return 'clicked';})()". Expect "clicked".
+17. Sleep about 1.5 seconds.
+18. Wait for the URL to contain "/c/" (the app should have switched to the draft).
+19. Assert that selector ".spinner" matches 0 elements (no loading spinner, despite the stalled fetch).
+20. Eval: confirm the composer is usable and seeded with the draft text. Expression: "(function(){var el=document.querySelector('[data-testid=\"message-input\"]');return (!!el)&&(!el.disabled)&&el.value.indexOf('draft body text')>=0 ? 'true' : 'false';})()". Expect "true".`)
 }
 
 // --- Conversation tests (ported from ui/e2e/conversation.spec.ts) ---
