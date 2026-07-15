@@ -359,7 +359,12 @@ func TestConversationListPatchStreamHistoryEndpoint(t *testing.T) {
 
 func waitForPatchEventAfter(t *testing.T, rec *flusherRecorder, prevHash string) ConversationListPatchEvent {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	// The patch event is produced synchronously in the DB commit hook, but
+	// reaches the recorder across several goroutine hops (commit hook ->
+	// cond.Broadcast -> listNext goroutine -> updates channel -> select loop ->
+	// flush). A generous deadline absorbs scheduling starvation on loaded CI
+	// without masking a real "event never emitted" bug (that still hangs).
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		for _, ev := range parseConversationStreamListPatches(rec.getString()) {
 			if (prevHash == "" && (ev.OldHash == nil || *ev.OldHash == "" || ev.Reset)) ||
