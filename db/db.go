@@ -408,10 +408,13 @@ func (db *DB) CreateDraftConversation(ctx context.Context, cwd, model *string, o
 	return &conversation, err
 }
 
-// UpdateDraft replaces the draft text of a draft conversation. Returns
-// ErrConversationNotDraft if the conversation no longer exists as a draft
-// (e.g. it was deleted, or promoted by a concurrent chat post).
-func (db *DB) UpdateDraft(ctx context.Context, conversationID, draft string) (*generated.Conversation, error) {
+// UpdateDraft partially updates a draft conversation in place: nil fields
+// keep their current value, so draft text, model, and cwd each update
+// independently without racing each other. Returns ErrConversationNotDraft
+// if the conversation no longer exists as a draft (deleted, or promoted by
+// a concurrent chat post) so the caller doesn't mutate an active
+// conversation.
+func (db *DB) UpdateDraft(ctx context.Context, conversationID string, draft, model, cwd *string) (*generated.Conversation, error) {
 	var conv generated.Conversation
 	err := db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
 		q := generated.New(tx.Conn())
@@ -419,6 +422,8 @@ func (db *DB) UpdateDraft(ctx context.Context, conversationID, draft string) (*g
 		conv, err = q.UpdateConversationDraft(ctx, generated.UpdateConversationDraftParams{
 			ConversationID: conversationID,
 			Draft:          draft,
+			Model:          model,
+			Cwd:            cwd,
 		})
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrConversationNotDraft
@@ -428,41 +433,58 @@ func (db *DB) UpdateDraft(ctx context.Context, conversationID, draft string) (*g
 	return &conv, err
 }
 
-// UpdateDraftCwd retargets the working directory of a draft conversation in
-// place, preserving its draft text. Returns ErrConversationNotDraft if the
-// conversation no longer exists as a draft (deleted, or promoted by a
-// concurrent chat post) so the caller doesn't mutate an active conversation.
-func (db *DB) UpdateDraftCwd(ctx context.Context, conversationID, cwd string) (*generated.Conversation, error) {
+// PromoteDraft applies send-time overrides (any non-nil of cwd, model,
+// opts) and clears is_draft and draft, all in one transaction, returning
+// the promoted row. The single Tx matters: a concurrent PUT /draft can no
+// longer interleave between an override and the promote, so the returned
+// row's model is exactly what the loop must pin to. Returns
+// ErrConversationNotDraft (and applies nothing) when the conversation is
+// no longer a draft — a concurrent send won the promote race — so the
+// caller can decide whether to retry or fail.
+func (db *DB) PromoteDraft(ctx context.Context, conversationID string, cwd, model *string, opts *ConversationOptions) (*generated.Conversation, error) {
+	var optsJSON []byte
+	if opts != nil {
+		var err error
+		optsJSON, err = json.Marshal(*opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal conversation options: %w", err)
+		}
+	}
 	var conv generated.Conversation
 	err := db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
 		q := generated.New(tx.Conn())
-		var err error
-		conv, err = q.UpdateDraftConversationCwd(ctx, generated.UpdateDraftConversationCwdParams{
-			Cwd:            &cwd,
+		// Gate the overrides on is_draft inside the Tx (not just on the
+		// caller's earlier read): if the promote below is going to lose the
+		// race, the overrides must not touch the now-active conversation.
+		if _, err := q.UpdateConversationDraft(ctx, generated.UpdateConversationDraftParams{
 			ConversationID: conversationID,
-		})
+			Model:          model,
+			Cwd:            cwd,
+		}); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrConversationNotDraft
+			}
+			return err
+		}
+		if opts != nil {
+			if err := q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
+				ConversationID:      conversationID,
+				ConversationOptions: string(optsJSON),
+			}); err != nil {
+				return err
+			}
+		}
+		var err error
+		conv, err = q.PromoteDraftConversation(ctx, conversationID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrConversationNotDraft
 		}
 		return err
 	})
-	return &conv, err
-}
-
-// PromoteDraft clears is_draft and draft on a conversation. Callers gate
-// on the conversation's IsDraft flag (loaded in the same handler) before
-// invoking this, so the underlying UPDATE always matches a row. Returns
-// ErrConversationNotDraft when the gate is wrong (e.g. concurrent
-// promote) so the caller can decide whether to retry or fail.
-func (db *DB) PromoteDraft(ctx context.Context, conversationID string) error {
-	return db.pool.Tx(ctx, func(ctx context.Context, tx *Tx) error {
-		q := generated.New(tx.Conn())
-		_, err := q.PromoteDraftConversation(ctx, conversationID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrConversationNotDraft
-		}
-		return err
-	})
+	if err != nil {
+		return nil, err
+	}
+	return &conv, nil
 }
 
 // QueuedMessage is one user message held in a conversation's queued_messages

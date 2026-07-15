@@ -12,21 +12,19 @@ VALUES (?, ?, TRUE, ?, ?, ?, TRUE, ?)
 RETURNING *;
 
 -- name: UpdateConversationDraft :one
--- Sets the draft text and bumps updated_at so the conversation list
--- reorders. Used by the autosave from the message input.
+-- Partially updates a draft conversation: any NULL argument keeps the
+-- current value (text, model, and cwd each update independently), and
+-- updated_at bumps so the conversation list reorders. The is_draft guard
+-- makes this atomic: a draft promoted concurrently yields no rows
+-- (ErrConversationNotDraft) rather than mutating an active conversation,
+-- whose cwd is immutable and whose model only changes through the /model
+-- loop switch.
 UPDATE conversations
-SET draft = ?, updated_at = CURRENT_TIMESTAMP
-WHERE conversation_id = ? AND is_draft = TRUE
-RETURNING *;
-
--- name: UpdateDraftConversationCwd :one
--- Retargets the working directory of a draft conversation in place. The
--- is_draft guard makes this atomic: a draft promoted concurrently yields
--- no rows (ErrConversationNotDraft) rather than mutating an active
--- conversation, whose cwd is immutable.
-UPDATE conversations
-SET cwd = ?, updated_at = CURRENT_TIMESTAMP
-WHERE conversation_id = ? AND is_draft = TRUE
+SET draft = COALESCE(sqlc.narg('draft'), draft),
+    model = COALESCE(sqlc.narg('model'), model),
+    cwd = COALESCE(sqlc.narg('cwd'), cwd),
+    updated_at = CURRENT_TIMESTAMP
+WHERE conversation_id = sqlc.arg('conversation_id') AND is_draft = TRUE
 RETURNING *;
 
 -- name: PromoteDraftConversation :one

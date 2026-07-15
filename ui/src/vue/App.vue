@@ -515,7 +515,7 @@ function setConversationCwd(cwd: string) {
       ? viewedConversation.value
       : null);
   if (conv?.is_draft) {
-    api.updateDraftCwd(conv.conversation_id, cwd).catch((err) => {
+    api.updateDraft(conv.conversation_id, { cwd }).catch((err) => {
       console.debug("Could not persist draft cwd (likely already promoted):", err);
     });
   }

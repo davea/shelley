@@ -138,32 +138,23 @@ class ApiService {
     return response.json();
   }
 
-  // updateDraft replaces the draft text on an existing draft conversation.
-  // Returns 404 once the draft has been promoted (i.e. once the first
-  // message has been sent); callers should treat that as a no-op.
-  async updateDraft(conversationId: string, draft: string): Promise<Conversation> {
+  // updateDraft partially updates a draft conversation in place: the draft
+  // text (composer autosave), the model (composer picker), and/or the cwd
+  // (command palette). Omitted fields keep their current value, so the
+  // three update independently without clobbering each other. Returns 404
+  // once the draft has been promoted (the model then travels with the chat
+  // POST, and cwd is immutable thereafter); callers treat that as a no-op.
+  async updateDraft(
+    conversationId: string,
+    fields: { draft?: string; model?: string; cwd?: string },
+  ): Promise<Conversation> {
     const response = await fetch(`${this.baseUrl}/conversation/${conversationId}/draft`, {
       method: "PUT",
       headers: this.postHeaders,
-      body: JSON.stringify({ draft }),
+      body: JSON.stringify(fields),
     });
     if (!response.ok) {
       throw await responseError(response, "Failed to update draft");
-    }
-    return response.json();
-  }
-
-  // updateDraftCwd retargets the working directory of a draft conversation
-  // in place, preserving the draft text. Returns 404 once the draft has been
-  // promoted (cwd is immutable thereafter); callers treat that as a no-op.
-  async updateDraftCwd(conversationId: string, cwd: string): Promise<Conversation> {
-    const response = await fetch(`${this.baseUrl}/conversation/${conversationId}/draft-cwd`, {
-      method: "PUT",
-      headers: this.postHeaders,
-      body: JSON.stringify({ cwd }),
-    });
-    if (!response.ok) {
-      throw await responseError(response, "Failed to update draft cwd");
     }
     return response.json();
   }

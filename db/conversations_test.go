@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -1017,5 +1018,76 @@ func TestQueuedMessagesMutationStrictOnCorruptColumn(t *testing.T) {
 	// An explicit clear is still allowed (hard reset).
 	if _, err := db.ClearQueuedMessages(ctx, id); err != nil {
 		t.Fatalf("ClearQueuedMessages: %v", err)
+	}
+}
+
+// PromoteDraft applies send-time overrides and clears is_draft in one
+// transaction. Nil overrides keep the draft's persisted values; non-nil
+// ones win; the returned row reflects the final state the loop must pin
+// to. A second promote (or one on a never-draft row) reports
+// ErrConversationNotDraft and applies nothing.
+func TestPromoteDraftAtomicOverrides(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	origModel := "model-orig"
+	origCwd := "/tmp/orig"
+	draft, err := db.CreateDraftConversation(ctx, &origCwd, &origModel, ConversationOptions{}, "body")
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	// Promote with all overrides.
+	newModel := "model-new"
+	newCwd := "/tmp/new"
+	opts := ConversationOptions{ThinkingLevel: "high"}
+	promoted, err := db.PromoteDraft(ctx, draft.ConversationID, &newCwd, &newModel, &opts)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if promoted.IsDraft || promoted.Draft != "" {
+		t.Fatalf("promoted row still draft-ish: is_draft=%v draft=%q", promoted.IsDraft, promoted.Draft)
+	}
+	if promoted.Model == nil || *promoted.Model != newModel {
+		t.Fatalf("promoted model: got %v, want %q", promoted.Model, newModel)
+	}
+	if promoted.Cwd == nil || *promoted.Cwd != newCwd {
+		t.Fatalf("promoted cwd: got %v, want %q", promoted.Cwd, newCwd)
+	}
+	if got := ParseConversationOptions(promoted.ConversationOptions); got.ThinkingLevel != "high" {
+		t.Fatalf("promoted options: got %+v", got)
+	}
+
+	// A second promote loses the race: ErrConversationNotDraft, nothing applied.
+	stale := "model-stale"
+	if _, err := db.PromoteDraft(ctx, draft.ConversationID, nil, &stale, nil); !errors.Is(err, ErrConversationNotDraft) {
+		t.Fatalf("second promote: want ErrConversationNotDraft, got %v", err)
+	}
+	after, err := db.GetConversationByID(ctx, draft.ConversationID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if after.Model == nil || *after.Model != newModel {
+		t.Fatalf("lost-race promote mutated model: got %v", after.Model)
+	}
+
+	// Nil overrides keep the draft's persisted values.
+	draft2, err := db.CreateDraftConversation(ctx, &origCwd, &origModel, ConversationOptions{ThinkingLevel: "low"}, "body2")
+	if err != nil {
+		t.Fatalf("create draft2: %v", err)
+	}
+	promoted2, err := db.PromoteDraft(ctx, draft2.ConversationID, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("promote2: %v", err)
+	}
+	if promoted2.Model == nil || *promoted2.Model != origModel {
+		t.Fatalf("promote2 model: got %v, want %q", promoted2.Model, origModel)
+	}
+	if promoted2.Cwd == nil || *promoted2.Cwd != origCwd {
+		t.Fatalf("promote2 cwd: got %v, want %q", promoted2.Cwd, origCwd)
+	}
+	if got := ParseConversationOptions(promoted2.ConversationOptions); got.ThinkingLevel != "low" {
+		t.Fatalf("promote2 options clobbered: got %+v", got)
 	}
 }

@@ -987,9 +987,6 @@ func (s *Server) conversationMux() *http.ServeMux {
 	mux.HandleFunc("PUT /{id}/draft", func(w http.ResponseWriter, r *http.Request) {
 		s.handleUpdateDraft(w, r, r.PathValue("id"))
 	})
-	mux.HandleFunc("PUT /{id}/draft-cwd", func(w http.ResponseWriter, r *http.Request) {
-		s.handleUpdateDraftCwd(w, r, r.PathValue("id"))
-	})
 	mux.HandleFunc("POST /{id}/new-generation", func(w http.ResponseWriter, r *http.Request) {
 		s.handleStartNewGeneration(w, r, r.PathValue("id"))
 	})
@@ -1152,26 +1149,13 @@ func (s *Server) handleChatConversation(w http.ResponseWriter, r *http.Request, 
 
 	userEmail := r.Header.Get("X-ExeDev-Email")
 
-	// Drafts can have their model/cwd retargeted right up to send. Apply
-	// the overrides under the same validation the new-conversation path
-	// runs, then promote (clearing is_draft and the draft body). For
-	// non-drafts these branches are skipped.
+	// Drafts can have their model/cwd retargeted right up to send. Validate
+	// send-time overrides the same way the new-conversation path does, then
+	// apply them and promote (clearing is_draft and the draft body) in ONE
+	// transaction: a concurrent PUT /draft can no longer slip between an
+	// override and the promote, so the promoted row's model is exactly what
+	// the loop below pins to. For non-drafts this branch is skipped.
 	if existing.IsDraft {
-		if req.Cwd != "" {
-			if err := s.db.UpdateConversationCwd(ctx, conversationID, req.Cwd); err != nil {
-				s.logger.Error("Failed to update draft cwd before promote", "conversationID", conversationID, "error", err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-		}
-		if req.Model != "" {
-			// req.Model was already validated against the LLM manager above.
-			if err := s.db.ForceUpdateConversationModel(ctx, conversationID, req.Model); err != nil {
-				s.logger.Error("Failed to update draft model before promote", "conversationID", conversationID, "error", err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-		}
 		// Apply send-time conversation_options. The web UI autosaves a draft
 		// (via POST /draft) as soon as the composer has text, and that draft is
 		// born WITHOUT options. The user's actual selection (thinking level,
@@ -1187,16 +1171,41 @@ func (s *Server) handleChatConversation(w http.ResponseWriter, r *http.Request, 
 				http.Error(w, msg, http.StatusBadRequest)
 				return
 			}
-			if err := s.db.UpdateConversationOptions(ctx, conversationID, *req.ConversationOptions); err != nil {
-				s.logger.Error("Failed to update draft options before promote", "conversationID", conversationID, "error", err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
 		}
-		if err := s.db.PromoteDraft(ctx, conversationID); err != nil {
+		var cwdOverride, modelOverride *string
+		if req.Cwd != "" {
+			cwdOverride = &req.Cwd
+		}
+		if req.Model != "" {
+			// req.Model was already validated against the LLM manager above.
+			modelOverride = &req.Model
+		}
+		promoted, err := s.db.PromoteDraft(ctx, conversationID, cwdOverride, modelOverride, req.ConversationOptions)
+		switch {
+		case errors.Is(err, db.ErrConversationNotDraft):
+			// A concurrent send won the promote race; its overrides stand and
+			// this request continues as an ordinary second message. If the
+			// winner already built the loop and our resolved model disagrees,
+			// AcceptUserMessage rejects it below with a model mismatch. (If
+			// the loop isn't built yet, whichever send reaches ensureLoop
+			// first pins it — two same-instant sends on different models is a
+			// race the user has already lost either way.)
+		case err != nil:
 			s.logger.Error("Failed to promote draft", "conversationID", conversationID, "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
+		case req.Model == "" && promoted.Model != nil && *promoted.Model != "" && *promoted.Model != modelID:
+			// An omitted-model send resolves to the draft's persisted model,
+			// but a PUT /draft may have retargeted it after our read above.
+			// The promoted row is authoritative — re-resolve so the loop pins
+			// to the model the user actually picked.
+			modelID = *promoted.Model
+			llmService, err = s.llmManager.GetService(modelID)
+			if err != nil {
+				s.logger.Error("Unsupported model on promoted draft", "model", modelID, "error", err)
+				http.Error(w, fmt.Sprintf("Unsupported model: %s", modelID), http.StatusBadRequest)
+				return
+			}
 		}
 	}
 
@@ -3642,13 +3651,24 @@ func (s *Server) handleCreateDraft(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateDraftRequest is the body for PUT /api/conversation/<id>/draft.
+// All fields are optional; absent (or null) fields keep their current
+// value, so text autosaves, model-picker changes, and cwd changes update
+// independently without clobbering each other. This mirrors
+// CreateDraftRequest the same way PUT-after-POST usually does.
 type UpdateDraftRequest struct {
-	Draft string `json:"draft"`
+	Draft *string `json:"draft,omitempty"`
+	Model *string `json:"model,omitempty"`
+	Cwd   *string `json:"cwd,omitempty"`
 }
 
-// handleUpdateDraft replaces the draft text on a draft conversation.
-// 404 when the conversation is not a draft (either it never was, or it
-// was already promoted by a chat post).
+// handleUpdateDraft partially updates a draft conversation: the draft text
+// (composer autosave), the model (composer picker — so a promote that
+// omits `model`, like the iOS push "Reply" handler, and other devices
+// reopening the draft see the pick), and/or the cwd (command palette
+// "set working directory") — without losing the fields it doesn't name.
+// 404 when the conversation is not a draft (either it never was, or it was
+// already promoted by a chat post): once promoted, cwd is immutable and
+// the model only changes through the /model loop switch.
 func (s *Server) handleUpdateDraft(w http.ResponseWriter, r *http.Request, conversationID string) {
 	ctx := r.Context()
 	var req UpdateDraftRequest
@@ -3656,48 +3676,29 @@ func (s *Server) handleUpdateDraft(w http.ResponseWriter, r *http.Request, conve
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-	conv, err := s.db.UpdateDraft(ctx, conversationID, req.Draft)
+	// Empty string is meaningful for draft (clear the text) but nonsense
+	// for model/cwd — those want "absent means keep".
+	if req.Model != nil {
+		if *req.Model == "" {
+			http.Error(w, "model must not be empty", http.StatusBadRequest)
+			return
+		}
+		if _, err := s.llmManager.GetService(*req.Model); err != nil {
+			http.Error(w, fmt.Sprintf("Unsupported model: %s", *req.Model), http.StatusBadRequest)
+			return
+		}
+	}
+	if req.Cwd != nil && *req.Cwd == "" {
+		http.Error(w, "cwd must not be empty", http.StatusBadRequest)
+		return
+	}
+	conv, err := s.db.UpdateDraft(ctx, conversationID, req.Draft, req.Model, req.Cwd)
 	if errors.Is(err, db.ErrConversationNotDraft) {
 		http.Error(w, "Not a draft conversation", http.StatusNotFound)
 		return
 	}
 	if err != nil {
 		s.logger.Error("Failed to update draft", "conversationID", conversationID, "error", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(conv)
-}
-
-// UpdateDraftCwdRequest is the body for PUT /api/conversation/<id>/draft-cwd.
-type UpdateDraftCwdRequest struct {
-	Cwd string `json:"cwd"`
-}
-
-// handleUpdateDraftCwd retargets the working directory of a draft conversation
-// in place, without losing the draft text. Used by the command palette
-// "set working directory" actions so changing the dir doesn't discard the
-// message the user is composing. 404 when the conversation is not a draft
-// (its cwd is immutable once promoted).
-func (s *Server) handleUpdateDraftCwd(w http.ResponseWriter, r *http.Request, conversationID string) {
-	ctx := r.Context()
-	var req UpdateDraftCwdRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-	if req.Cwd == "" {
-		http.Error(w, "cwd is required", http.StatusBadRequest)
-		return
-	}
-	conv, err := s.db.UpdateDraftCwd(ctx, conversationID, req.Cwd)
-	if errors.Is(err, db.ErrConversationNotDraft) {
-		http.Error(w, "Not a draft conversation", http.StatusNotFound)
-		return
-	}
-	if err != nil {
-		s.logger.Error("Failed to update draft cwd", "conversationID", conversationID, "error", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}

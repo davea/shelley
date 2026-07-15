@@ -555,9 +555,68 @@ const selectedModel = ref<string>(
     return firstReady?.id || "claude-sonnet-4.6";
   })(),
 );
-function setSelectedModel(model: string) {
+// applyModel updates the picker's local state only (ref + localStorage).
+// Used both by user picks and by server echoes; never talks to the server.
+function applyModel(model: string) {
   selectedModel.value = model;
   localStorage.setItem("shelley_selected_model", model);
+}
+// In-flight picker PUT tracking. While a PUT for a draft is outstanding,
+// the conversation-model watch ignores echoes FOR THAT DRAFT: they are
+// either our own PUT reflecting back or a stale row racing a newer pick,
+// and applying them would visibly revert the picker the user just moved.
+// Echoes for other conversations (a genuine switch) still apply. Once the
+// last PUT settles, echoes flow again and converge on the server's value.
+let modelPutsInFlight = 0;
+let modelPutDraftId: string | null = null;
+// putDraftModel best-effort syncs a picked model onto the server-side
+// draft row. A 404 means the draft was promoted concurrently (the model
+// then travels with the promoting chat POST); other failures fall back to
+// the same promote-time sync.
+function putDraftModel(draftId: string, model: string) {
+  modelPutsInFlight++;
+  modelPutDraftId = draftId;
+  api
+    .updateDraft(draftId, { model })
+    .then((conv) => {
+      // The PUT bumped the row's updated_at — the arbiter the draft-text
+      // cache reconciles against. Re-base like saveDraft does, or a
+      // reload inside the autosave debounce would judge the locally
+      // cached keystrokes stale and resurrect the server's older text.
+      // Only advance: this response may land after a later text
+      // autosave's, and regressing the stamp would re-open the window.
+      if (draftConvId === draftId && conv.updated_at > draftSyncedAt) {
+        draftSyncedAt = conv.updated_at;
+      }
+      const cur = loadCachedDraft(draftId);
+      if (cur && conv.updated_at > cur.basedOn) {
+        saveCachedDraft(draftId, cur.value, conv.updated_at);
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      modelPutsInFlight--;
+      if (modelPutsInFlight === 0) modelPutDraftId = null;
+    });
+}
+// setSelectedModel is the USER-pick path (composer picker). Server-driven
+// updates (conversation switch, /model echo) go through applyModel instead
+// — that split, not a value-equality guard, is what keeps echoes from
+// looping back into PUTs: an equality check against the (stale until the
+// echo lands) conversation row would drop a legitimate re-pick of the
+// original model made while a previous pick's PUT was still in flight.
+function setSelectedModel(model: string) {
+  applyModel(model);
+  // Keep the server-side draft row in sync with the picker. Without this,
+  // the draft keeps the model it was created with until the promoting chat
+  // POST overrides it — so a client that promotes without an explicit
+  // `model` (push reply, crashed client's retry) or another device
+  // reopening the draft sees the stale model.
+  const draftId =
+    props.currentConversation?.is_draft && props.conversationId
+      ? props.conversationId
+      : lazyDraftId.value;
+  if (draftId) putDraftModel(draftId, model);
 }
 
 const selectedCwd = ref<string>("");
@@ -1228,8 +1287,7 @@ function buildConversationOptions(): ChatRequest["conversation_options"] | undef
     realOverrides[k] = v;
   }
   const hasOverrides = Object.keys(realOverrides).length > 0;
-  const explicitThinking =
-    thinkingLevel.value === "default" ? undefined : thinkingLevel.value;
+  const explicitThinking = thinkingLevel.value === "default" ? undefined : thinkingLevel.value;
   const hasThinking = explicitThinking !== undefined;
   if (!orchestratorOn && !hasOverrides && !hasThinking) return undefined;
   return {
@@ -1547,13 +1605,20 @@ async function saveDraft(value: string) {
   const id = draftConvId;
   if (id) {
     if (props.currentConversation?.is_draft) {
-      const conv = await api.updateDraft(id, value);
+      const conv = await api.updateDraft(id, { draft: value });
       // The server advanced updated_at to acknowledge this text. Re-base the
       // live cache entry onto it so keystrokes typed while this PUT was
       // outstanding (stamped with the older time) stay ahead of the server.
-      draftSyncedAt = conv.updated_at;
+      // Only advance — a concurrent model PUT (putDraftModel) may have
+      // already re-based onto a newer stamp, and regressing would re-open
+      // the stale-cache window.
+      if (draftConvId === id && conv.updated_at > draftSyncedAt) {
+        draftSyncedAt = conv.updated_at;
+      }
       const cur = loadCachedDraft(id);
-      if (cur) saveCachedDraft(id, cur.value, conv.updated_at);
+      if (cur && conv.updated_at > cur.basedOn) {
+        saveCachedDraft(id, cur.value, conv.updated_at);
+      }
     }
     return;
   }
@@ -1571,6 +1636,12 @@ async function saveDraft(value: string) {
     .then((conv) => {
       draftConvId = conv.conversation_id;
       draftSyncedAt = conv.updated_at;
+      // A model picked while this createDraft was in flight had no draft id
+      // to PUT onto and would otherwise be dropped (and the row echo would
+      // revert the picker). Reconcile: the picker is authoritative.
+      if (conv.model && conv.model !== selectedModel.value) {
+        putDraftModel(conv.conversation_id, selectedModel.value);
+      }
       // Migrate the `null` new-view cache to the real id so a reload of
       // /c/<id> finds the keystrokes (same session; see lazyDraftId). Re-base
       // onto the new row's updated_at so the migrated text stays ahead.
@@ -1751,10 +1822,17 @@ const statusContentProps = computed(() => ({
 // one AND when its model changes underneath us (e.g. a mid-conversation /model
 // switch, which the server broadcasts on the conversation stream). Without the
 // latter, the status/details would keep showing the old model after /model.
+// Server-driven: applyModel, not setSelectedModel — echoing a row back into a
+// PUT would loop, and while our own picker PUTs are in flight the row is
+// stale, so applying it would revert the pick (see modelPutsInFlight).
 watch(
   () => [props.currentConversation?.conversation_id, props.currentConversation?.model] as const,
   () => {
-    if (props.currentConversation?.model) setSelectedModel(props.currentConversation.model);
+    if (!props.currentConversation?.model) return;
+    if (modelPutsInFlight > 0 && props.currentConversation.conversation_id === modelPutDraftId) {
+      return;
+    }
+    applyModel(props.currentConversation.model);
   },
 );
 
