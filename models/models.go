@@ -261,12 +261,6 @@ func All() []Model {
 			Build: oaiChatSvc(oai.GLM52Fireworks, "fireworks"),
 		},
 		{
-			ID: "glm-5.1-fireworks", Provider: ProviderFireworks,
-			Description: "GLM-5.1 on Fireworks", APIModelName: oai.GLM51Fireworks.ModelName,
-			APIType: APITypeOpenAIChat, DefaultBaseURL: DefaultFireworksBaseURL,
-			Build: oaiChatSvc(oai.GLM51Fireworks, "fireworks"),
-		},
-		{
 			ID: "gemini-3-pro", Provider: ProviderGemini,
 			Description: "Gemini 3 Pro", APIModelName: "gemini-3-pro-preview",
 			APIType: APITypeGemini, DefaultBaseURL: DefaultGeminiBaseURL,

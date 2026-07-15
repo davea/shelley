@@ -108,13 +108,13 @@ func TestLLMIntegrationSourceLabelsAndFiltering(t *testing.T) {
 			{ID: "openai/gpt-5.6-terra", Provider: "openai", NativeID: "gpt-5.6-terra", APIs: []string{"openai_chat", "openai_responses"}},
 			{ID: "openai/gpt-5.6-luna", Provider: "openai", NativeID: "gpt-5.6-luna", APIs: []string{"openai_chat", "openai_responses"}},
 			{ID: "openai/gpt-5.5", Provider: "openai", NativeID: "gpt-5.5", APIs: []string{"openai_responses"}},
-			{ID: "fireworks/glm-5p1", Provider: "fireworks", NativeID: "accounts/fireworks/models/glm-5p1", APIs: []string{"openai_chat"}},
+			{ID: "fireworks/glm-5p2", Provider: "fireworks", NativeID: "accounts/fireworks/models/glm-5p2", APIs: []string{"openai_chat"}},
 			{ID: "fireworks/gpt-oss-20b", Provider: "fireworks", NativeID: "accounts/fireworks/models/gpt-oss-20b", APIs: []string{"openai_chat"}},
 		},
 	}
 	bs := Build(models.All(), []Source{LLMIntegration(integ, ""), Predictable()}, &http.Client{}, nil)
 	wantLabel := "llm.int.exe.xyz"
-	for _, id := range []string{"claude-opus-4.7", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "glm-5.1-fireworks", "gpt-oss-20b-fireworks"} {
+	for _, id := range []string{"claude-opus-4.7", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "glm-5.2-fireworks", "gpt-oss-20b-fireworks"} {
 		b := findBuilt(bs, id)
 		if b == nil {
 			t.Errorf("%q should be built", id)
