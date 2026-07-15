@@ -3610,7 +3610,7 @@ func (s *Server) applyForkPointModelState(ctx context.Context, sourceID, forkID 
 		}
 		opts := db.ParseConversationOptions(fork.ConversationOptions)
 		opts.ThinkingLevel = reasoningAtFork
-		if err := s.db.UpdateConversationOptions(ctx, forkID, opts); err != nil {
+		if _, err := s.db.UpdateConversationOptions(ctx, forkID, opts); err != nil {
 			return fmt.Errorf("set fork reasoning: %w", err)
 		}
 	}
