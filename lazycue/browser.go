@@ -12,6 +12,14 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+// defaultStepTimeout is the polling ceiling for steps that don't set an
+// explicit timeout. All wait_*/assert_* steps (and eval-with-expect) poll up to
+// this long for their condition to hold before failing, so UI that is merely
+// slow to settle under heavy CI load doesn't spuriously fail a step (which
+// would trigger a costly LLM heal). The happy path returns as soon as the
+// condition holds, so a generous ceiling costs nothing when things are fast.
+const defaultStepTimeout = 15 * time.Second
+
 // Browser wraps a headless Chrome instance via chromedp.
 type Browser struct {
 	allocCancel context.CancelFunc
@@ -180,7 +188,7 @@ func (b *Browser) executeStep(ctx context.Context, baseURL string, step Step) (s
 		// merely SLOW to settle under CI load doesn't spuriously fail the step
 		// (which would trigger a costly LLM heal). The assertion is unchanged:
 		// the expected value must still become true within the window.
-		timeout := parseTimeout(step.Timeout, 10*time.Second)
+		timeout := parseTimeout(step.Timeout, defaultStepTimeout)
 		deadline := time.Now().Add(timeout)
 		var got string
 		for {
@@ -209,7 +217,7 @@ func (b *Browser) executeStep(ctx context.Context, baseURL string, step Step) (s
 }
 
 func (b *Browser) executeStepErr(ctx context.Context, baseURL string, step Step) error {
-	timeout := parseTimeout(step.Timeout, 10*time.Second)
+	timeout := parseTimeout(step.Timeout, defaultStepTimeout)
 
 	switch step.Action {
 	case ActionNavigate:
@@ -264,69 +272,79 @@ func (b *Browser) executeStepErr(ctx context.Context, baseURL string, step Step)
 		return err
 
 	case ActionAssertVisible:
-		var visible bool
-		if err := chromedp.Run(b.ctx, chromedp.Evaluate(fmt.Sprintf(
-			`(function() {
+		return b.pollCheck(ctx, timeout, func() error {
+			var visible bool
+			if err := chromedp.Run(b.ctx, chromedp.Evaluate(fmt.Sprintf(
+				`(function() {
 				const el = document.querySelector(%q);
 				if (!el) return false;
 				const style = window.getComputedStyle(el);
 				return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
 			})()`, step.Selector,
-		), &visible)); err != nil {
-			return err
-		}
-		if !visible {
-			return fmt.Errorf("assert_visible: element %q not visible", step.Selector)
-		}
-		return nil
+			), &visible)); err != nil {
+				return err
+			}
+			if !visible {
+				return fmt.Errorf("assert_visible: element %q not visible", step.Selector)
+			}
+			return nil
+		})
 
 	case ActionAssertNotVisible:
-		var visible bool
-		if err := chromedp.Run(b.ctx, chromedp.Evaluate(fmt.Sprintf(
-			`(function() {
+		return b.pollCheck(ctx, timeout, func() error {
+			var visible bool
+			if err := chromedp.Run(b.ctx, chromedp.Evaluate(fmt.Sprintf(
+				`(function() {
 				const el = document.querySelector(%q);
 				if (!el) return false;
 				const style = window.getComputedStyle(el);
 				return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
 			})()`, step.Selector,
-		), &visible)); err != nil {
-			return err
-		}
-		if visible {
-			return fmt.Errorf("assert_not_visible: element %q is visible", step.Selector)
-		}
-		return nil
+			), &visible)); err != nil {
+				return err
+			}
+			if visible {
+				return fmt.Errorf("assert_not_visible: element %q is visible", step.Selector)
+			}
+			return nil
+		})
 
 	case ActionAssertText:
-		var got string
-		if err := chromedp.Run(b.ctx, chromedp.TextContent(step.Selector, &got, chromedp.ByQuery)); err != nil {
-			return fmt.Errorf("assert_text: %w", err)
-		}
-		got = strings.TrimSpace(got)
-		if got != step.Text {
-			return fmt.Errorf("assert_text: expected %q, got %q", step.Text, got)
-		}
-		return nil
+		return b.pollCheck(ctx, timeout, func() error {
+			var got string
+			if err := chromedp.Run(b.ctx, chromedp.TextContent(step.Selector, &got, chromedp.ByQuery)); err != nil {
+				return fmt.Errorf("assert_text: %w", err)
+			}
+			got = strings.TrimSpace(got)
+			if got != step.Text {
+				return fmt.Errorf("assert_text: expected %q, got %q", step.Text, got)
+			}
+			return nil
+		})
 
 	case ActionAssertTextContains:
-		var got string
-		if err := chromedp.Run(b.ctx, chromedp.TextContent(step.Selector, &got, chromedp.ByQuery)); err != nil {
-			return fmt.Errorf("assert_text_contains: %w", err)
-		}
-		if !strings.Contains(got, step.Text) {
-			return fmt.Errorf("assert_text_contains: %q not found in %q", step.Text, got)
-		}
-		return nil
+		return b.pollCheck(ctx, timeout, func() error {
+			var got string
+			if err := chromedp.Run(b.ctx, chromedp.TextContent(step.Selector, &got, chromedp.ByQuery)); err != nil {
+				return fmt.Errorf("assert_text_contains: %w", err)
+			}
+			if !strings.Contains(got, step.Text) {
+				return fmt.Errorf("assert_text_contains: %q not found in %q", step.Text, got)
+			}
+			return nil
+		})
 
 	case ActionAssertAttribute:
-		var got string
-		if err := chromedp.Run(b.ctx, chromedp.AttributeValue(step.Selector, step.Attribute, &got, nil, chromedp.ByQuery)); err != nil {
-			return fmt.Errorf("assert_attribute: %w", err)
-		}
-		if got != step.Value {
-			return fmt.Errorf("assert_attribute %q: expected %q, got %q", step.Attribute, step.Value, got)
-		}
-		return nil
+		return b.pollCheck(ctx, timeout, func() error {
+			var got string
+			if err := chromedp.Run(b.ctx, chromedp.AttributeValue(step.Selector, step.Attribute, &got, nil, chromedp.ByQuery)); err != nil {
+				return fmt.Errorf("assert_attribute: %w", err)
+			}
+			if got != step.Value {
+				return fmt.Errorf("assert_attribute %q: expected %q, got %q", step.Attribute, step.Value, got)
+			}
+			return nil
+		})
 
 	case ActionWaitURL:
 		// Poll the current location until it matches. Useful for SPA route
@@ -343,39 +361,45 @@ func (b *Browser) executeStepErr(ctx context.Context, baseURL string, step Step)
 		))
 
 	case ActionAssertURL:
-		var got string
-		if err := chromedp.Run(b.ctx, chromedp.Location(&got)); err != nil {
-			return err
-		}
-		if step.Value != "" && got != step.Value {
-			return fmt.Errorf("assert_url: expected %q, got %q", step.Value, got)
-		}
-		if step.Text != "" && !strings.Contains(got, step.Text) {
-			return fmt.Errorf("assert_url: %q not found in %q", step.Text, got)
-		}
-		return nil
+		return b.pollCheck(ctx, timeout, func() error {
+			var got string
+			if err := chromedp.Run(b.ctx, chromedp.Location(&got)); err != nil {
+				return err
+			}
+			if step.Value != "" && got != step.Value {
+				return fmt.Errorf("assert_url: expected %q, got %q", step.Value, got)
+			}
+			if step.Text != "" && !strings.Contains(got, step.Text) {
+				return fmt.Errorf("assert_url: %q not found in %q", step.Text, got)
+			}
+			return nil
+		})
 
 	case ActionAssertTitle:
-		var got string
-		if err := chromedp.Run(b.ctx, chromedp.Title(&got)); err != nil {
-			return err
-		}
-		if got != step.Text {
-			return fmt.Errorf("assert_title: expected %q, got %q", step.Text, got)
-		}
-		return nil
+		return b.pollCheck(ctx, timeout, func() error {
+			var got string
+			if err := chromedp.Run(b.ctx, chromedp.Title(&got)); err != nil {
+				return err
+			}
+			if got != step.Text {
+				return fmt.Errorf("assert_title: expected %q, got %q", step.Text, got)
+			}
+			return nil
+		})
 
 	case ActionAssertCount:
-		var count int
-		if err := chromedp.Run(b.ctx, chromedp.Evaluate(fmt.Sprintf(
-			`document.querySelectorAll(%q).length`, step.Selector,
-		), &count)); err != nil {
-			return fmt.Errorf("assert_count: %w", err)
-		}
-		if count != step.Count {
-			return fmt.Errorf("assert_count: expected %d elements matching %q, got %d", step.Count, step.Selector, count)
-		}
-		return nil
+		return b.pollCheck(ctx, timeout, func() error {
+			var count int
+			if err := chromedp.Run(b.ctx, chromedp.Evaluate(fmt.Sprintf(
+				`document.querySelectorAll(%q).length`, step.Selector,
+			), &count)); err != nil {
+				return fmt.Errorf("assert_count: %w", err)
+			}
+			if count != step.Count {
+				return fmt.Errorf("assert_count: expected %d elements matching %q, got %d", step.Count, step.Selector, count)
+			}
+			return nil
+		})
 
 	case ActionSleep:
 		d := parseTimeout(step.Timeout, 1*time.Second)
@@ -404,6 +428,33 @@ func (b *Browser) fill(ctx context.Context, selector, value string) error {
 
 	var result bool
 	return chromedp.Run(b.ctx, chromedp.Evaluate(js, &result))
+}
+
+// pollCheck repeatedly runs check until it returns nil or the timeout expires,
+// returning check's last error on timeout. It is the Go-assertion analogue of
+// pollJS: point-in-time assert_* steps use it so UI state that is merely SLOW
+// to settle under CI load doesn't spuriously fail (which would trigger a costly
+// LLM heal) — the same rationale as the polling eval-with-expect path. The
+// assertion is unchanged: it must still hold within the window, and a check
+// that never passes (a genuine mismatch, e.g. a forever-spinner regression)
+// still fails after the timeout. Polling only tolerates late settling; it never
+// turns a currently-passing assert into a failure.
+func (b *Browser) pollCheck(ctx context.Context, timeout time.Duration, check func() error) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := check()
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 
 // pollJS polls a JS expression until it returns true or the timeout expires.
