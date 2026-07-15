@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"testing"
 	"time"
 )
 
@@ -22,6 +23,18 @@ type reflectionIntegration struct {
 // queries the default "reflection" integration. Returns false if the
 // integration is disabled/detached or on any network error.
 func exeDevHasNotifyIntegration() bool {
+	// Never probe the reflection API over the real network from a test binary
+	// unless a test has explicitly injected its own client. Many server and
+	// integration tests run with predictableOnly=false and mock LLMs; without
+	// this guard every simulated end-of-turn would fire a REAL push to the VM
+	// owner's devices whenever the host VM happens to have the "notify"
+	// integration attached. Tests that exercise the reflection logic itself
+	// override exeReflectionHTTPClient with a fake transport (see
+	// exe_notify_test.go); those are unaffected because the client is no longer
+	// the default.
+	if testing.Testing() && exeReflectionHTTPClient == http.DefaultClient {
+		return false
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://reflection.int.exe.xyz/integrations", nil)

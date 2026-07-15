@@ -99,6 +99,22 @@ func hookURLs(hooks []db.ConversationHook) []string {
 	return urls
 }
 
+// TestReflectionProbeSkippedWithoutInjectedClient guards the fix that stops
+// test binaries from firing REAL exe.dev push notifications to the VM owner's
+// devices. Many tests (in this package and the integration test/ package) run
+// with predictableOnly=false and mock LLMs; the reflection probe must NOT hit
+// the real network unless a test has explicitly injected a fake client. With
+// the default client under a test binary the probe short-circuits to false.
+func TestReflectionProbeSkippedWithoutInjectedClient(t *testing.T) {
+	old := exeReflectionHTTPClient
+	t.Cleanup(func() { exeReflectionHTTPClient = old })
+	exeReflectionHTTPClient = http.DefaultClient
+	if exeDevHasNotifyIntegration() {
+		t.Fatal("reflection probe must be disabled (no real network) when the" +
+			" default client is used inside a test binary")
+	}
+}
+
 func TestWithExeNotifyHook(t *testing.T) {
 	gw := exeNotifyGatewayURL
 	cases := []struct {
