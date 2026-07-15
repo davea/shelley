@@ -1190,7 +1190,7 @@ func (s *Server) handleChatConversation(w http.ResponseWriter, r *http.Request, 
 				http.Error(w, msg, http.StatusBadRequest)
 				return
 			}
-			if err := s.db.UpdateConversationOptions(ctx, conversationID, *req.ConversationOptions); err != nil {
+			if _, err := s.db.UpdateConversationOptions(ctx, conversationID, *req.ConversationOptions); err != nil {
 				s.logger.Error("Failed to update draft options before promote", "conversationID", conversationID, "error", err)
 				http.Error(w, "Internal server error", http.StatusInternalServerError)
 				return
@@ -3466,7 +3466,7 @@ func (s *Server) applyForkPointModelState(ctx context.Context, sourceID, forkID 
 		}
 		opts := db.ParseConversationOptions(fork.ConversationOptions)
 		opts.ThinkingLevel = reasoningAtFork
-		if err := s.db.UpdateConversationOptions(ctx, forkID, opts); err != nil {
+		if _, err := s.db.UpdateConversationOptions(ctx, forkID, opts); err != nil {
 			return fmt.Errorf("set fork reasoning: %w", err)
 		}
 	}

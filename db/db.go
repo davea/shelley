@@ -349,10 +349,11 @@ func (db *DB) SetConversationThinkingLevel(ctx context.Context, conversationID, 
 		if err != nil {
 			return fmt.Errorf("failed to marshal conversation options: %w", err)
 		}
-		return q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
+		_, err = q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
 			ConversationID:      conversationID,
 			ConversationOptions: string(optsJSON),
 		})
+		return err
 	})
 	return opts, err
 }

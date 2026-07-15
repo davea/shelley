@@ -2020,7 +2020,7 @@ func (cm *ConversationManager) ApplyModelSettings(ctx context.Context, ch ModelS
 		opts.ThinkingLevel = ch.NewReasoning
 		cm.conversationOptions = opts
 		cm.mu.Unlock()
-		if err := cm.db.UpdateConversationOptions(ctx, cm.conversationID, opts); err != nil {
+		if _, err := cm.db.UpdateConversationOptions(ctx, cm.conversationID, opts); err != nil {
 			return fmt.Errorf("failed to persist reasoning level: %w", err)
 		}
 	}
