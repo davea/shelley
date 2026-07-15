@@ -53,6 +53,11 @@ type APIMessage struct {
 	LLMAPIURL           *string `json:"llm_api_url,omitempty"`
 	ModelName           *string `json:"model_name,omitempty"`
 	ForkedFromMessageID *string `json:"forked_from_message_id,omitempty"`
+	// UserEmail is the exe.dev account that authored a user message (from the
+	// X-ExeDev-Email header the HTTPS proxy stamps). Only user messages carry
+	// it; nil otherwise (agent/tool/system rows, or direct/unauthenticated
+	// access without the header).
+	UserEmail *string `json:"user_email,omitempty"`
 }
 
 // ConversationState represents the current state of a conversation.
@@ -175,6 +180,7 @@ func toAPIMessages(messages []generated.Message) []APIMessage {
 			LLMAPIURL:           msg.LlmApiUrl,
 			ModelName:           msg.ModelName,
 			ForkedFromMessageID: msg.ForkedFromMessageID,
+			UserEmail:           msg.UserEmail,
 		}
 		apiMessages[i] = apiMsg
 	}
@@ -1102,13 +1108,18 @@ func (s *Server) recordMessage(ctx context.Context, conversationID string, messa
 // ctx cancel, error), neither the row nor the array change persists, so Hydrate
 // can't re-feed an already-delivered message as a duplicate. Mirrors
 // recordMessage's manager-sync + notify tail.
-func (s *Server) recordDrainedQueuedMessage(ctx context.Context, conversationID, queuedID string, message llm.Message) error {
+//
+// userEmail is the exe.dev author captured at queue time (drain runs on a
+// background context, so it can't be read from the request here); it is
+// stamped onto the new row. Empty when the queuing request carried no header.
+func (s *Server) recordDrainedQueuedMessage(ctx context.Context, conversationID, queuedID string, message llm.Message, userEmail string) error {
 	params, err := s.buildCreateMessageParams(conversationID, message, llm.Usage{})
 	if err != nil {
 		return err
 	}
 	params.BumpTimestamp = true
 	params.RemoveQueuedID = queuedID
+	params.UserEmail = userEmail
 	createdMsg, err := s.db.CreateMessage(ctx, params)
 	if err != nil {
 		return fmt.Errorf("failed to create drained queued message: %w", err)
@@ -1125,6 +1136,26 @@ func (s *Server) recordDrainedQueuedMessage(ctx context.Context, conversationID,
 	return nil
 }
 
+// userEmailContextKey carries the authenticated exe.dev account (from the
+// X-ExeDev-Email header the HTTPS proxy stamps) from an HTTP handler down to
+// the message recorder, so a user turn's row can be attributed to its author.
+// Only the immediate-send path uses this; queued messages persist the email in
+// their QueuedMessage entry instead (drain runs on a background context).
+type userEmailContextKey struct{}
+
+// contextWithUserEmail returns a child context carrying userEmail. An empty
+// string is threaded unchanged so a missing header stores NULL.
+func contextWithUserEmail(ctx context.Context, userEmail string) context.Context {
+	return context.WithValue(ctx, userEmailContextKey{}, userEmail)
+}
+
+// userEmailFromContext returns the exe.dev email stamped by contextWithUserEmail,
+// or "" if none was set.
+func userEmailFromContext(ctx context.Context) string {
+	email, _ := ctx.Value(userEmailContextKey{}).(string)
+	return email
+}
+
 // recordTurnStartMessage records the user message that starts an agent turn,
 // folding the agent_working=true flip and the updated_at bump into the same Tx
 // as the message INSERT. This replaces a separate SetAgentWorking(true) commit
@@ -1139,6 +1170,12 @@ func (s *Server) recordTurnStartMessage(ctx context.Context, conversationID stri
 	}
 	params.MarkAgentStart = true
 	params.BumpTimestamp = true
+	// Attribute the turn-start user row to its author. recordTurnStartMessage
+	// is only ever called with a genuine user message (AcceptUserMessage's
+	// turn-start recorder), so unlike buildCreateMessageParams — which also
+	// serves tool_result rows that carry MessageRoleUser — it's safe to stamp
+	// the email here unconditionally.
+	params.UserEmail = userEmailFromContext(ctx)
 	createdMsg, err := s.db.CreateMessage(ctx, params)
 	if err != nil {
 		return fmt.Errorf("failed to create turn-start message: %w", err)

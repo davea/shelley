@@ -49,6 +49,7 @@ type Message struct {
 	LlmApiUrl           *string   `json:"llm_api_url"`
 	ModelName           *string   `json:"model_name"`
 	ForkedFromMessageID *string   `json:"forked_from_message_id"`
+	UserEmail           *string   `json:"user_email"`
 }
 
 type Model struct {

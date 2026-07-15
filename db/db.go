@@ -504,6 +504,12 @@ type QueuedMessage struct {
 	// Model is the model id chosen at queue time, used to start/continue the
 	// loop when the queue drains.
 	Model string `json:"model"`
+	// UserEmail is the exe.dev account (from the X-ExeDev-Email header) that
+	// authored the queued message, captured at queue time. It is persisted
+	// here (rather than read at drain) because drain runs on a background
+	// context with no request/header available. Stamped onto the messages row
+	// when the message drains. Empty when the request carried no header.
+	UserEmail string `json:"user_email,omitempty"`
 }
 
 // ParseQueuedMessagesStrict parses the queued_messages JSON array, returning an
@@ -1090,8 +1096,13 @@ type CreateMessageParams struct {
 	// provider-reported model name out of UsageData into first-class
 	// columns so they can be queried directly. Empty strings are stored as
 	// NULL (only assistant/agent messages with usage carry them).
-	LLMAPIURL           string
-	ModelName           string
+	LLMAPIURL string
+	ModelName string
+	// UserEmail is the exe.dev account (from the X-ExeDev-Email header the
+	// HTTPS proxy stamps) that authored a user message. Empty strings are
+	// stored as NULL: only user messages carry it, and requests without the
+	// header (direct/local access) leave it unset.
+	UserEmail           string
 	DisplayData         interface{} // Will be JSON marshalled, tool-specific display content
 	ExcludedFromContext bool        // If true, message is stored but not sent to LLM
 	// MarkAgentDone, when true, also writes conversations.agent_working=false
@@ -1201,6 +1212,7 @@ func insertMessageTx(ctx context.Context, q *generated.Queries, params CreateMes
 		ExcludedFromContext: params.ExcludedFromContext,
 		LlmApiUrl:           nullableString(params.LLMAPIURL),
 		ModelName:           nullableString(params.ModelName),
+		UserEmail:           nullableString(params.UserEmail),
 	})
 	if err != nil {
 		return generated.Message{}, err

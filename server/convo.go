@@ -57,6 +57,12 @@ type pendingBatch struct {
 	// messages-row ids — no row exists yet). Used to remove the entry from
 	// the array on drain or cancel. Indexed parallel to Messages.
 	MessageIDs []string
+	// UserEmail is the exe.dev author of a queued user message (Kind=
+	// pendingBatchUser), captured at queue time. Stamped onto the messages
+	// row when the batch drains (drain runs on a background context, so the
+	// value can't be read from the request there). Empty for other kinds and
+	// for requests without the X-ExeDev-Email header.
+	UserEmail string
 	// SubagentConversationID is set only for Kind=pendingBatchSubagentDone.
 	// It identifies the child subagent whose completion this batch notifies
 	// the parent about. Used to coalesce stale notifications: if a subagent
@@ -620,9 +626,10 @@ func (cm *ConversationManager) Hydrate(ctx context.Context) error {
 	// We turn these into in-memory user batches below so messages queued
 	// before a server restart survive and still drain.
 	type restoredQueued struct {
-		id  string
-		msg llm.Message
-		mdl string
+		id    string
+		msg   llm.Message
+		mdl   string
+		email string
 	}
 	var restored []restoredQueued
 	for _, qm := range db.ParseQueuedMessages(conversation.QueuedMessages) {
@@ -631,7 +638,7 @@ func (cm *ConversationManager) Hydrate(ctx context.Context) error {
 			cm.logger.Error("Failed to parse persisted queued message; dropping", "queued_id", qm.ID, "error", err)
 			continue
 		}
-		restored = append(restored, restoredQueued{id: qm.ID, msg: msg, mdl: qm.Model})
+		restored = append(restored, restoredQueued{id: qm.ID, msg: msg, mdl: qm.Model, email: qm.UserEmail})
 	}
 
 	cm.mu.Lock()
@@ -664,6 +671,7 @@ func (cm *ConversationManager) Hydrate(ctx context.Context) error {
 			Messages:   []llm.Message{r.msg},
 			ModelID:    r.mdl,
 			MessageIDs: []string{r.id},
+			UserEmail:  r.email,
 		})
 	}
 	if len(restoredBatches) > 0 {
@@ -727,7 +735,10 @@ func (cm *ConversationManager) AcceptUserMessage(ctx context.Context, service ll
 	} else {
 		// No turn-start recorder wired (e.g. a manager built without one):
 		// fall back to the two-Tx ordering — persist working=true first, then
-		// the message — to preserve the no-flicker guarantee.
+		// the message — to preserve the no-flicker guarantee. Note recordMessage
+		// does not stamp user_email (it also serves tool_result rows), so this
+		// fallback drops author attribution; it's unreachable in production —
+		// getOrCreate*ConversationManager always wire a non-nil recordTurnStart.
 		cm.SetAgentWorking(true)
 		if recordMessage != nil {
 			if err := recordMessage(ctx, message, llm.Usage{}); err != nil {
@@ -829,6 +840,7 @@ func (cm *ConversationManager) QueueMessage(ctx context.Context, s *Server, mode
 		Llm:       llmJSON,
 		CreatedAt: time.Now().UTC(),
 		Model:     modelID,
+		UserEmail: userEmailFromContext(ctx),
 	}
 	if _, err := s.db.AppendQueuedMessage(ctx, cm.conversationID, qm); err != nil {
 		return fmt.Errorf("failed to append queued message: %w", err)
@@ -845,6 +857,7 @@ func (cm *ConversationManager) QueueMessage(ctx context.Context, s *Server, mode
 		Messages:   []llm.Message{message},
 		ModelID:    modelID,
 		MessageIDs: []string{qm.ID},
+		UserEmail:  qm.UserEmail,
 	})
 	return nil
 }
@@ -995,7 +1008,7 @@ func (cm *ConversationManager) processBatch(ctx context.Context, s *Server, loop
 			if i < len(b.MessageIDs) {
 				queuedID = b.MessageIDs[i]
 			}
-			if err := s.recordDrainedQueuedMessage(ctx, cm.conversationID, queuedID, msg); err != nil {
+			if err := s.recordDrainedQueuedMessage(ctx, cm.conversationID, queuedID, msg, b.UserEmail); err != nil {
 				cm.logger.Error("Failed to record drained queued message; will retry", "error", err)
 				return false
 			}

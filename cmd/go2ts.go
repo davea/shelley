@@ -95,6 +95,7 @@ type apiMessageForTS struct {
 	LLMAPIURL           *string `json:"llm_api_url,omitempty"`
 	ModelName           *string `json:"model_name,omitempty"`
 	ForkedFromMessageID *string `json:"forked_from_message_id,omitempty"`
+	UserEmail           *string `json:"user_email,omitempty"`
 }
 
 type conversationStateForTS struct {

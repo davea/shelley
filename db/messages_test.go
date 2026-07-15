@@ -621,3 +621,68 @@ func TestMessageService_ListMessagesByConversationPaginated(t *testing.T) {
 		messageIDs[msg.MessageID] = true
 	}
 }
+
+// TestMessageUserEmailRoundTrip verifies that CreateMessage persists the
+// UserEmail into the messages.user_email column, that an empty string is
+// stored as NULL, and that a forked copy preserves the source's user_email.
+func TestMessageUserEmailRoundTrip(t *testing.T) {
+	database := setupTestDB(t)
+	defer database.Close()
+
+	ctx := context.Background()
+	conv, err := database.CreateConversation(ctx, stringPtr("user-email-round-trip"), true, nil, nil, ConversationOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A user message with an author.
+	if _, err := database.CreateMessage(ctx, CreateMessageParams{
+		ConversationID: conv.ConversationID,
+		Type:           MessageTypeUser,
+		LLMData:        llm.Message{Role: llm.MessageRoleUser},
+		UserEmail:      "alice@example.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A user message with no author (e.g. direct/local access): stored NULL.
+	if _, err := database.CreateMessage(ctx, CreateMessageParams{
+		ConversationID: conv.ConversationID,
+		Type:           MessageTypeUser,
+		LLMData:        llm.Message{Role: llm.MessageRoleUser},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	messages, err := database.ListMessages(ctx, conv.ConversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("got %d messages, want 2", len(messages))
+	}
+	if messages[0].UserEmail == nil || *messages[0].UserEmail != "alice@example.com" {
+		t.Fatalf("message[0].UserEmail = %v, want alice@example.com", messages[0].UserEmail)
+	}
+	if messages[1].UserEmail != nil {
+		t.Fatalf("message[1].UserEmail = %v, want nil (empty stored as NULL)", *messages[1].UserEmail)
+	}
+
+	// Forking copies user_email onto the fork's copies.
+	forked, err := database.ForkConversation(ctx, conv.ConversationID, messages[1].SequenceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkedMsgs, err := database.ListMessages(ctx, forked.ConversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forkedMsgs) != 2 {
+		t.Fatalf("got %d forked messages, want 2", len(forkedMsgs))
+	}
+	if forkedMsgs[0].UserEmail == nil || *forkedMsgs[0].UserEmail != "alice@example.com" {
+		t.Fatalf("forked message[0].UserEmail = %v, want alice@example.com", forkedMsgs[0].UserEmail)
+	}
+	if forkedMsgs[1].UserEmail != nil {
+		t.Fatalf("forked message[1].UserEmail = %v, want nil", *forkedMsgs[1].UserEmail)
+	}
+}

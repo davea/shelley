@@ -12,6 +12,10 @@
     <div class="usage-detail-grid">
       <div class="usage-detail-label">Type:</div>
       <div class="usage-detail-value">{{ message.type }}</div>
+      <template v-if="message.user_email">
+        <div class="usage-detail-label">User:</div>
+        <div class="usage-detail-value">{{ message.user_email }}</div>
+      </template>
       <template v-if="message.created_at">
         <div class="usage-detail-label">Timestamp:</div>
         <div class="usage-detail-value">{{ formatTimestamp(message.created_at) }}</div>

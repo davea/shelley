@@ -49,6 +49,7 @@ export interface ApiMessageForTS {
   llm_api_url?: string | null;
   model_name?: string | null;
   forked_from_message_id?: string | null;
+  user_email?: string | null;
 }
 
 export interface ConversationStateForTS {

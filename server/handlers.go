@@ -1148,6 +1148,13 @@ func (s *Server) handleChatConversation(w http.ResponseWriter, r *http.Request, 
 	}
 
 	userEmail := r.Header.Get("X-ExeDev-Email")
+	// Thread the authenticated exe.dev account down to the message recorder so
+	// the user turn's row is attributed to its author. The active manager is a
+	// long-lived singleton shared across requests (its userEmail is only set at
+	// creation), so per-request context — not manager state — is the reliable
+	// carrier here. Both the immediate-send (recordTurnStartMessage) and queued
+	// (QueueMessage) paths read it off this ctx.
+	ctx = contextWithUserEmail(ctx, userEmail)
 
 	// Drafts can have their model/cwd retargeted right up to send. Validate
 	// send-time overrides the same way the new-conversation path does, then
@@ -1453,6 +1460,9 @@ func (s *Server) handleNewConversation(w http.ResponseWriter, r *http.Request) {
 	})
 
 	userEmail := r.Header.Get("X-ExeDev-Email")
+	// Attribute the user turn to its author; see handleChatConversation for why
+	// the recorder reads the email off ctx rather than the shared manager.
+	ctx = contextWithUserEmail(ctx, userEmail)
 
 	// Get or create conversation manager
 	manager, err := s.getOrCreateConversationManager(ctx, conversationID, userEmail)
