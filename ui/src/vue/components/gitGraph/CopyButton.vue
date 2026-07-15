@@ -1,9 +1,9 @@
 <!-- Vue port of the CopyButton subcomponent in components/GitGraphViewer.tsx. -->
 <template>
   <button
+    v-tooltip.top="title || `Copy ${label}`"
     type="button"
     class="git-graph-copy-btn"
-    :title="title || `Copy ${label}`"
     @click="onClick"
   >
     {{ copied ? "copied" : label }}

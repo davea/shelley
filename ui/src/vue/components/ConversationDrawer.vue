@@ -39,7 +39,7 @@
           <button
             :class="`btn-icon${groupBy !== 'none' ? ' group-by-active' : ''}`"
             :aria-label="t('groupConversations')"
-            :title="t('groupConversations')"
+            v-tooltip.top="t('groupConversations')"
             @click="groupMenuOpen = !groupMenuOpen"
           >
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -66,7 +66,6 @@
             <div class="group-by-menu-separator" />
             <button
               class="group-by-menu-item"
-              :title="t('resortNow')"
               @click="
                 resortKey += 1;
                 groupMenuOpen = false;
@@ -124,7 +123,7 @@
         <button
           class="btn-icon show-on-desktop-only"
           :aria-label="t('collapseSidebar')"
-          :title="t('collapseSidebar')"
+          v-tooltip.top="t('collapseSidebar')"
           @click="emit('toggle-collapse')"
         >
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -170,7 +169,7 @@
         type="button"
         class="drawer-search-clear"
         :aria-label="t('clearSearch')"
-        :title="t('clearSearch')"
+        v-tooltip.top="t('clearSearch')"
         @click="searchQuery = ''"
       >
         ✕

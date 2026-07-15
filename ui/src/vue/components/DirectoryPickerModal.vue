@@ -159,7 +159,8 @@
           <button
             class="directory-picker-create-btn"
             :disabled="createLoading || !newDirName.trim()"
-            title="Create"
+            v-tooltip.top="'Create'"
+            aria-label="Create"
             @click="handleCreateDirectory"
           >
             <div v-if="createLoading" class="spinner spinner-small"></div>
@@ -175,7 +176,8 @@
           <button
             class="directory-picker-create-btn directory-picker-cancel-btn"
             :disabled="createLoading"
-            title="Cancel"
+            v-tooltip.top="'Cancel'"
+            aria-label="Cancel"
             @click="handleCancelCreate"
           >
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -209,7 +211,7 @@
       <button
         v-if="!isCreating && !loading && !error"
         class="btn directory-picker-new-btn"
-        title="Create new folder"
+        v-tooltip.top="'Create new folder'"
         @click="handleStartCreate"
       >
         <svg

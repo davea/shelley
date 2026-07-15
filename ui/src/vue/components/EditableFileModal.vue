@@ -28,7 +28,14 @@
               <template v-else-if="saveStatus === 'error'">Error saving</template>
             </span>
             <VimToggle v-if="isDesktop" :enabled="vimEnabled" @change="setVimEnabled" />
-            <button class="diff-viewer-close" title="Close (Esc)" @click="emit('close')">×</button>
+            <button
+              v-tooltip.top="'Close (Esc)'"
+              class="diff-viewer-close"
+              aria-label="Close (Esc)"
+              @click="emit('close')"
+            >
+              ×
+            </button>
           </div>
         </div>
         <div class="diff-viewer-content">

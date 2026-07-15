@@ -11,7 +11,7 @@
     aria-label="Conversation table of contents"
     aria-haspopup="true"
     :aria-expanded="open"
-    title="Table of contents"
+    v-tooltip.top="'Table of contents'"
     @click="popoverRef?.toggle($event)"
   >
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" class="toc-button-icon">

@@ -134,7 +134,7 @@
               v-if="distillationEditable"
               type="button"
               class="distillation-edit-button"
-              title="Edit distillation in modal"
+              v-tooltip.top="'Edit distillation in modal'"
               @click="openDistillationEditor"
             >
               Edit

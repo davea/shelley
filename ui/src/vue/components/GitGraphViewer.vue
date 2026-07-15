@@ -20,27 +20,27 @@
           title="Which refs to walk"
         >
           <button
+            v-tooltip.top="'Show commits from all branches'"
             type="button"
             :class="`git-graph-scope-btn${scope === 'all' ? ' git-graph-scope-btn-active' : ''}`"
             :aria-pressed="scope === 'all'"
-            title="Show commits from all branches"
             @click="setScope('all')"
           >
             All branches
           </button>
           <button
+            v-tooltip.top="'Show commits reachable from HEAD only'"
             type="button"
             :class="`git-graph-scope-btn${scope === 'current' ? ' git-graph-scope-btn-active' : ''}`"
             :aria-pressed="scope === 'current'"
-            title="Show commits reachable from HEAD only"
             @click="setScope('current')"
           >
             Current branch
           </button>
         </div>
         <button
+          v-tooltip.top="`Pick repository (current: ${cwd})`"
           class="git-graph-tool"
-          :title="`Pick repository (current: ${cwd})`"
           aria-label="Pick repository"
           @click="showCwdPicker = true"
         >
@@ -54,8 +54,8 @@
           </svg>
         </button>
         <button
+          v-tooltip.top="'Close (Esc)'"
           class="git-graph-tool"
-          title="Close (Esc)"
           aria-label="Close"
           @click="emit('close')"
         >
@@ -155,11 +155,11 @@
           <!-- Draggable divider — desktop only; hidden on mobile via CSS
                because the detail pane becomes a bottom sheet there. -->
           <div
+            v-tooltip.top="'Drag to resize — double-click to reset'"
             class="git-graph-divider"
             role="separator"
             aria-orientation="vertical"
             aria-label="Resize commit details (double-click to reset)"
-            title="Drag to resize — double-click to reset"
             @mousedown="onDividerMouseDown"
             @dblclick="onDividerDoubleClick"
           >
@@ -174,10 +174,10 @@
             <div class="git-graph-sheet-topbar">
               <span class="git-graph-sheet-grip" aria-hidden="true" />
               <button
+                v-tooltip.top="'Close details'"
                 type="button"
                 class="git-graph-sheet-close"
                 aria-label="Close commit details"
-                title="Close details"
                 @click="sheetOpen = false"
               >
                 ×
@@ -276,11 +276,11 @@
               </a>
               <a
                 v-if="data?.githubBase"
+                v-tooltip.top="'View on GitHub'"
                 class="git-graph-github-link"
                 :href="`${data.githubBase}/commit/${selectedCommit.hash}`"
                 target="_blank"
                 rel="noopener noreferrer"
-                title="View on GitHub"
               >
                 <OctocatIcon :size="14" />
                 <span>GitHub</span>

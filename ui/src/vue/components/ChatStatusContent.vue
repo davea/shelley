@@ -47,7 +47,8 @@
       <button
         :disabled="cancelling"
         class="status-stop-button"
-        :title="cancelling ? 'Cancelling...' : 'Stop'"
+        v-tooltip.top="'Stop'"
+        :aria-label="cancelling ? 'Cancelling...' : 'Stop'"
         @click="onCancel"
       >
         <svg viewBox="0 0 24 24" fill="currentColor">
@@ -108,7 +109,8 @@
       <div ref="advancedSettingsRef" class="advanced-settings-wrapper">
         <button
           :class="`advanced-settings-trigger${toolOverrideCount > 0 ? ' active' : ''}`"
-          title="Advanced settings"
+          v-tooltip.top="'Advanced settings'"
+          aria-label="Advanced settings"
           :disabled="sending"
           @click="showAdvancedSettings = !showAdvancedSettings"
         >
@@ -135,7 +137,7 @@
               type="button"
               class="advanced-settings-reset"
               :disabled="toolOverrideCount === 0"
-              title="Clear all overrides"
+              v-tooltip.top="'Clear all overrides'"
               @click="onResetToolOverrides"
             >
               Reset to defaults
@@ -196,7 +198,7 @@
     </div>
     <div
       :class="`status-field status-field-cwd${cwdError ? ' status-field-error' : ''}`"
-      :title="cwdError || 'Working directory for file operations'"
+      v-tooltip.top="cwdError || 'Working directory for file operations'"
     >
       <span class="status-field-label">{{ t("dirLabel") }}</span>
       <button

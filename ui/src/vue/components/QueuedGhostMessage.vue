@@ -24,7 +24,7 @@
           v-if="onCancel"
           class="queued-message-badge-cancel"
           data-testid="cancel-queued"
-          title="Cancel queued message"
+          v-tooltip.top="'Cancel queued message'"
           @click.stop="onCancel(queued.id)"
         >
           Cancel

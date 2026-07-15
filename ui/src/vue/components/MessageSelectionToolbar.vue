@@ -10,7 +10,7 @@
       :style="{ top: `${pos.top}px`, left: `${pos.left}px`, width: `${BTN_WIDTH}px` }"
       data-testid="message-selection-comment-btn"
       aria-label="Comment"
-      title="Comment"
+      v-tooltip.top="'Comment'"
       @mousedown="swallow"
       @pointerdown="swallow"
       @touchstart="swallow"

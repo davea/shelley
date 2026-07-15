@@ -45,9 +45,9 @@
             </svg>
           </button>
           <button
+            v-tooltip.top="'Open in new tab'"
             class="output-iframe-tool-open-btn"
             aria-label="Open in new tab"
-            title="Open in new tab"
             @click.stop="handleOpenInNewTab"
           >
             <svg

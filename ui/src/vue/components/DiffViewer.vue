@@ -64,13 +64,21 @@
           </div>
         </div>
         <button
+          v-tooltip.top="`Git directory: ${cwd}\nClick to change`"
           class="diff-viewer-dir-btn"
-          :title="`Git directory: ${cwd}\nClick to change`"
+          :aria-label="`Git directory: ${cwd}. Click to change`"
           @click="showDirPicker = true"
         >
           <span v-html="DIR_ICON" />
         </button>
-        <button class="diff-viewer-close" title="Close (Esc)" @click="emit('close')">×</button>
+        <button
+          v-tooltip.top="'Close (Esc)'"
+          class="diff-viewer-close"
+          aria-label="Close (Esc)"
+          @click="emit('close')"
+        >
+          ×
+        </button>
       </div>
 
       <!-- Desktop header -->
@@ -78,10 +86,10 @@
         <div class="diff-viewer-header-row">
           <button
             v-if="layout === 'sidebar'"
+            v-tooltip.top="'Hide sidebar'"
             type="button"
             class="btn-icon diff-viewer-collapse-btn"
             aria-label="Hide sidebar"
-            title="Hide sidebar"
             @click="setLayout('header')"
           >
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20" height="20">
@@ -95,10 +103,10 @@
           </button>
           <button
             v-else
+            v-tooltip.top="'Show sidebar'"
             type="button"
             class="btn-icon diff-viewer-expand-btn"
             aria-label="Show sidebar"
-            title="Show sidebar"
             @click="setLayout('sidebar')"
           >
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20" height="20">
@@ -149,33 +157,37 @@
           <div class="diff-viewer-controls-row">
             <div class="diff-viewer-nav-buttons">
               <button
+                v-tooltip.top="'Previous file (<)'"
                 class="diff-viewer-nav-btn"
                 :disabled="!hasPrevFile"
-                title="Previous file (<)"
+                aria-label="Previous file (<)"
                 @click="goToPreviousFile"
               >
                 <span v-html="PREV_FILE_ICON" />
               </button>
               <button
+                v-tooltip.top="'Previous change (,)'"
                 class="diff-viewer-nav-btn"
                 :disabled="!fileDiff"
-                title="Previous change (,)"
+                aria-label="Previous change (,)"
                 @click="goToPreviousChange"
               >
                 <span v-html="PREV_CHANGE_ICON" />
               </button>
               <button
+                v-tooltip.top="'Next change (.)'"
                 class="diff-viewer-nav-btn"
                 :disabled="!fileDiff"
-                title="Next change (.)"
+                aria-label="Next change (.)"
                 @click="goToNextChange"
               >
                 <span v-html="NEXT_CHANGE_ICON" />
               </button>
               <button
+                v-tooltip.top="'Next file (>)'"
                 class="diff-viewer-nav-btn"
                 :disabled="!hasNextFile"
-                title="Next file (>)"
+                aria-label="Next file (>)"
                 @click="goToNextFile()"
               >
                 <span v-html="NEXT_FILE_ICON" />
@@ -183,15 +195,17 @@
             </div>
             <div class="diff-viewer-mode-toggle">
               <button
+                v-tooltip.top="'Comment mode'"
                 :class="`diff-viewer-mode-btn ${mode === 'comment' ? 'active' : ''}`"
-                title="Comment mode"
+                aria-label="Comment mode"
                 @click="mode = 'comment'"
               >
                 💬
               </button>
               <button
+                v-tooltip.top="'Edit mode'"
                 :class="`diff-viewer-mode-btn ${mode === 'edit' ? 'active' : ''}`"
-                title="Edit mode"
+                aria-label="Edit mode"
                 @click="mode = 'edit'"
               >
                 ✏️
@@ -199,13 +213,21 @@
             </div>
             <VimToggle :enabled="vimEnabled" @change="setVimEnabled" />
             <button
+              v-tooltip.top="`Git directory: ${cwd}\nClick to change`"
               class="diff-viewer-dir-btn"
-              :title="`Git directory: ${cwd}\nClick to change`"
+              :aria-label="`Git directory: ${cwd}. Click to change`"
               @click="showDirPicker = true"
             >
               <span v-html="DIR_ICON" />
             </button>
-            <button class="diff-viewer-close" title="Close (Esc)" @click="emit('close')">×</button>
+            <button
+              v-tooltip.top="'Close (Esc)'"
+              class="diff-viewer-close"
+              aria-label="Close (Esc)"
+              @click="emit('close')"
+            >
+              ×
+            </button>
           </div>
         </div>
       </div>
@@ -314,9 +336,9 @@
           <!-- Floating "add comment" prompt shown next to a selection in comment mode -->
           <button
             v-if="commentPrompt"
+            v-tooltip.top="'Add comment on selection'"
             class="diff-viewer-comment-prompt"
             :style="{ top: `${commentPrompt.top}px`, left: `${commentPrompt.left}px` }"
-            title="Add comment on selection"
             @mousedown.prevent
             @click="openCommentFromPrompt"
           >
@@ -328,40 +350,49 @@
       <!-- Mobile floating nav buttons -->
       <div v-if="isMobile" class="diff-viewer-mobile-nav">
         <button
+          v-tooltip.top="
+            mode === 'comment' ? 'Comment mode (tap to switch)' : 'Edit mode (tap to switch)'
+          "
           :class="`diff-viewer-mobile-nav-btn diff-viewer-mobile-mode-btn ${mode === 'comment' ? 'active' : ''}`"
-          :title="mode === 'comment' ? 'Comment mode (tap to switch)' : 'Edit mode (tap to switch)'"
+          :aria-label="
+            mode === 'comment' ? 'Comment mode (tap to switch)' : 'Edit mode (tap to switch)'
+          "
           @click="mode = mode === 'comment' ? 'edit' : 'comment'"
         >
           {{ mode === "comment" ? "💬" : "✏️" }}
         </button>
         <button
+          v-tooltip.top="'Previous file (<)'"
           class="diff-viewer-mobile-nav-btn"
           :disabled="!hasPrevFile"
-          title="Previous file (<)"
+          aria-label="Previous file (<)"
           @click="goToPreviousFile"
         >
           <span v-html="PREV_FILE_ICON" />
         </button>
         <button
+          v-tooltip.top="'Previous change (,)'"
           class="diff-viewer-mobile-nav-btn"
           :disabled="!fileDiff"
-          title="Previous change (,)"
+          aria-label="Previous change (,)"
           @click="goToPreviousChange"
         >
           <span v-html="PREV_CHANGE_ICON" />
         </button>
         <button
+          v-tooltip.top="'Next change (.)'"
           class="diff-viewer-mobile-nav-btn"
           :disabled="!fileDiff"
-          title="Next change (.)"
+          aria-label="Next change (.)"
           @click="goToNextChange"
         >
           <span v-html="NEXT_CHANGE_ICON" />
         </button>
         <button
+          v-tooltip.top="'Next file (>)'"
           class="diff-viewer-mobile-nav-btn"
           :disabled="!hasNextFile"
-          title="Next file (>)"
+          aria-label="Next file (>)"
           @click="goToNextFile()"
         >
           <span v-html="NEXT_FILE_ICON" />

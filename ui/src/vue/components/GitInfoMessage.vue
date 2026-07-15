@@ -12,12 +12,16 @@
       <span v-if="worktree" class="msg-worktree">{{ worktree }}</span>
       <span v-if="branch" class="msg-branch">{{ branch }}</span>
       {{ branch ? " now at " : "now at " }}
-      <code class="msg-commit-hash" title="Click to copy commit hash" @click="handleCopyHash">{{
-        commitHash
-      }}</code>
+      <code
+        class="msg-commit-hash"
+        v-tooltip.top="'Click to copy commit hash'"
+        @click="handleCopyHash"
+        >{{ commitHash }}</code
+      >
       <button
         :class="copied ? 'msg-copy-button copied' : 'msg-copy-button'"
-        title="Copy commit hash"
+        v-tooltip.top="'Copy commit hash'"
+        aria-label="Copy commit hash"
         @click="handleCopyHash"
       >
         <svg

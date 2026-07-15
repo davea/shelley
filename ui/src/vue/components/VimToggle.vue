@@ -6,7 +6,7 @@
   <button
     type="button"
     :class="`vim-toggle ${enabled ? 'active' : ''}`"
-    :title="enabled ? 'Disable Vim mode' : 'Enable Vim mode'"
+    v-tooltip.top="enabled ? 'Disable Vim mode' : 'Enable Vim mode'"
     :aria-pressed="enabled"
     @click="emit('change', !enabled)"
   >

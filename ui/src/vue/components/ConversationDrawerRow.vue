@@ -55,7 +55,7 @@
               type="button"
               class="conversation-tag-remove"
               :aria-label="`${ctx.t('removeTag')} ${tag}`"
-              :title="ctx.t('removeTag')"
+              v-tooltip.top="ctx.t('removeTag')"
               @click="ctx.handleRemoveTag(conversation, tag)"
             >
               ×
@@ -117,7 +117,7 @@
         <button
           v-if="!isDraft && !itemArchived && hasSubagents"
           class="subagent-count-badge"
-          :title="isExpanded ? ctx.t('hideSubagents') : ctx.t('showSubagents')"
+          v-tooltip.top="isExpanded ? ctx.t('hideSubagents') : ctx.t('showSubagents')"
           :aria-label="isExpanded ? ctx.t('collapseSubagents') : ctx.t('expandSubagents')"
           @click="ctx.toggleSubagents($event, conversation.conversation_id)"
         >
@@ -142,7 +142,7 @@
         <div v-if="!isDraft && !itemArchived" class="conversation-actions drawer-actions-row">
           <button
             class="btn-icon-sm"
-            :title="ctx.t('rename')"
+            v-tooltip.top="ctx.t('rename')"
             :aria-label="ctx.t('rename')"
             @click="ctx.handleStartRename($event, conversation)"
           >
@@ -157,7 +157,7 @@
           </button>
           <button
             class="btn-icon-sm"
-            :title="ctx.t('editTags')"
+            v-tooltip.top="ctx.t('editTags')"
             :aria-label="ctx.t('editTags')"
             @click="ctx.handleOpenTagEditor($event, conversation.conversation_id)"
           >
@@ -172,7 +172,7 @@
           </button>
           <button
             class="btn-icon-sm"
-            :title="ctx.t('archive')"
+            v-tooltip.top="ctx.t('archive')"
             :aria-label="ctx.t('archive')"
             @click="ctx.handleArchive($event, conversation.conversation_id)"
           >
@@ -193,7 +193,7 @@
         :class="`conversation-git drawer-git-info ${isActive ? 'drawer-git-info-active' : ''}`"
       >
         <span
-          :title="`Click to copy ${convState.git_commit}`"
+          v-tooltip.top="`Click to copy ${convState.git_commit}`"
           :class="`drawer-git-hash ${ctx.copiedConvId.value === conversation.conversation_id ? 'drawer-git-hash-copied' : ''}`"
           @click="
             ctx.handleCopyGitHash($event, convState.git_commit!, conversation.conversation_id)
@@ -218,7 +218,7 @@
     <div v-if="itemArchived" class="conversation-actions drawer-actions-row-offset">
       <button
         class="btn-icon-sm"
-        :title="ctx.t('restore')"
+        v-tooltip.top="ctx.t('restore')"
         :aria-label="ctx.t('restore')"
         @click="ctx.handleUnarchive($event, conversation.conversation_id)"
       >

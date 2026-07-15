@@ -7238,33 +7238,23 @@ svg {
   color: var(--text-secondary);
 }
 
-.info-tooltip {
-  position: absolute;
-  top: 50%;
-  left: 100%;
-  transform: translateY(-50%);
+/* PrimeVue Tooltip (v-tooltip directive) — shared theme for the title=→tooltip
+   sweep. Matches the app chrome (bg-tertiary panel, small text) instead of
+   Aura's dark defaults. The arrow is hidden: at this size it adds noise. */
+.p-tooltip .p-tooltip-text {
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
   border-radius: 0.375rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0.375rem 0.625rem;
   font-size: 0.75rem;
   font-weight: 400;
   color: var(--text-primary);
-  white-space: normal;
-  width: 220px;
-  margin-left: 0.375rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 100;
+  white-space: pre-line; /* multiline titles (e.g. "Git directory: …\nClick to change") */
+  max-width: 20rem;
 }
-
-.info-tooltip::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: 100%;
-  transform: translateY(-50%);
-  border: 6px solid transparent;
-  border-right-color: var(--border);
+.p-tooltip .p-tooltip-arrow {
+  display: none;
 }
 
 .provider-buttons {

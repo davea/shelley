@@ -6,7 +6,8 @@
   <div class="message-action-bar message-action-bar-wrapper" data-action-bar>
     <button
       v-if="onCopy"
-      title="Copy"
+      v-tooltip.top="'Copy'"
+      aria-label="Copy"
       :class="`message-action-button${copyFeedback ? ' message-action-button-success' : ''}`"
       @click="handleCopy"
       @mouseenter="onEnter($event, !copyFeedback)"
@@ -42,7 +43,8 @@
     </button>
     <button
       v-if="onFork"
-      title="Fork conversation from here"
+      v-tooltip.top="'Fork conversation from here'"
+      aria-label="Fork conversation from here"
       class="message-action-button"
       @click="handleFork"
       @mouseenter="onEnter($event, true)"
@@ -67,7 +69,8 @@
     </button>
     <button
       v-if="onShowUsage"
-      title="Details"
+      v-tooltip.top="'Details'"
+      aria-label="Details"
       class="message-action-button"
       @click="handleShowUsage"
       @mouseenter="onEnter($event, true)"

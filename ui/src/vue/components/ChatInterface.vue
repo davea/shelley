@@ -26,7 +26,7 @@
           v-if="isDrawerCollapsed && onToggleDrawerCollapse"
           class="btn-icon show-on-desktop-only"
           :aria-label="t('expandSidebar')"
-          :title="t('expandSidebar')"
+          v-tooltip.top="t('expandSidebar')"
           @click="onToggleDrawerCollapse && onToggleDrawerCollapse()"
         >
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -205,7 +205,7 @@
             <button
               class="queued-message-badge-cancel"
               data-testid="cancel-all-queued"
-              title="Cancel all queued messages"
+              v-tooltip.top="'Cancel all queued messages'"
               @click="cancelQueuedMessages"
             >
               Cancel all queued
@@ -225,7 +225,7 @@
           v-if="showScrollToBottom"
           class="scroll-to-bottom-button"
           aria-label="Scroll to bottom"
-          title="Scroll to bottom"
+          v-tooltip.top="'Scroll to bottom'"
           @click="scrollToBottom"
         >
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-scroll-icon">

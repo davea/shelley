@@ -195,7 +195,13 @@
       <div class="form-group">
         <label>
           {{ t("tags") }}
-          <span class="info-icon-wrapper" @click.prevent.stop="showTagsTooltip = !showTagsTooltip">
+          <span
+            class="info-icon-wrapper"
+            v-tooltip.top="t('tagsTooltip')"
+            tabindex="0"
+            role="note"
+            :aria-label="t('tagsTooltip')"
+          >
             <span class="info-icon">
               <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="14" height="14">
                 <path
@@ -206,7 +212,6 @@
                 />
               </svg>
             </span>
-            <span v-if="showTagsTooltip" class="info-tooltip">{{ t("tagsTooltip") }}</span>
           </span>
         </label>
         <input
@@ -287,7 +292,6 @@ const form = reactive<FormData>({ ...emptyForm });
 const error = ref<string | null>(null);
 const testing = ref(false);
 const testResult = ref<{ success: boolean; message: string } | null>(null);
-const showTagsTooltip = ref(false);
 
 function resetForm() {
   Object.assign(form, emptyForm, { reasoning_map: { ...DEFAULT_REASONING_MAP } });
@@ -335,7 +339,6 @@ watch(
     if (!open) return;
     error.value = null;
     testResult.value = null;
-    showTagsTooltip.value = false;
     const m = props.editModel;
     if (m) {
       Object.assign(form, {

@@ -29,8 +29,9 @@
       <div class="patch-tool-header-controls">
         <button
           v-if="showDiffToggle"
+          v-tooltip.top="sideBySide ? 'Switch to inline diff' : 'Switch to side-by-side diff'"
           class="patch-tool-diff-mode-toggle"
-          :title="sideBySide ? 'Switch to inline diff' : 'Switch to side-by-side diff'"
+          :aria-label="sideBySide ? 'Switch to inline diff' : 'Switch to side-by-side diff'"
           @click.stop="toggleSideBySide"
         >
           <svg

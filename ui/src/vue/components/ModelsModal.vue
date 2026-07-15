@@ -111,7 +111,12 @@
           </template>
           <template #body="{ data }">
             <div v-if="data.model" class="models-cell-actions">
-              <button class="btn-icon" :title="t('duplicate')" @click="handleDuplicate(data.model)">
+              <button
+                class="btn-icon"
+                v-tooltip.top="t('duplicate')"
+                :aria-label="t('duplicate')"
+                @click="handleDuplicate(data.model)"
+              >
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16">
                   <path
                     stroke-linecap="round"
@@ -121,7 +126,12 @@
                   />
                 </svg>
               </button>
-              <button class="btn-icon" :title="t('editModel')" @click="handleEdit(data.model)">
+              <button
+                class="btn-icon"
+                v-tooltip.top="t('editModel')"
+                :aria-label="t('editModel')"
+                @click="handleEdit(data.model)"
+              >
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16">
                   <path
                     stroke-linecap="round"
@@ -133,7 +143,8 @@
               </button>
               <button
                 class="btn-icon btn-danger"
-                :title="t('delete_')"
+                v-tooltip.top="t('delete_')"
+                :aria-label="t('delete_')"
                 @click="handleDelete(data.model.model_id)"
               >
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="16" height="16">

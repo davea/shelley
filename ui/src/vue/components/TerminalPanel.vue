@@ -32,8 +32,9 @@
     <div class="terminal-panel-header">
       <!-- Minimize/maximize toggle -->
       <button
+        v-tooltip.top="minimized ? 'Expand terminals' : 'Minimize terminals'"
         class="terminal-panel-action-btn"
-        :title="minimized ? 'Expand terminals' : 'Minimize terminals'"
+        :aria-label="minimized ? 'Expand terminals' : 'Minimize terminals'"
         @click="toggleMinimized"
       >
         <ChevronUpIcon v-if="minimized" />
@@ -70,8 +71,9 @@
           >
           <span class="terminal-panel-tab-label">{{ tabLabel(t.command) }}</span>
           <button
+            v-tooltip.top="'Close terminal'"
             class="terminal-panel-tab-close"
-            title="Close terminal"
+            aria-label="Close terminal"
             @click.stop="emit('close', t.id)"
           >
             ×
@@ -82,16 +84,18 @@
       <!-- Action buttons — hidden when minimized -->
       <div v-if="!minimized" class="terminal-panel-actions">
         <button
+          v-tooltip.top="'Copy visible screen'"
           :class="`terminal-panel-action-btn${copyFeedback === 'copyScreen' ? ' terminal-panel-action-btn-feedback' : ''}`"
-          title="Copy visible screen"
+          aria-label="Copy visible screen"
           @click="copyScreen"
         >
           <CheckIcon v-if="copyFeedback === 'copyScreen'" />
           <CopyIcon v-else />
         </button>
         <button
+          v-tooltip.top="'Copy all output'"
           :class="`terminal-panel-action-btn${copyFeedback === 'copyAll' ? ' terminal-panel-action-btn-feedback' : ''}`"
-          title="Copy all output"
+          aria-label="Copy all output"
           @click="copyAll"
         >
           <CheckIcon v-if="copyFeedback === 'copyAll'" />
@@ -99,16 +103,18 @@
         </button>
         <template v-if="canInsertIntoInput">
           <button
+            v-tooltip.top="'Insert visible screen into input'"
             :class="`terminal-panel-action-btn${copyFeedback === 'insertScreen' ? ' terminal-panel-action-btn-feedback' : ''}`"
-            title="Insert visible screen into input"
+            aria-label="Insert visible screen into input"
             @click="insertScreen"
           >
             <CheckIcon v-if="copyFeedback === 'insertScreen'" />
             <InsertIcon v-else />
           </button>
           <button
+            v-tooltip.top="'Insert all output into input'"
             :class="`terminal-panel-action-btn${copyFeedback === 'insertAll' ? ' terminal-panel-action-btn-feedback' : ''}`"
-            title="Insert all output into input"
+            aria-label="Insert all output into input"
             @click="insertAll"
           >
             <CheckIcon v-if="copyFeedback === 'insertAll'" />
@@ -117,8 +123,9 @@
         </template>
         <div class="terminal-panel-actions-divider" />
         <button
+          v-tooltip.top="'Close active terminal'"
           class="terminal-panel-action-btn"
-          title="Close active terminal"
+          aria-label="Close active terminal"
           @click="handleCloseActive"
         >
           <CloseIcon />
