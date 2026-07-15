@@ -1019,16 +1019,24 @@ func (cm *ConversationManager) processBatch(ctx context.Context, s *Server, loop
 		loopInstance.QueueMessages(b.Messages...)
 		return true
 	case pendingBatchSubagentDone:
-		// Subagent-done batches: persist the synthetic pair now (in batch
-		// order so a future Hydrate reads them back correctly), then feed
-		// atomically to the loop. If the first record fails we skip the
-		// second — a half-written tool_use without a tool_result would
-		// corrupt history.
+		// Subagent-done batches: persist the synthetic tool_use/tool_result
+		// pair in a SINGLE transaction so they receive consecutive sequence
+		// ids and land adjacently in history. Recording them in separate
+		// transactions let the parent's already-running loop (woken by an
+		// earlier batch) commit its own assistant message BETWEEN the
+		// tool_use and its tool_result, which corrupts history: LLM APIs
+		// require a tool_use block be immediately followed by its matching
+		// tool_result. One atomic insert closes that interleaving window.
+		// A whole-batch failure skips feeding the loop — a half-written pair
+		// would corrupt history — but we do NOT retry (a partial pair can't
+		// be committed by CreateMessages' single Tx anyway).
+		inputs := make([]recordMessageInput, 0, len(b.Messages))
 		for _, msg := range b.Messages {
-			if err := cm.recordMessage(ctx, msg, llm.Usage{}); err != nil {
-				cm.logger.Error("Failed to record synthetic subagent message", "error", err)
-				return true // do not retry subagent-done batches
-			}
+			inputs = append(inputs, recordMessageInput{message: msg})
+		}
+		if err := s.recordMessages(ctx, cm.conversationID, inputs); err != nil {
+			cm.logger.Error("Failed to record synthetic subagent messages", "error", err)
+			return true // do not retry subagent-done batches
 		}
 		loopInstance.QueueMessages(b.Messages...)
 		return true
