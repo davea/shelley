@@ -381,6 +381,7 @@ import { useFeatureFlag } from "../composables/featureFlags";
 import { useVersionChecker } from "../composables/versionChecker";
 import { focusMessageInputIfUnfocused } from "../../utils/focusMessageInput";
 import { buildMessageQuote } from "../../utils/messageQuote";
+import { hasMultipleUsers } from "../../utils/messageAuthors";
 import { tildifyPath } from "../../utils/tildify";
 import { handleModifiedNavClick } from "../utils/openInNewTab";
 import { isAutoExpandTool } from "../../utils/toolMeta";
@@ -489,6 +490,14 @@ const lastMessageId = computed(() =>
   messages.value.length > 0 ? messages.value[messages.value.length - 1].message_id : null,
 );
 provide("lastMessageId", lastMessageId);
+
+// When more than one distinct human user (by exe.dev email) has participated in
+// a conversation, descendant Message components show each user message's author
+// email. Empty-string emails are ignored (unauthenticated/direct access), so a
+// mix of empty and a single real email still counts as one participant and
+// elides the label. Provided to Message.vue through MessageRenderNode.
+const showUserEmails = computed(() => hasMultipleUsers(messages.value));
+provide("showUserEmails", showUserEmails);
 const loading = ref(true);
 const showLoadingProgressUI = ref(false);
 const loadingProgress = ref<{

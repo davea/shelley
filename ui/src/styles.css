@@ -908,6 +908,17 @@ button {
   color: var(--user-message-text);
 }
 
+/* Author email label, shown on user messages when multiple users have
+   participated in the conversation. Right-aligned to match user bubbles. */
+.message-author-email {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  margin-bottom: 0.25rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
 .message-agent .message-content,
 .message-tool .message-content {
   margin-right: auto;

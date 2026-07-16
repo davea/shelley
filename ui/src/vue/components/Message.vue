@@ -120,6 +120,9 @@
         :on-fork="hasForkAction ? handleFork : undefined"
       />
       <div class="message-content" data-testid="message-content">
+        <div v-if="authorEmail" class="message-author-email" data-testid="message-author-email">
+          {{ authorEmail }}
+        </div>
         <!-- Distillation box takes precedence over content blocks. -->
         <div
           v-if="isDistilledUser"
@@ -175,7 +178,6 @@
             />
           </div>
         </template>
-
       </div>
     </div>
     <UsageDetailModal
@@ -313,6 +315,18 @@ function hasToolContent(m: LLMMessage | null): boolean {
 const isUser = computed(() => props.message.type === "user" && !hasToolResult(llmMessage.value));
 const isTool = computed(() => props.message.type === "tool" || hasToolContent(llmMessage.value));
 const isError = computed(() => props.message.type === "error");
+
+// When multiple distinct users have participated in the conversation,
+// ChatInterface provides showUserEmails=true so each human user message is
+// labeled with its author's exe.dev email. Elided otherwise, and for
+// distilled/compacted user messages (which render agent-side and aren't a
+// single person's turn).
+const showUserEmails = inject<ComputedRef<boolean>>("showUserEmails");
+const authorEmail = computed(() =>
+  isUser.value && !isDistilledUser.value && showUserEmails?.value
+    ? props.message.user_email || null
+    : null,
+);
 
 // ---- Distillation ----
 const distillation = computed(() => {
