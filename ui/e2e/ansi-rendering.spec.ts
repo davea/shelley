@@ -50,8 +50,8 @@ test.describe('ANSI escape sequence rendering', () => {
     expect(innerHTML).toContain('color');
 
     // Verify specific colors are applied via inline styles
-    // Green = color:#0A0 (ansi-to-html default for color 2)
-    // Red = color:#A00 (ansi-to-html default for color 1)
+    // Green = color:rgb(0,187,0) (ansi_up default for color 2)
+    // Red = color:rgb(187,0,0) (ansi_up default for color 1)
     const greenSpan = outputPre.locator('span').filter({ hasText: 'Green' });
     await expect(greenSpan).toBeVisible();
     const greenStyle = await greenSpan.getAttribute('style');
@@ -62,9 +62,11 @@ test.describe('ANSI escape sequence rendering', () => {
     const redStyle = await redSpan.getAttribute('style');
     expect(redStyle).toContain('color');
 
-    // Bold should be rendered as <b> tag
-    const boldTag = outputPre.locator('b').filter({ hasText: 'Bold' });
-    await expect(boldTag).toBeVisible();
+    // Bold is rendered as a span with font-weight:bold (ansi_up style)
+    const boldSpan = outputPre.locator('span').filter({ hasText: 'Bold' });
+    await expect(boldSpan).toBeVisible();
+    const boldStyle = await boldSpan.getAttribute('style');
+    expect(boldStyle).toContain('font-weight:bold');
 
     // Take a screenshot for visual verification
     await page.screenshot({ path: 'e2e/screenshots/ansi-colors.png', fullPage: true });
@@ -93,6 +95,44 @@ test.describe('ANSI escape sequence rendering', () => {
     expect(textContent).toContain('just plain text with no escapes');
 
     // Should NOT have <span> tags (plain text path)
+    const innerHTML = await outputPre.innerHTML();
+    expect(innerHTML).not.toContain('<span');
+  });
+
+  test('bash output with cursor-movement ANSI sequences renders no stray letters', async ({ page, request }) => {
+    // Regression: the old ansi-to-html library only understood SGR color
+    // codes; its catch-all token consumed the introducer + params but left the
+    // trailing final byte of cursor-movement sequences. \x1b[1G (Cursor
+    // Horizontal Absolute) is emitted by logging libraries to redraw/align
+    // status lines, and produced "GGGDev code has changes" with three of them.
+    // Shelley pre-strips non-SGR sequences (and now uses ansi_up, which parses
+    // complete CSI sequences), so only the readable text remains.
+    const slug = await createConversationViaAPI(
+      request,
+      `bash: printf '\\033[1G\\033[1G\\033[1GDev code has changes not yet deployed'`,
+    );
+
+    await page.goto(`/c/${slug}`);
+    await page.waitForLoadState('domcontentloaded');
+
+    const modal = await openToolPill(page, 'printf');
+    const bashTool = modal.locator('.bash-tool').filter({ hasText: 'Dev code has changes' }).first();
+    await expect(bashTool).toBeVisible({ timeout: 15000 });
+    const details = bashTool.locator('.bash-tool-details');
+    await expect(details).toBeVisible();
+
+    const outputPre = details.locator('.bash-tool-code').last();
+    await expect(outputPre).toBeVisible();
+
+    const textContent = await outputPre.textContent();
+    // The readable text is preserved...
+    expect(textContent).toContain('Dev code has changes not yet deployed');
+    // ...and no stray escape letters or raw fragments leak through.
+    expect(textContent).not.toContain('GGG');
+    expect(textContent).not.toContain('[1G');
+    expect(textContent).not.toContain('\x1b');
+
+    // Cursor-only sequences are non-SGR, so no color <span>s are expected.
     const innerHTML = await outputPre.innerHTML();
     expect(innerHTML).not.toContain('<span');
   });

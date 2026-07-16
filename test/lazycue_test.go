@@ -288,6 +288,23 @@ func TestNewPageBashPlainText(t *testing.T) {
 	lazyTest(t, `Navigate to /new. Type the text bash: echo "just plain text with no escapes" into the message input (data-testid "message-input") and click the send button (data-testid "send-button"). Wait for a completed tool call (data-testid "tool-call-completed") to appear, then click the bash tool header (".bash-tool-header") to expand the details panel (".bash-tool-details" should become visible). The output area (the last ".bash-tool-code" element) should contain the text "just plain text with no escapes". Since there are no ANSI codes, that output element should contain zero <span> elements (selector ".bash-tool-details .bash-tool-code span" should match 0 elements).`)
 }
 
+// TestNewPageBashAnsiCursorMovement guards against the regression where
+// cursor-movement ANSI sequences (e.g. \x1b[1G, Cursor Horizontal Absolute —
+// emitted by logging libraries to redraw/align status lines) left stray
+// trailing letters in the rendered output ("GGGDev code has changes").
+// ansi-to-html only understands SGR color codes; Shelley now pre-strips
+// non-SGR sequences, so only the readable text remains.
+func TestNewPageBashAnsiCursorMovement(t *testing.T) {
+	lazyTest(t, "Navigate to /new. Into the message input (data-testid \"message-input\") type the text: "+
+		"bash: printf '\\033[1G\\033[1G\\033[1GDev code has changes not yet deployed' "+
+		"and click the send button (data-testid \"send-button\"). Wait for a completed tool call "+
+		"(data-testid \"tool-call-completed\") to appear, then click the bash tool header "+
+		"(\".bash-tool-header\") to expand the details panel (\".bash-tool-details\" should become visible). "+
+		"The output area (the last \".bash-tool-code\" element) should contain the readable text "+
+		"\"Dev code has changes not yet deployed\" and must NOT contain the stray fragment \"GGG\" "+
+		"or the raw escape fragment \"[1G\".")
+}
+
 func TestNewPageBashCommandInHeader(t *testing.T) {
 	lazyTest(t, `Navigate to /new. Type "bash: unique-test-command-xyz123" into the message input (data-testid "message-input") and click the send button (data-testid "send-button"). Wait for a completed tool call (data-testid "tool-call-completed") to appear. The bash tool command element (".bash-tool-command") should be visible and contain the text "unique-test-command-xyz123".`)
 }
