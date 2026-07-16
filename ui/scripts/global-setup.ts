@@ -43,7 +43,6 @@ export default async function globalSetup() {
   let exitCode: number | null = null;
 
   serverProcess = spawn(binPath, [
-    '--model', 'predictable',
     '--predictable-only',
     '--db', testDb,
     'serve',

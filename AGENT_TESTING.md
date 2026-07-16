@@ -35,12 +35,12 @@ pnpm exec playwright install chromium
 
 For testing with Claude:
 ```bash
-./bin/shelley --model claude-sonnet-4.6 --db test.db serve --port 9001
+./bin/shelley --default-model claude-sonnet-4.6 --db test.db serve --port 9001
 ```
 
 For testing with predictable model (no API key needed):
 ```bash
-./bin/shelley --model predictable --db test.db serve --port 9001
+./bin/shelley --predictable-only --db test.db serve --port 9001
 ```
 
 ### 4. Start Headless Browser (if using headless tool)
