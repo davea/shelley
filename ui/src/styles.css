@@ -8855,7 +8855,7 @@ kbd {
 /* MessageActionBar styles */
 .message-action-bar-wrapper {
   position: absolute;
-  top: 8px;
+  top: -16px;
   right: 8px;
   display: flex;
   gap: 2px;
