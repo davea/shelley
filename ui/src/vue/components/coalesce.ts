@@ -141,10 +141,16 @@ export function coalesceMessages(messages: Message[]): CoalescedItem[] {
           const textContents: LLMContent[] = [];
           const toolUses: LLMContent[] = [];
           const serverToolResults: Record<string, LLMContent[]> = {};
+          let hasThinking = false;
 
           llmData.Content.forEach((content: LLMContent) => {
             if (content.Type === 2) {
               textContents.push(content);
+            } else if (content.Type === 3 && (content.Thinking || content.Text)) {
+              // Non-empty thinking block. Adaptive-thinking models may emit a
+              // signature-only block (empty Thinking/Text); that one is not
+              // renderable, mirroring meaningfulContent in Message.vue.
+              hasThinking = true;
             } else if (content.Type === 5 || content.Type === 7) {
               toolUses.push(content);
             } else if (content.Type === 8 && content.ToolUseID && content.ToolResult) {
@@ -156,7 +162,9 @@ export function coalesceMessages(messages: Message[]): CoalescedItem[] {
             .map((c) => c.Text || "")
             .join("")
             .trim();
-          if (textString) {
+          // A turn with only thinking + tool calls (no text) still needs a
+          // message item, or the thinking block would never render.
+          if (textString || hasThinking) {
             items.push({ type: "message", generation: message.generation, carried, message });
           }
 

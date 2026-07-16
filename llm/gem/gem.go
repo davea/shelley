@@ -413,7 +413,7 @@ func (s *Service) thinkingConfig(req *llm.Request) *gemini.ThinkingConfig {
 				effort = "high"
 			}
 		}
-		return &gemini.ThinkingConfig{ThinkingLevel: effort}
+		return &gemini.ThinkingConfig{ThinkingLevel: effort, IncludeThoughts: true}
 	}
 
 	// Gemini 2.5 (and earlier) uses an integer thinkingBudget. Explicit off
@@ -422,7 +422,10 @@ func (s *Service) thinkingConfig(req *llm.Request) *gemini.ThinkingConfig {
 		return nil
 	}
 	budget := level.ThinkingBudgetTokens()
-	return &gemini.ThinkingConfig{ThinkingBudget: &budget}
+	// includeThoughts asks the API to return thought summaries; without it,
+	// no thinking text comes back and the UI never shows the model's
+	// reasoning. Skip it when thinking is off (budget 0).
+	return &gemini.ThinkingConfig{ThinkingBudget: &budget, IncludeThoughts: budget != 0}
 }
 
 // convertGeminiResponsesToContent converts a Gemini response to llm.Content

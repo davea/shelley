@@ -1287,6 +1287,10 @@ func TestThinkingConfig(t *testing.T) {
 			} else if tc.ThinkingBudget != nil {
 				t.Errorf("unexpected thinkingBudget = %d", *tc.ThinkingBudget)
 			}
+			wantThoughts := tt.wantBudget == nil || *tt.wantBudget != 0
+			if tc.IncludeThoughts != wantThoughts {
+				t.Errorf("includeThoughts = %v, want %v (thought summaries are only returned when requested)", tc.IncludeThoughts, wantThoughts)
+			}
 		})
 	}
 }
@@ -1418,6 +1422,10 @@ func TestThinkingConfigRequestOverride(t *testing.T) {
 				if tc.ThinkingBudget == nil || *tc.ThinkingBudget != *tt.wantBudget {
 					t.Errorf("thinkingBudget = %v, want %d", tc.ThinkingBudget, *tt.wantBudget)
 				}
+			}
+			wantThoughts := tt.wantBudget == nil || *tt.wantBudget != 0
+			if tc.IncludeThoughts != wantThoughts {
+				t.Errorf("includeThoughts = %v, want %v (thought summaries are only returned when requested)", tc.IncludeThoughts, wantThoughts)
 			}
 		})
 	}

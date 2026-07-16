@@ -1137,6 +1137,12 @@ func TestResponsesServiceReasoningEffort(t *testing.T) {
 			if gotReasoning.Effort != tt.wantEffort {
 				t.Errorf("effort = %q, want %q", gotReasoning.Effort, tt.wantEffort)
 			}
+			// The OpenAI provider always requests reasoning summaries;
+			// without summary: "auto" the API omits summary text and the UI
+			// never shows thinking.
+			if gotReasoning.Summary != "auto" {
+				t.Errorf("summary = %q, want %q", gotReasoning.Summary, "auto")
+			}
 		})
 	}
 }

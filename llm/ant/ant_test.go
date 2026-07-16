@@ -2842,9 +2842,15 @@ func TestFromLLMRequestThinkingLevels(t *testing.T) {
 				if got.OutputConfig == nil || got.OutputConfig.Effort != tt.wantEffort {
 					t.Errorf("output_config.effort = %+v, want %q", got.OutputConfig, tt.wantEffort)
 				}
+				if got.Thinking.Display != "summarized" {
+					t.Errorf("thinking.display = %q, want %q (opus 4.7+ omits thinking text unless display is set)", got.Thinking.Display, "summarized")
+				}
 			} else {
 				if got.Thinking.BudgetTokens != tt.wantBudgetGreat {
 					t.Errorf("thinking.budget_tokens = %d, want %d", got.Thinking.BudgetTokens, tt.wantBudgetGreat)
+				}
+				if got.Thinking.Display != "" {
+					t.Errorf("thinking.display = %q, want empty (budget-style models show thinking by default)", got.Thinking.Display)
 				}
 			}
 		})

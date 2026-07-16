@@ -311,6 +311,7 @@ func useAdaptiveThinking(model string) bool {
 type thinking struct {
 	Type         string `json:"type"`                    // "enabled" or "adaptive"
 	BudgetTokens int    `json:"budget_tokens,omitempty"` // Max tokens for thinking (legacy, not used with adaptive)
+	Display      string `json:"display,omitempty"`       // "summarized": return thinking text. Opus 4.7+ defaults to "omitted" (empty thinking blocks).
 }
 
 // outputConfig controls output behavior (effort level for adaptive thinking).
@@ -721,7 +722,10 @@ func applyAnthropicThinking(req *request, model string, level llm.ThinkingLevel,
 			level = llm.ThinkingLevelLow
 		}
 		effort := level.ThinkingEffort()
-		req.Thinking = &thinking{Type: "adaptive"}
+		// Opus 4.7+ defaults thinking.display to "omitted", which returns
+		// thinking blocks with an empty thinking field. Request summarized
+		// thinking so the UI can show the model's reasoning.
+		req.Thinking = &thinking{Type: "adaptive", Display: "summarized"}
 		req.OutputConfig = &outputConfig{Effort: effort}
 		return
 	}

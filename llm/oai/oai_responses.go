@@ -62,8 +62,8 @@ type responsesRequest struct {
 }
 
 type responsesReasoning struct {
-	Effort  string `json:"effort,omitempty"` // "low", "medium", "high"
-	Summary string `json:"summary,omitempty"`
+	Effort  string `json:"effort,omitempty"`  // "low", "medium", "high"
+	Summary string `json:"summary,omitempty"` // "auto": include reasoning summaries in the output
 }
 
 type responsesText struct {
@@ -609,7 +609,7 @@ func (s *ResponsesService) Do(ctx context.Context, ir *llm.Request) (*llm.Respon
 	}
 	if effort != "" {
 		req.Reasoning = &responsesReasoning{Effort: effort}
-		if openAIResponses {
+		if s.supportsReasoningSummaries() {
 			req.Reasoning.Summary = "auto"
 		}
 	}
@@ -806,6 +806,15 @@ func (s *ResponsesService) Do(ctx context.Context, ir *llm.Request) (*llm.Respon
 
 func (s *ResponsesService) isOpenAIResponses() bool {
 	return s.ProviderName == "" || s.ProviderName == "openai"
+}
+
+// supportsReasoningSummaries reports whether the provider accepts
+// reasoning.summary and returns summary text on reasoning output items.
+// xAI's Responses API implements the same contract as OpenAI's (verified
+// against grok-4.5, including streamed reasoning_summary_text deltas and
+// stateless reasoning replay across tool turns).
+func (s *ResponsesService) supportsReasoningSummaries() bool {
+	return s.isOpenAIResponses() || s.ProviderName == "xai"
 }
 
 func withoutOpenAIResponsesReasoning(messages []llm.Message) []llm.Message {

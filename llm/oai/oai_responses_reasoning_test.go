@@ -316,6 +316,59 @@ func TestResponsesServiceOpenAIRequestDefaultsAreProviderIsolated(t *testing.T) 
 	}
 }
 
+func TestResponsesServiceXAIRequestsReasoningSummaries(t *testing.T) {
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(responsesResponse{
+			ID:     "resp_ok",
+			Status: "completed",
+			Model:  "grok-4.5",
+			Output: []responsesOutputItem{{
+				Type:    "message",
+				Role:    "assistant",
+				Content: []responsesContent{{Type: "output_text", Text: "ok"}},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	svc := &ResponsesService{
+		APIKey:        "test-key",
+		Model:         Grok45,
+		ModelURL:      server.URL,
+		ProviderName:  "xai",
+		ThinkingLevel: llm.ThinkingLevelMedium,
+	}
+	_, err := svc.Do(context.Background(), &llm.Request{
+		Messages: []llm.Message{{
+			Role:    llm.MessageRoleUser,
+			Content: []llm.Content{{Type: llm.ContentTypeText, Text: "hi"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+
+	// xAI supports reasoning summaries via the same contract as OpenAI.
+	reasoning, ok := got["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("reasoning = %#v", got["reasoning"])
+	}
+	if reasoning["summary"] != "auto" {
+		t.Errorf("reasoning.summary = %#v, want %q", reasoning["summary"], "auto")
+	}
+	// OpenAI-only request fields must still be absent.
+	for _, field := range []string{"include", "parallel_tool_calls", "prompt_cache_key", "text", "tool_choice"} {
+		if _, ok := got[field]; ok {
+			t.Errorf("xAI request contains OpenAI field %q: %#v", field, got[field])
+		}
+	}
+}
+
 func TestResponsesServiceTextVerbosityFollowsModelMetadata(t *testing.T) {
 	tests := []struct {
 		model Model
