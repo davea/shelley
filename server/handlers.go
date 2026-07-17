@@ -967,6 +967,9 @@ func (s *Server) conversationMux() *http.ServeMux {
 	mux.HandleFunc("POST /{id}/retry", func(w http.ResponseWriter, r *http.Request) {
 		s.handleRetryConversation(w, r, r.PathValue("id"))
 	})
+	mux.HandleFunc("POST /{id}/continue", func(w http.ResponseWriter, r *http.Request) {
+		s.handleContinueConversation(w, r, r.PathValue("id"))
+	})
 	mux.HandleFunc("POST /{id}/archive", func(w http.ResponseWriter, r *http.Request) {
 		s.handleArchiveConversation(w, r, r.PathValue("id"))
 	})
@@ -1665,6 +1668,113 @@ func (s *Server) handleRetryConversation(w http.ResponseWriter, r *http.Request,
 	s.logger.Info("Retry triggered", "conversationID", conversationID)
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"status": "retrying"})
+}
+
+// continueRequest is the optional JSON body for POST
+// /api/conversation/<id>/continue. An empty/omitted model falls back to the
+// default catalog model (Opus), matching the "switch to Opus and continue"
+// button a refusal error shows.
+type continueRequest struct {
+	Model string `json:"model"`
+}
+
+// handleContinueConversation handles POST /api/conversation/<id>/continue.
+// It powers the "switch to Opus and continue" affordance offered on a refusal
+// error: it switches the conversation to a more capable model (Opus by
+// default) and re-fires the request the previous model declined. Requires a
+// latest message that is a refusal error (error_type=refusal). The refusal row
+// is left untouched (append-only log) and excluded from context, so the new
+// model sees the same request.
+func (s *Server) handleContinueConversation(w http.ResponseWriter, r *http.Request, conversationID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Parse the optional body (empty body is fine — defaults to Opus).
+	var req continueRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	// Validate that the bottom message is a refusal error BEFORE spinning up a
+	// loop with tools and a 12-hour context.
+	latest, err := s.db.GetLatestMessage(ctx, conversationID)
+	if err != nil {
+		s.logger.Warn("Continue: failed to load latest message", "conversationID", conversationID, "error", err)
+		http.Error(w, "conversation not found or empty", http.StatusNotFound)
+		return
+	}
+	if latest.Type != string(db.MessageTypeError) {
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]string{"status": "not_applicable"})
+		return
+	}
+	if latest.UserData != nil && *latest.UserData != "" {
+		var ud map[string]any
+		if err := json.Unmarshal([]byte(*latest.UserData), &ud); err == nil {
+			if errType, _ := ud["error_type"].(string); errType != string(llm.ErrorTypeRefusal) {
+				http.Error(w, "latest error is not a refusal", http.StatusConflict)
+				return
+			}
+		}
+	}
+
+	userEmail := r.Header.Get("X-ExeDev-Email")
+	manager, err := s.getOrCreateConversationManager(ctx, conversationID, userEmail)
+	if err != nil {
+		s.logger.Error("Failed to get conversation manager for continue", "conversationID", conversationID, "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Resolve the model to continue on. Default to the catalog default (Opus).
+	modelList := s.getModelList()
+	currentModel := manager.GetModel()
+	if currentModel == "" {
+		currentModel = s.effectiveDefaultModel(modelList)
+	}
+	newModel := req.Model
+	if newModel == "" {
+		newModel = models.Default().ID
+	}
+	if _, err := s.llmManager.GetService(newModel); err != nil || !isReadyModel(newModel, modelList) {
+		http.Error(w, fmt.Sprintf("Unknown or unavailable model: %s", newModel), http.StatusBadRequest)
+		return
+	}
+
+	llmService, err := s.llmManager.GetService(newModel)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Unsupported model: %s", newModel), http.StatusBadRequest)
+		return
+	}
+
+	// Build the model-switch delta (empty when already on the target model, in
+	// which case ContinueAfterRefusal just re-fires without a modelchange marker).
+	currentReasoning := manager.GetThinkingLevel()
+	ch := ModelSettingsChange{OldModel: currentModel, OldReasoning: currentReasoning}
+	if newModel != currentModel {
+		ch.NewModel = newModel
+		ch.OldModelDisplay = modelDisplayName(currentModel, modelList)
+		ch.NewModelDisplay = modelDisplayName(newModel, modelList)
+	}
+
+	if err := manager.ContinueAfterRefusal(ctx, ch, llmService, newModel); err != nil {
+		if errors.Is(err, errNotRefusal) {
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(map[string]string{"status": "not_applicable"})
+			return
+		}
+		s.logger.Warn("Continue rejected", "conversationID", conversationID, "error", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	s.logger.Info("Continue triggered", "conversationID", conversationID, "model", newModel)
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"status": "continuing", "model": newModel})
 }
 
 // handleStreamConversation handles GET /conversation/<id>/stream.

@@ -670,6 +670,25 @@ func (l *Loop) handleRefusal(ctx context.Context, resp *llm.Response) error {
 		l.logger.Error("failed to record refusal message", "error", err)
 	}
 
+	// Build the user-visible notice. Start with the standard guidance, then
+	// append every field the provider gave us in the refusal reason (category
+	// and full explanation), so nothing is hidden from the user.
+	noticeText := "[The model declined to continue this request. Retrying the same " +
+		"request will likely be declined again. Switch to Opus to continue, " +
+		"or use /model to switch models. You can also try rephrasing or " +
+		"clarifying the intent instead.]"
+	var refusalCategory, refusalExplanation string
+	if resp.RefusalDetails != nil {
+		refusalCategory = strings.TrimSpace(resp.RefusalDetails.Category)
+		refusalExplanation = strings.TrimSpace(resp.RefusalDetails.Explanation)
+		if refusalCategory != "" {
+			noticeText += "\n\nCategory: " + refusalCategory
+		}
+		if refusalExplanation != "" {
+			noticeText += "\n\nReason: " + refusalExplanation
+		}
+	}
+
 	// Record a visible refusal notice with EndOfTurn=true. Marked non-retryable:
 	// re-running the identical request just refuses again, so the UI should not
 	// offer a Retry button. Rephrasing the request is what actually helps.
@@ -688,14 +707,14 @@ func (l *Loop) handleRefusal(ctx context.Context, resp *llm.Response) error {
 		Content: []llm.Content{
 			{
 				Type: llm.ContentTypeText,
-				Text: "[The model declined to continue this request. Retrying the same " +
-					"request will likely be declined again; try rephrasing or clarifying " +
-					"the intent instead.]",
+				Text: noticeText,
 			},
 		},
-		EndOfTurn:      true,
-		ErrorType:      llm.ErrorTypeRefusal,
-		ErrorRetryable: false,
+		EndOfTurn:          true,
+		ErrorType:          llm.ErrorTypeRefusal,
+		ErrorRetryable:     false,
+		RefusalCategory:    refusalCategory,
+		RefusalExplanation: refusalExplanation,
 	}
 
 	if err := l.recordMessage(ctx, errorMessage, llm.Usage{}); err != nil {

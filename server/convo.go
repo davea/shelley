@@ -821,6 +821,99 @@ func (cm *ConversationManager) RetryLastLLMRequest(ctx context.Context) error {
 	return nil
 }
 
+// errNotRefusal is returned by ContinueAfterRefusal when the latest message is
+// not a stop_reason=refusal error, so there is nothing to continue past.
+var errNotRefusal = fmt.Errorf("latest message is not a refusal; nothing to continue")
+
+// ContinueAfterRefusal handles the "switch to Opus and continue" affordance a
+// refusal error offers in the UI. A refusal is deliberately non-retryable
+// (re-running the identical request on the SAME model just refuses again), but
+// switching to a more capable model and re-issuing the request usually
+// succeeds. This applies the requested model/reasoning change (recording the
+// usual modelchange marker) and then re-fires the LLM request against the new
+// model. The refusal error row is never mutated; like a retry it is excluded
+// from context, so the new model sees the same request that was refused.
+//
+// ch carries the model switch to apply before continuing; service/modelID name
+// the model to build the loop with (must match ch.NewModel when a switch is
+// requested). retryMu serializes this against concurrent retries/continues.
+func (cm *ConversationManager) ContinueAfterRefusal(ctx context.Context, ch ModelSettingsChange, service llm.Service, modelID string) error {
+	if service == nil {
+		return fmt.Errorf("llm service is required")
+	}
+
+	cm.retryMu.Lock()
+	defer cm.retryMu.Unlock()
+
+	cm.mu.Lock()
+	logger := cm.logger
+	conversationID := cm.conversationID
+	database := cm.db
+	cm.mu.Unlock()
+
+	latest, err := database.GetLatestMessage(ctx, conversationID)
+	if err != nil {
+		return fmt.Errorf("failed to load latest message: %w", err)
+	}
+	if latest.Type != string(db.MessageTypeError) {
+		return errNotRefusal
+	}
+	// Only refusal errors offer the continue-on-another-model affordance. A
+	// generic (llm_request) error uses the ordinary Retry path instead.
+	ud := map[string]any{}
+	if latest.UserData != nil && *latest.UserData != "" {
+		if err := json.Unmarshal([]byte(*latest.UserData), &ud); err != nil {
+			return fmt.Errorf("failed to parse error message user_data: %w", err)
+		}
+	}
+	if errType, _ := ud["error_type"].(string); errType != string(llm.ErrorTypeRefusal) {
+		return errNotRefusal
+	}
+
+	// Dedupe double-clicks without committing the switch yet: if we've already
+	// continued past THIS bottom refusal, bail. The stamp itself is written last
+	// (just before Retry), after all fallible work, so a Hydrate/ensureLoop
+	// failure doesn't permanently wedge a second attempt.
+	cm.mu.Lock()
+	alreadyContinued := cm.lastRetriedErrorMessageID == latest.MessageID
+	cm.mu.Unlock()
+	if alreadyContinued {
+		return errNotRefusal
+	}
+
+	// Apply the model/reasoning switch first (records the modelchange marker and
+	// resets the loop so the next build uses the new settings). Skip when the
+	// change is a no-op so we don't record an empty marker.
+	if ch.NewModel != "" || ch.ReasoningSet {
+		if err := cm.ApplyModelSettings(ctx, ch); err != nil {
+			return fmt.Errorf("failed to switch model before continuing: %w", err)
+		}
+	}
+
+	// Rebuild the loop against the new model and re-fire the refused request.
+	if err := cm.Hydrate(ctx); err != nil {
+		return fmt.Errorf("failed to hydrate before continuing: %w", err)
+	}
+	if err := cm.ensureLoop(service, modelID); err != nil {
+		return fmt.Errorf("failed to build loop before continuing: %w", err)
+	}
+
+	cm.mu.Lock()
+	loopInstance := cm.loop
+	// Stamp the dedup marker now that all fallible setup has succeeded, mirroring
+	// RetryLastLLMRequest's ordering (stamp immediately before Retry).
+	cm.lastRetriedErrorMessageID = latest.MessageID
+	cm.mu.Unlock()
+	if loopInstance == nil {
+		return fmt.Errorf("conversation loop not initialized")
+	}
+
+	logger.Info("continuing after refusal on new model", "message_id", latest.MessageID, "model", modelID)
+	cm.SetAgentWorking(true)
+	loopInstance.Retry()
+	return nil
+}
+
 // QueueMessage appends a user message to the conversation's queued_messages
 // JSON array (the single source of truth for queued user input) and holds it
 // for delivery after the current agent turn (or distillation) completes. It

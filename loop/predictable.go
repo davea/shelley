@@ -337,6 +337,12 @@ func (s *PredictableService) makeRefusalResponse(inputTokens uint64) *llm.Respon
 			{Type: llm.ContentTypeThinking, Thinking: "", Signature: "pred-sig"},
 		},
 		StopReason: llm.StopReasonRefusal,
+		RefusalDetails: &llm.RefusalDetails{
+			Category: "cyber",
+			Explanation: "This request triggered restrictions on violative cyber " +
+				"content and was blocked under Anthropic's Usage Policy. To learn " +
+				"more, see https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback.",
+		},
 		Usage: llm.Usage{
 			InputTokens:  inputTokens,
 			OutputTokens: 42,

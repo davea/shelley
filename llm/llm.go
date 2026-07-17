@@ -211,6 +211,13 @@ type Message struct {
 	// that re-running the LLM request with the same history is likely to
 	// succeed. The UI exposes a Retry button when this is true.
 	ErrorRetryable bool `json:"ErrorRetryable,omitempty"`
+
+	// RefusalCategory and RefusalExplanation carry the provider's structured
+	// reason on an ErrorTypeRefusal message (Anthropic's stop_details). They are
+	// surfaced to the user so they know WHY the model declined. Empty when the
+	// provider gave no reason.
+	RefusalCategory    string `json:"RefusalCategory,omitempty"`
+	RefusalExplanation string `json:"RefusalExplanation,omitempty"`
 }
 
 // ToolUse represents a tool use in the message content.
@@ -575,6 +582,19 @@ type Response struct {
 	// URL is the LLM API endpoint this response came from. Providers set it
 	// so the loop can record which endpoint produced the usage data.
 	URL string
+	// RefusalDetails carries the provider's structured explanation for a
+	// StopReasonRefusal response, when one is supplied (Anthropic returns a
+	// stop_details object on refusals). Nil for non-refusals or providers that
+	// don't surface a reason.
+	RefusalDetails *RefusalDetails
+}
+
+// RefusalDetails is the provider-supplied reason a request was refused
+// (Anthropic's stop_details). Category is a coarse machine-readable bucket
+// (e.g. "cyber"); Explanation is human-readable prose.
+type RefusalDetails struct {
+	Category    string
+	Explanation string
 }
 
 func (m *Response) ToMessage() Message {

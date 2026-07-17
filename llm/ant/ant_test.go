@@ -302,6 +302,77 @@ func TestToLLMResponse(t *testing.T) {
 	}
 }
 
+// TestToLLMResponseRefusalDetails verifies that Anthropic's stop_details on a
+// refusal response is mapped onto llm.Response.RefusalDetails so the loop can
+// surface the reason to the user.
+func TestToLLMResponseRefusalDetails(t *testing.T) {
+	resp := &response{
+		ID:         "msg_refusal",
+		Type:       "message",
+		Role:       "assistant",
+		Model:      ClaudeFable5,
+		Content:    []content{},
+		StopReason: "refusal",
+		StopDetails: &stopDetails{
+			Type:        "refusal",
+			Category:    "cyber",
+			Explanation: "This request triggered restrictions on violative cyber content.",
+		},
+	}
+
+	got := toLLMResponse(resp)
+	if got.StopReason != llm.StopReasonRefusal {
+		t.Fatalf("StopReason = %v, want refusal", got.StopReason)
+	}
+	if got.RefusalDetails == nil {
+		t.Fatal("RefusalDetails should be populated on a refusal")
+	}
+	if got.RefusalDetails.Category != "cyber" {
+		t.Errorf("RefusalDetails.Category = %q, want cyber", got.RefusalDetails.Category)
+	}
+	if !strings.Contains(got.RefusalDetails.Explanation, "cyber content") {
+		t.Errorf("RefusalDetails.Explanation = %q, want it to mention the reason", got.RefusalDetails.Explanation)
+	}
+
+	// A non-refusal stop_details (or none) must not populate RefusalDetails.
+	resp.StopReason = "end_turn"
+	resp.StopDetails = &stopDetails{Type: "end_turn"}
+	if got := toLLMResponse(resp); got.RefusalDetails != nil {
+		t.Errorf("RefusalDetails should be nil for a non-refusal, got %+v", got.RefusalDetails)
+	}
+}
+
+// TestParseSSEStreamRefusalDetails verifies the streaming path captures the
+// refusal stop_details delivered on the message_delta event.
+func TestParseSSEStreamRefusalDetails(t *testing.T) {
+	stream := strings.Join([]string{
+		`event: message_start`,
+		`data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_1","type":"message","role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":22,"output_tokens":7}}}`,
+		``,
+		`event: message_delta`,
+		`data: {"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":"Blocked under policy."}},"usage":{"output_tokens":7}}`,
+		``,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
+		``,
+	}, "\n")
+
+	resp, err := parseSSEStream(strings.NewReader(stream), nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream: %v", err)
+	}
+	ll := toLLMResponse(resp)
+	if ll.StopReason != llm.StopReasonRefusal {
+		t.Fatalf("StopReason = %v, want refusal", ll.StopReason)
+	}
+	if ll.RefusalDetails == nil || ll.RefusalDetails.Category != "cyber" {
+		t.Fatalf("RefusalDetails not captured from stream: %+v", ll.RefusalDetails)
+	}
+	if !strings.Contains(ll.RefusalDetails.Explanation, "Blocked under policy") {
+		t.Errorf("RefusalDetails.Explanation = %q", ll.RefusalDetails.Explanation)
+	}
+}
+
 func TestFromLLMToolUse(t *testing.T) {
 	tests := []struct {
 		name string

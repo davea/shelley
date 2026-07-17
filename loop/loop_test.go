@@ -2122,6 +2122,30 @@ func TestRefusal(t *testing.T) {
 	if !strings.Contains(errMsg.Content[0].Text, "declined") {
 		t.Errorf("error message should explain the refusal, got: %s", errMsg.Content[0].Text)
 	}
+	// The user-visible refusal notice must guide the user toward continuing on a
+	// more capable model: mention switching to Opus and the /model command.
+	if !strings.Contains(errMsg.Content[0].Text, "Opus") {
+		t.Errorf("error message should suggest switching to Opus, got: %s", errMsg.Content[0].Text)
+	}
+	if !strings.Contains(errMsg.Content[0].Text, "/model") {
+		t.Errorf("error message should mention the /model command, got: %s", errMsg.Content[0].Text)
+	}
+	// The provider's structured refusal reason must be captured on the message
+	// and surfaced in the notice text (the predictable service returns a "cyber"
+	// category with an explanation).
+	if errMsg.RefusalCategory != "cyber" {
+		t.Errorf("error message should carry RefusalCategory=cyber, got %q", errMsg.RefusalCategory)
+	}
+	if errMsg.RefusalExplanation == "" {
+		t.Error("error message should carry a RefusalExplanation")
+	}
+	if !strings.Contains(errMsg.Content[0].Text, "Reason:") {
+		t.Errorf("error message should include the refusal reason, got: %s", errMsg.Content[0].Text)
+	}
+	// The coarse category the provider returned must also be visible.
+	if !strings.Contains(errMsg.Content[0].Text, "Category: cyber") {
+		t.Errorf("error message should include the refusal category, got: %s", errMsg.Content[0].Text)
+	}
 
 	// Neither the raw empty refusal nor the synthetic error message may live in
 	// context history: both are user-visible-only artifacts. The cold-start path

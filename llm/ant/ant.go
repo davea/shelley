@@ -266,14 +266,23 @@ func (u *usage) Add(other usage) {
 
 // response represents the response from the message API.
 type response struct {
-	ID           string    `json:"id"`
-	Type         string    `json:"type"`
-	Role         string    `json:"role"`
-	Model        string    `json:"model"`
-	Content      []content `json:"content"`
-	StopReason   string    `json:"stop_reason"`
-	StopSequence *string   `json:"stop_sequence,omitempty"`
-	Usage        usage     `json:"usage"`
+	ID           string       `json:"id"`
+	Type         string       `json:"type"`
+	Role         string       `json:"role"`
+	Model        string       `json:"model"`
+	Content      []content    `json:"content"`
+	StopReason   string       `json:"stop_reason"`
+	StopSequence *string      `json:"stop_sequence,omitempty"`
+	StopDetails  *stopDetails `json:"stop_details,omitempty"`
+	Usage        usage        `json:"usage"`
+}
+
+// stopDetails is Anthropic's structured stop explanation. On a refusal it
+// carries a coarse category (e.g. "cyber") and a human-readable explanation.
+type stopDetails struct {
+	Type        string `json:"type"`
+	Category    string `json:"category,omitempty"`
+	Explanation string `json:"explanation,omitempty"`
 }
 
 type toolChoice struct {
@@ -825,7 +834,7 @@ func toLLMContent(c content) llm.Content {
 }
 
 func toLLMResponse(r *response) *llm.Response {
-	return &llm.Response{
+	resp := &llm.Response{
 		ID:           r.ID,
 		Type:         r.Type,
 		Role:         toLLMRole[r.Role],
@@ -835,6 +844,13 @@ func toLLMResponse(r *response) *llm.Response {
 		StopSequence: r.StopSequence,
 		Usage:        toLLMUsage(r.Usage),
 	}
+	if r.StopDetails != nil && r.StopDetails.Type == "refusal" {
+		resp.RefusalDetails = &llm.RefusalDetails{
+			Category:    r.StopDetails.Category,
+			Explanation: r.StopDetails.Explanation,
+		}
+	}
+	return resp
 }
 
 // streamEvent represents a single SSE event from the Anthropic streaming API.
@@ -872,8 +888,9 @@ type streamDelta struct {
 	Signature string `json:"signature,omitempty"`
 
 	// message_delta
-	StopReason   string  `json:"stop_reason,omitempty"`
-	StopSequence *string `json:"stop_sequence,omitempty"`
+	StopReason   string       `json:"stop_reason,omitempty"`
+	StopSequence *string      `json:"stop_sequence,omitempty"`
+	StopDetails  *stopDetails `json:"stop_details,omitempty"`
 }
 
 // sseEvent represents a parsed Server-Sent Event per the SSE spec.
@@ -1061,6 +1078,9 @@ func parseSSEStream(r io.Reader, onStream func(llm.StreamDelta)) (*response, err
 			if resp != nil {
 				resp.StopReason = delta.StopReason
 				resp.StopSequence = delta.StopSequence
+				if delta.StopDetails != nil {
+					resp.StopDetails = delta.StopDetails
+				}
 			}
 			if event.Usage != nil && resp != nil {
 				// message_delta usage contains output_tokens

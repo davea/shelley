@@ -46,6 +46,10 @@
       />
       <div class="message-content" data-testid="message-content">
         <div class="whitespace-pre-wrap break-words">{{ errorText }}</div>
+        <RefusalContinueButton
+          v-if="isRefusal && isLastMessage"
+          :conversation-id="message.conversation_id"
+        />
         <ErrorRetryButton
           v-if="errorRetryable && isLastMessage"
           :conversation-id="message.conversation_id"
@@ -221,6 +225,7 @@ import WarningMessage from "./WarningMessage.vue";
 import ModelChangeMessage from "./ModelChangeMessage.vue";
 import DistillStatusMessage from "./DistillStatusMessage.vue";
 import ErrorRetryButton from "./ErrorRetryButton.vue";
+import RefusalContinueButton from "./RefusalContinueButton.vue";
 import MessageContentBlock from "./MessageContentBlock.vue";
 import CitedText from "./CitedText.vue";
 import { coalesceContent } from "../../utils/coalesceContent";
@@ -436,6 +441,7 @@ const errorText = computed(() => {
 });
 const errorMeta = computed(() => {
   let retryable = false;
+  let errorType = "";
   if (props.message.user_data) {
     try {
       const ud =
@@ -443,13 +449,18 @@ const errorMeta = computed(() => {
           ? JSON.parse(props.message.user_data)
           : props.message.user_data;
       retryable = !!ud?.retryable;
+      errorType = typeof ud?.error_type === "string" ? ud.error_type : "";
     } catch {
       // ignore
     }
   }
-  return { retryable };
+  return { retryable, errorType };
 });
 const errorRetryable = computed(() => errorMeta.value.retryable);
+// A refusal (stop_reason=refusal) is non-retryable on the same model, but the
+// user can switch to a more capable model (Opus) and continue. Only the
+// bottom-most refusal error offers the affordance.
+const isRefusal = computed(() => errorMeta.value.errorType === "refusal");
 
 // lastMessageId is provided by ChatInterface; an error message only offers its
 // Retry button when it is the bottom-most message (see provide in

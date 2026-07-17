@@ -1027,13 +1027,24 @@ func (s *Server) buildCreateMessageParams(conversationID string, message llm.Mes
 	if len(userData) > 0 {
 		ud = userData[0]
 	}
-	// Stamp retryable flag into user_data for error messages so the UI can
-	// expose a Retry button without parsing llm_data.
-	if message.ErrorType == llm.ErrorTypeLLMRequest && ud == nil {
-		ud = map[string]any{
+	// Stamp the error type + retryable flag into user_data for error messages
+	// so the UI can decide which affordance to show (Retry button for retryable
+	// llm_request errors; the "switch to Opus and continue" action for refusals)
+	// without parsing llm_data.
+	if message.ErrorType != llm.ErrorTypeNone && ud == nil {
+		udMap := map[string]any{
 			"error_type": string(message.ErrorType),
 			"retryable":  message.ErrorRetryable,
 		}
+		// Surface the provider's structured refusal reason so the UI can show the
+		// user WHY the model declined (Anthropic's stop_details).
+		if message.RefusalCategory != "" {
+			udMap["refusal_category"] = message.RefusalCategory
+		}
+		if message.RefusalExplanation != "" {
+			udMap["refusal_explanation"] = message.RefusalExplanation
+		}
+		ud = udMap
 	}
 	// End-of-turn agent and error messages mean the agent has finished. Fold
 	// the agent_working=false flip into the message-INSERT Tx so a single
