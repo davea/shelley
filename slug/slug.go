@@ -124,9 +124,15 @@ func hasTag(tags, tag string) bool {
 	return false
 }
 
+// PromptPreamble is the fixed leading text of the slug-generation prompt. It is
+// exported so tests (e.g. fake LLM services shared with the agent loop) can
+// reliably distinguish a slug request from a real agent turn. Keep it in sync
+// with the format string in callSlugLLM.
+const PromptPreamble = "Generate a short, descriptive slug (2-6 words, lowercase, hyphen-separated) for a conversation that starts with this user message:"
+
 // callSlugLLM calls an LLM service to generate a slug from a user message.
 func callSlugLLM(ctx context.Context, llmService llm.Service, userMessage string) (string, error) {
-	slugPrompt := fmt.Sprintf(`Generate a short, descriptive slug (2-6 words, lowercase, hyphen-separated) for a conversation that starts with this user message:
+	slugPrompt := fmt.Sprintf(PromptPreamble+`
 
 %s
 

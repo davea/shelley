@@ -16,19 +16,43 @@ import (
 	"shelley.exe.dev/db"
 	"shelley.exe.dev/llm"
 	"shelley.exe.dev/loop"
+	"shelley.exe.dev/slug"
 )
 
-// refuseThenOKService refuses the first request (stop_reason=refusal) and then
-// returns a normal assistant message on every subsequent request. This lets us
-// exercise the "switch model and continue" flow end-to-end: the first model
-// declines, and continuing on a new model succeeds.
+// refuseThenOKService refuses the first *agent* request (stop_reason=refusal)
+// and then returns a normal assistant message on every subsequent request. This
+// lets us exercise the "switch model and continue" flow end-to-end: the first
+// model declines, and continuing on a new model succeeds.
+//
+// Slug generation runs concurrently on the first user message and shares this
+// same service. It must NOT consume the "first request" refusal slot, or the
+// refusal races into the throwaway slug request while the real agent turn gets
+// the OK response — then no refusal is ever recorded and the test wedges. Slug
+// requests carry a distinctive prompt preamble (slug.PromptPreamble), so we
+// detect and delegate them to the inner PredictableService without touching the
+// refusal counter.
 type refuseThenOKService struct {
 	inner *loop.PredictableService
 	mu    sync.Mutex
 	calls int
 }
 
+func isSlugRequest(req *llm.Request) bool {
+	for _, m := range req.Messages {
+		for _, c := range m.Content {
+			if strings.Contains(c.Text, slug.PromptPreamble) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s *refuseThenOKService) Do(ctx context.Context, req *llm.Request) (*llm.Response, error) {
+	// Slug generation shares this service; never let it consume the refusal slot.
+	if isSlugRequest(req) {
+		return s.inner.Do(ctx, req)
+	}
 	s.mu.Lock()
 	n := s.calls
 	s.calls++
