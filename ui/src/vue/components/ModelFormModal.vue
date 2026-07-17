@@ -52,12 +52,12 @@
             {{ t("customEndpoint") }}
           </button>
         </div>
-        <input
+        <InputText
           v-if="form.endpoint_custom"
-          type="text"
           v-model="form.endpoint"
           placeholder="https://..."
-          class="form-input"
+          fluid
+          :dt="inputFieldDt"
         />
         <div v-else class="endpoint-display">{{ form.endpoint }}</div>
       </div>
@@ -65,14 +65,14 @@
       <!-- Model Name with autocomplete suggestions -->
       <div class="form-group">
         <label>{{ t("model") }}</label>
-        <input
-          type="text"
-          :value="form.model_name"
+        <InputText
+          :model-value="form.model_name"
           placeholder="Model name (e.g., claude-sonnet-4-6)"
-          class="form-input"
+          fluid
+          :dt="inputFieldDt"
           :list="`model-name-suggestions-${form.provider_type}`"
           autocomplete="off"
-          @input="onModelNameInput(($event.target as HTMLInputElement).value)"
+          @update:model-value="onModelNameInput($event ?? '')"
         />
         <datalist :id="`model-name-suggestions-${form.provider_type}`">
           <option
@@ -88,22 +88,22 @@
       <!-- Display Name -->
       <div class="form-group">
         <label>{{ t("displayName") }}</label>
-        <input
-          type="text"
+        <InputText
           v-model="form.display_name"
           :placeholder="t('nameShownInSelector')"
-          class="form-input"
+          fluid
+          :dt="inputFieldDt"
         />
       </div>
 
       <!-- API Key -->
       <div class="form-group">
         <label>{{ t("apiKey") }}</label>
-        <input
-          type="text"
+        <InputText
           v-model="form.api_key"
           :placeholder="t('enterApiKey')"
-          class="form-input"
+          fluid
+          :dt="inputFieldDt"
           autocomplete="off"
         />
       </div>
@@ -111,22 +111,26 @@
       <!-- Max Tokens -->
       <div class="form-group">
         <label>{{ t("maxContextTokens") }}</label>
-        <input
+        <InputText
           type="number"
-          :value="form.max_tokens"
-          class="form-input"
-          @input="form.max_tokens = parseInt(($event.target as HTMLInputElement).value) || 200000"
+          :model-value="String(form.max_tokens)"
+          fluid
+          :dt="inputFieldDt"
+          @update:model-value="form.max_tokens = parseInt($event ?? '') || 200000"
         />
       </div>
 
       <!-- Image input support -->
       <div class="form-group">
         <label>{{ t("imageSupport") }}</label>
-        <select v-model="form.image_support" class="form-input">
-          <option value="auto">{{ t("imageSupportAuto") }}</option>
-          <option value="yes">{{ t("imageSupportYes") }}</option>
-          <option value="no">{{ t("imageSupportNo") }}</option>
-        </select>
+        <Select
+          v-model="form.image_support"
+          :options="imageSupportOptions"
+          option-label="label"
+          option-value="value"
+          fluid
+          :dt="selectFieldDt"
+        />
         <div class="form-hint">{{ t("imageSupportHelp") }}</div>
         <div v-if="editingResolvedAuto" class="form-hint">
           <code>auto({{ editingResolvedAuto.endpoint }}, {{ editingResolvedAuto.model }})</code>
@@ -138,11 +142,11 @@
       <!-- Legacy provider default for OpenAI Responses models -->
       <div v-if="form.provider_type === 'openai-responses'" class="form-group">
         <label>{{ t("reasoningEffort") }}</label>
-        <input
+        <InputText
           v-model="form.reasoning_effort"
-          type="text"
           :placeholder="t('reasoningEffortPlaceholder')"
-          class="form-input"
+          fluid
+          :dt="inputFieldDt"
           list="reasoning-effort-suggestions"
           autocomplete="off"
         />
@@ -159,11 +163,14 @@
       <!-- Reasoning capability and generic level mapping -->
       <div class="form-group">
         <label>{{ t("supportsReasoning") }}</label>
-        <select v-model="form.reasoning_support" class="form-input">
-          <option value="auto">{{ t("reasoningSupportAuto") }}</option>
-          <option value="yes">{{ t("reasoningSupportYes") }}</option>
-          <option value="no">{{ t("reasoningSupportNo") }}</option>
-        </select>
+        <Select
+          v-model="form.reasoning_support"
+          :options="reasoningSupportOptions"
+          option-label="label"
+          option-value="value"
+          fluid
+          :dt="selectFieldDt"
+        />
         <div class="form-hint">
           {{ t("reasoningSupportHelp") }}
         </div>
@@ -174,9 +181,11 @@
           <label v-for="level in REASONING_LEVELS" :key="level" class="reasoning-map-row">
             <span>{{ level }}</span>
             <span class="reasoning-map-arrow" aria-hidden="true">→</span>
-            <input
+            <InputText
               v-model="form.reasoning_map[level]"
-              class="form-input reasoning-map-input"
+              class="reasoning-map-input"
+              fluid
+              :dt="inputFieldDt"
               :list="`reasoning-map-${level}`"
               :placeholder="t('reasoningMappingUnsupported')"
             />
@@ -214,11 +223,11 @@
             </span>
           </span>
         </label>
-        <input
-          type="text"
+        <InputText
           v-model="form.tags"
           :placeholder="t('tagsPlaceholder')"
-          class="form-input"
+          fluid
+          :dt="inputFieldDt"
         />
       </div>
 
@@ -258,6 +267,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import Button from "primevue/button";
+import InputText from "primevue/inputtext";
+import Select from "primevue/select";
+import { inputFieldDt, selectFieldDt } from "./configFieldDt";
 import Modal from "./Modal.vue";
 import { useI18n } from "../composables/i18n";
 import {
@@ -283,6 +295,17 @@ const props = defineProps<{ isOpen: boolean; editModel: CustomModel | null }>();
 const emit = defineEmits<{ (e: "close"): void; (e: "saved"): void }>();
 
 const { t } = useI18n();
+
+const imageSupportOptions = computed(() => [
+  { label: t("imageSupportAuto"), value: "auto" },
+  { label: t("imageSupportYes"), value: "yes" },
+  { label: t("imageSupportNo"), value: "no" },
+]);
+const reasoningSupportOptions = computed(() => [
+  { label: t("reasoningSupportAuto"), value: "auto" },
+  { label: t("reasoningSupportYes"), value: "yes" },
+  { label: t("reasoningSupportNo"), value: "no" },
+]);
 
 const form = reactive<FormData>({ ...emptyForm });
 const error = ref<string | null>(null);

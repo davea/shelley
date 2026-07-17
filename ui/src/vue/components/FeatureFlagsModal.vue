@@ -31,13 +31,15 @@
           <span>{{ effective(flag) === true ? "true" : "false" }}</span>
         </label>
         <template v-else>
-          <textarea
-            class="form-input feature-flag-json"
-            :value="draft[flag.name]"
+          <Textarea
+            class="feature-flag-json"
+            :model-value="draft[flag.name]"
             spellcheck="false"
+            fluid
+            :dt="inputFieldDt"
             :rows="Math.min(8, (draft[flag.name] ?? '').split('\n').length)"
             :disabled="busy[flag.name]"
-            @input="draft[flag.name] = ($event.target as HTMLTextAreaElement).value"
+            @update:model-value="draft[flag.name] = $event ?? ''"
           />
           <div class="feature-flag-actions">
             <Button
@@ -72,6 +74,8 @@
 import { reactive, ref, watch } from "vue";
 import Modal from "./Modal.vue";
 import Button from "primevue/button";
+import Textarea from "primevue/textarea";
+import { inputFieldDt } from "./configFieldDt";
 import { featureFlagsApi, type FeatureFlag } from "../../services/api";
 import { refreshFeatureFlags } from "../composables/featureFlags";
 

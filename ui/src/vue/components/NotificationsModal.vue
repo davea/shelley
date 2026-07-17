@@ -31,10 +31,11 @@
 
     <div class="form-group">
       <label>{{ t("displayName") }}</label>
-      <input
-        class="form-input"
+      <InputText
         v-model="form.display_name"
         :placeholder="getTypeLabel(form.channel_type)"
+        fluid
+        :dt="inputFieldDt"
       />
     </div>
 
@@ -202,6 +203,8 @@
 import { computed, reactive, ref, watch } from "vue";
 import Modal from "./Modal.vue";
 import Button from "primevue/button";
+import InputText from "primevue/inputtext";
+import { inputFieldDt } from "./configFieldDt";
 import { useI18n } from "../composables/i18n";
 import ConfigFieldInput from "./ConfigFieldInput.vue";
 import {
