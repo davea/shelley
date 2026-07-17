@@ -107,18 +107,40 @@ func TestLLMIntegrationSourceLabelsAndFiltering(t *testing.T) {
 	integ := &LLMIntegrationConfig{
 		Name: "llm", Host: "llm.int.exe.xyz", URL: "https://llm.int.exe.xyz",
 		Models: []IntegrationModel{
+			{ID: "anthropic/claude-opus-4-8", Provider: "anthropic", NativeID: "claude-opus-4-8", APIs: []string{"anthropic_messages"}},
 			{ID: "anthropic/claude-opus-4-7", Provider: "anthropic", NativeID: "claude-opus-4-7", APIs: []string{"anthropic_messages"}},
+			{ID: "anthropic/claude-opus-4-6", Provider: "anthropic", NativeID: "claude-opus-4-6", APIs: []string{"anthropic_messages"}},
+			{ID: "anthropic/claude-sonnet-4-6", Provider: "anthropic", NativeID: "claude-sonnet-4-6", APIs: []string{"anthropic_messages"}},
 			{ID: "openai/gpt-5.6-sol", Provider: "openai", NativeID: "gpt-5.6-sol", APIs: []string{"openai_chat", "openai_responses"}},
 			{ID: "openai/gpt-5.6-terra", Provider: "openai", NativeID: "gpt-5.6-terra", APIs: []string{"openai_chat", "openai_responses"}},
 			{ID: "openai/gpt-5.6-luna", Provider: "openai", NativeID: "gpt-5.6-luna", APIs: []string{"openai_chat", "openai_responses"}},
 			{ID: "openai/gpt-5.5", Provider: "openai", NativeID: "gpt-5.5", APIs: []string{"openai_responses"}},
 			{ID: "fireworks/glm-5p2", Provider: "fireworks", NativeID: "accounts/fireworks/models/glm-5p2", APIs: []string{"openai_chat"}},
+			{ID: "fireworks/kimi-k2p6", Provider: "fireworks", NativeID: "accounts/fireworks/models/kimi-k2p6", APIs: []string{"openai_chat"}},
+			{ID: "fireworks/deepseek-v4-pro", Provider: "fireworks", NativeID: "accounts/fireworks/models/deepseek-v4-pro", APIs: []string{"openai_chat"}},
+			{ID: "fireworks/deepseek-v4-flash", Provider: "fireworks", NativeID: "accounts/fireworks/models/deepseek-v4-flash", APIs: []string{"openai_chat"}},
+			{ID: "fireworks/qwen3p6-plus", Provider: "fireworks", NativeID: "accounts/fireworks/models/qwen3p6-plus", APIs: []string{"openai_chat"}},
 			{ID: "fireworks/gpt-oss-20b", Provider: "fireworks", NativeID: "accounts/fireworks/models/gpt-oss-20b", APIs: []string{"openai_chat"}},
 		},
 	}
 	bs := Build(models.All(), []Source{LLMIntegration(integ, ""), Predictable()}, &http.Client{}, nil)
 	wantLabel := "llm.int.exe.xyz"
-	for _, id := range []string{"claude-opus-4-7", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "glm-5p2", "gpt-oss-20b"} {
+	for _, id := range []string{
+		"claude-opus-4.8",
+		"claude-opus-4.7",
+		"claude-opus-4.6",
+		"claude-sonnet-4.6",
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
+		"gpt-5.5",
+		"glm-5.2-fireworks",
+		"kimi-k2.6-fireworks",
+		"deepseek-v4-pro-fireworks",
+		"deepseek-v4-flash-fireworks",
+		"qwen3.6-plus-fireworks",
+		"gpt-oss-20b-fireworks",
+	} {
 		b := findBuilt(bs, id)
 		if b == nil {
 			t.Errorf("%q should be built", id)
@@ -128,7 +150,18 @@ func TestLLMIntegrationSourceLabelsAndFiltering(t *testing.T) {
 			t.Errorf("%s source = %q, want %q", id, b.Source, wantLabel)
 		}
 	}
-	for _, id := range []string{"anthropic/claude-opus-4-7", "openai/gpt-5.5", "claude-opus-4.7", "glm-5.2-fireworks", "gemini-3-pro", "claude-opus-4.6"} {
+	for _, id := range []string{
+		"anthropic/claude-opus-4-7",
+		"openai/gpt-5.5",
+		"claude-opus-4-7",
+		"glm-5p2",
+		"kimi-k2p6",
+		"deepseek-v4-pro",
+		"deepseek-v4-flash",
+		"qwen3p6-plus",
+		"gpt-oss-20b",
+		"gemini-3-pro",
+	} {
 		if b := findBuilt(bs, id); b != nil {
 			t.Errorf("%q should NOT be built, got %+v", id, b)
 		}
@@ -152,8 +185,8 @@ func TestLLMIntegrationEnrichesCompatibleCatalogModel(t *testing.T) {
 		t.Fatalf("built models = %+v, want one", got)
 	}
 	built := got[0]
-	if built.ID != "sol-upstream-id" {
-		t.Errorf("ID = %q, want upstream-driven ID", built.ID)
+	if built.ID != "gpt-5.6-sol" {
+		t.Errorf("ID = %q, want stable catalog ID", built.ID)
 	}
 	if built.BaseURL != integrationURL {
 		t.Errorf("BaseURL = %q, want %q", built.BaseURL, integrationURL)
@@ -222,6 +255,9 @@ func TestLLMIntegrationUnknownModelUsesDynamicCapabilities(t *testing.T) {
 	got := Build(models.All(), []Source{LLMIntegration(integ, "")}, &http.Client{}, nil)
 	if len(got) != 1 {
 		t.Fatalf("built models = %+v, want one", got)
+	}
+	if got[0].ID != "upstream-only" {
+		t.Errorf("ID = %q, want short upstream ID", got[0].ID)
 	}
 	service, ok := got[0].Service.(*oai.ResponsesService)
 	if !ok {
@@ -300,7 +336,7 @@ func TestLLMIntegrationModelsJSONIsAuthoritative(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("built models = %+v, want exactly the three integration models", got)
 	}
-	wantIDs := []string{"upstream-only@llm2", "known-but-renamed@llm2", "upstream-chat@llm2"}
+	wantIDs := []string{"upstream-only@llm2", "claude-opus-4.7@llm2", "upstream-chat@llm2"}
 	for i, want := range wantIDs {
 		if got[i].ID != want {
 			t.Fatalf("built model %d ID = %q, want %q", i, got[i].ID, want)
@@ -386,6 +422,26 @@ func TestLLMIntegrationKeepsProviderPrefixesForShortIDCollisions(t *testing.T) {
 	}
 }
 
+func TestLLMIntegrationStableCatalogIDWinsShortIDCollision(t *testing.T) {
+	integ := &LLMIntegrationConfig{
+		Name: "llm", Host: "llm.int.exe.xyz", URL: "https://llm.int.exe.xyz",
+		Models: []IntegrationModel{
+			{ID: "openrouter/claude-opus-4.7", Provider: "openrouter", NativeID: "openrouter-opus", APIs: []string{"openai_chat"}},
+			{ID: "anthropic/renamed-upstream", Provider: "anthropic", NativeID: "claude-opus-4-7", APIs: []string{"anthropic_messages"}},
+		},
+	}
+
+	got := Build(models.All(), []Source{LLMIntegration(integ, "")}, &http.Client{}, nil)
+	if len(got) != 2 {
+		t.Fatalf("built models = %+v, want two", got)
+	}
+	for i, want := range []string{"openrouter/claude-opus-4.7", "claude-opus-4.7"} {
+		if got[i].ID != want {
+			t.Errorf("built model %d ID = %q, want %q", i, got[i].ID, want)
+		}
+	}
+}
+
 func TestLLMIntegrationCollisionResolutionSpansSourcesBeforeSuffixes(t *testing.T) {
 	primary := &LLMIntegrationConfig{
 		Name: "primary", Host: "primary.int.exe.xyz", URL: "https://primary.int.exe.xyz",
@@ -457,10 +513,10 @@ func TestLLMIntegrationCatalogAndDynamicImageCapabilities(t *testing.T) {
 		id   string
 		want bool
 	}{
-		{"image", true},
-		{"text", true},
-		{"responses-image", true},
-		{"responses-text", true},
+		{"claude-opus-4.7", true},
+		{"claude-opus-4.6", true},
+		{"gpt-5.6-sol", true},
+		{"gpt-5.5", true},
 		{"chat-image", true},
 		{"chat-text", false},
 	} {
@@ -645,15 +701,15 @@ func TestMultipleLLMIntegrationsUnionWithSuffix(t *testing.T) {
 		LLMIntegration(secondary, "@llm2"),
 		Predictable(),
 	}, &http.Client{}, nil)
-	for _, id := range []string{"anthropic/claude-opus-4-7", "gpt-5.5", "anthropic/claude-opus-4-7@llm2", "claude-sonnet-4-6@llm2"} {
+	for _, id := range []string{"claude-opus-4.7", "gpt-5.5", "claude-opus-4.7@llm2", "claude-sonnet-4.6@llm2"} {
 		if findBuilt(bs, id) == nil {
 			t.Errorf("missing %q", id)
 		}
 	}
-	if b := findBuilt(bs, "anthropic/claude-opus-4-7"); b == nil || b.Source != "llm.int.exe.xyz" {
+	if b := findBuilt(bs, "claude-opus-4.7"); b == nil || b.Source != "llm.int.exe.xyz" {
 		t.Errorf("primary collision lost: %+v", b)
 	}
-	if b := findBuilt(bs, "anthropic/claude-opus-4-7@llm2"); b == nil || b.Source != "llm2.int.exe.xyz" {
+	if b := findBuilt(bs, "claude-opus-4.7@llm2"); b == nil || b.Source != "llm2.int.exe.xyz" {
 		t.Errorf("suffixed model wrong: %+v", b)
 	}
 }
@@ -688,8 +744,8 @@ func TestBuiltBaseURLResolution(t *testing.T) {
 		},
 	}
 	bs = Build(models.All(), []Source{LLMIntegration(integ, "")}, &http.Client{}, nil)
-	if b := findBuilt(bs, "claude-opus-4-7"); b == nil || b.BaseURL != "https://llm.int.exe.xyz" {
-		t.Errorf("claude-opus-4-7 BaseURL: %+v", b)
+	if b := findBuilt(bs, "claude-opus-4.7"); b == nil || b.BaseURL != "https://llm.int.exe.xyz" {
+		t.Errorf("claude-opus-4.7 BaseURL: %+v", b)
 	}
 	if b := findBuilt(bs, "gpt-5.5"); b == nil || b.BaseURL != "https://llm.int.exe.xyz" {
 		t.Errorf("gpt-5.5 BaseURL: %+v", b)

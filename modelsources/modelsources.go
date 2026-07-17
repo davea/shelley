@@ -166,10 +166,10 @@ func Build(catalog []models.Model, sources []Source, httpc *http.Client, logger 
 	var out []models.Built
 	seen := map[string]bool{}
 	reservedIDs := nonIntegrationModelIDs(catalog, sources)
-	candidateCounts := integrationModelCandidateCounts(sources)
+	candidateCounts := integrationModelCandidateCounts(catalog, sources)
 	for _, src := range sources {
 		if src.integration != nil {
-			ids := integrationModelIDs(src.integration.Models, src.idSuffix, candidateCounts, reservedIDs, seen)
+			ids := integrationModelIDs(catalog, src.integration.Models, src.idSuffix, candidateCounts, reservedIDs, seen)
 			for i, m := range src.integration.Models {
 				id := ids[i]
 				if m.ID == "" || seen[id] {
@@ -240,7 +240,7 @@ func nonIntegrationModelIDs(catalog []models.Model, sources []Source) map[string
 	return ids
 }
 
-func integrationModelCandidateCounts(sources []Source) map[string]int {
+func integrationModelCandidateCounts(catalog []models.Model, sources []Source) map[string]int {
 	counts := map[string]int{}
 	for _, src := range sources {
 		if src.integration == nil {
@@ -250,19 +250,21 @@ func integrationModelCandidateCounts(sources []Source) map[string]int {
 			if model.ID == "" || model.apiModelName() == "" || !integrationModelSupportedByShelley(model) {
 				continue
 			}
-			counts[providerStrippedIntegrationID(model.ID)]++
+			candidate, _ := integrationModelIDCandidate(catalog, model)
+			counts[candidate]++
 		}
 	}
 	return counts
 }
 
-func integrationModelIDs(integrationModels []IntegrationModel, idSuffix string, candidateCounts map[string]int, reservedIDs, seen map[string]bool) []string {
+func integrationModelIDs(catalog []models.Model, integrationModels []IntegrationModel, idSuffix string, candidateCounts map[string]int, reservedIDs, seen map[string]bool) []string {
 	candidates := make([]string, len(integrationModels))
+	catalogMatches := make([]bool, len(integrationModels))
 	for i, model := range integrationModels {
 		if model.ID == "" || model.apiModelName() == "" || !integrationModelSupportedByShelley(model) {
 			continue
 		}
-		candidates[i] = providerStrippedIntegrationID(model.ID)
+		candidates[i], catalogMatches[i] = integrationModelIDCandidate(catalog, model)
 	}
 
 	qualified := make([]bool, len(integrationModels))
@@ -271,7 +273,7 @@ func integrationModelIDs(integrationModels []IntegrationModel, idSuffix string, 
 			continue
 		}
 		shortID := candidate + idSuffix
-		qualified[i] = candidateCounts[candidate] > 1 || reservedIDs[shortID] || seen[shortID]
+		qualified[i] = !catalogMatches[i] && (candidateCounts[candidate] > 1 || reservedIDs[shortID] || seen[shortID])
 	}
 
 	ids := make([]string, len(integrationModels))
@@ -286,6 +288,13 @@ func integrationModelIDs(integrationModels []IntegrationModel, idSuffix string, 
 		}
 	}
 	return ids
+}
+
+func integrationModelIDCandidate(catalog []models.Model, model IntegrationModel) (string, bool) {
+	if catalogModel, ok := compatibleCatalogModel(catalog, model); ok {
+		return catalogModel.ID, true
+	}
+	return providerStrippedIntegrationID(model.ID), false
 }
 
 func providerStrippedIntegrationID(id string) string {
