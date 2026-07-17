@@ -63,7 +63,6 @@ export function toolEmoji(name: string | undefined | null, input?: unknown): str
       return "🔍";
     case "browser_recent_console_logs":
     case "browser_clear_console_logs":
-    case "read_context_file":
       return "📋";
     case "browser_emulate":
       return "📱";
@@ -106,7 +105,6 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   patch: "File edit",
   change_dir: "Change directory",
   read_image: "Read image",
-  read_context_file: "Read file",
   keyword_search: "Keyword search",
   web_search: "Web search",
   subagent: "Subagent",
@@ -394,7 +392,6 @@ function inputSummary(name: string | undefined | null, input: unknown): string {
       return pick("command");
     case "patch":
     case "change_dir":
-    case "read_context_file":
       return pick("path");
     case "screenshot":
     case "browser_take_screenshot":

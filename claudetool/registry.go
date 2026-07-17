@@ -13,7 +13,7 @@ type ToolInfo struct {
 // whether it is on by default. This is what the UI enumerates in the gear menu
 // and what the API accepts in tool_overrides.
 //
-// Keep in sync with NewToolSet / NewOrchestratorToolSet / browse.RegisterBrowserTools.
+// Keep in sync with NewToolSet / browse.RegisterBrowserTools.
 var ToolRegistry = []ToolInfo{
 	{Name: "bash", Summary: "Run shell commands.", DefaultOn: true},
 	{Name: "shell", Summary: "Run shell commands.", DefaultOn: false},
@@ -23,7 +23,6 @@ var ToolRegistry = []ToolInfo{
 	{Name: "output_iframe", Summary: "Show HTML/visualizations to the user.", DefaultOn: true},
 	{Name: "subagent", Summary: "Spawn a subagent conversation.", DefaultOn: true},
 	{Name: "llm_one_shot", Summary: "One-shot prompt to another LLM.", DefaultOn: true},
-	{Name: "read_context_file", Summary: "Read a file from the orchestrator context dir.", DefaultOn: true},
 	{Name: "browser", Summary: "Browser automation (navigate, eval, screenshot, emulate, network, accessibility, profile).", DefaultOn: true},
 	{Name: "read_image", Summary: "Read an image file for the model.", DefaultOn: true},
 }

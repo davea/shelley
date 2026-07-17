@@ -35,19 +35,6 @@ import (
 	"shelley.exe.dev/version"
 )
 
-// detectCLIAgents checks which CLI agent binaries are available in PATH.
-// Returns a list of agent identifiers (e.g., "claude-cli", "codex-cli").
-func detectCLIAgents() []string {
-	var agents []string
-	if _, err := exec.LookPath("claude"); err == nil {
-		agents = append(agents, "claude-cli")
-	}
-	if _, err := exec.LookPath("codex"); err == nil {
-		agents = append(agents, "codex-cli")
-	}
-	return agents
-}
-
 // handleRead serves files from limited allowed locations via /api/read?path=
 func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -734,7 +721,6 @@ func (s *Server) serveIndexWithInit(w http.ResponseWriter, r *http.Request, fs h
 	// Whether this VM has an exe.dev "notify" integration, so the UI can show
 	// the auto-configured push-notification toggle.
 	initData["exe_notify_available"] = s.exeNotifyAvailable()
-	initData["cli_agents"] = detectCLIAgents()
 	if s.Banner != "" {
 		initData["banner"] = s.Banner
 	}
@@ -1173,7 +1159,7 @@ func (s *Server) handleChatConversation(w http.ResponseWriter, r *http.Request, 
 		// Apply send-time conversation_options. The web UI autosaves a draft
 		// (via POST /draft) as soon as the composer has text, and that draft is
 		// born WITHOUT options. The user's actual selection (thinking level,
-		// orchestrator mode, tool overrides) only travels with the promoting
+		// tool overrides) only travels with the promoting
 		// chat request, so without this the selection is dropped and reasoning
 		// is silently disabled for adaptive models.
 		if req.ConversationOptions != nil {
@@ -1251,7 +1237,6 @@ func (s *Server) handleChatConversation(w http.ResponseWriter, r *http.Request, 
 		Cwd:            manager.cwd,
 		Model:          modelID,
 		UserEmail:      userEmail,
-		IsOrchestrator: manager.conversationOptions.IsOrchestrator(),
 	})
 	if slashResult.Err != nil {
 		s.logger.Error("slash-command hook failed", "conversationID", conversationID, "error", slashResult.Err)
@@ -1414,7 +1399,6 @@ func (s *Server) handleNewConversation(w http.ResponseWriter, r *http.Request) {
 		Cwd:    derefString(cwdPtr),
 		Readonly: NewConversationReadonly{
 			ConversationID: conversationID,
-			IsOrchestrator: convOpts.IsOrchestrator(),
 			Headers:        HookHeaders(r.Header),
 		},
 	})
@@ -1491,7 +1475,6 @@ func (s *Server) handleNewConversation(w http.ResponseWriter, r *http.Request) {
 		Cwd:               hookResult.Cwd,
 		Model:             modelID,
 		UserEmail:         userEmail,
-		IsOrchestrator:    convOpts.IsOrchestrator(),
 	})
 	if slashResult.Err != nil {
 		s.logger.Error("slash-command hook failed", "conversationID", conversationID, "error", slashResult.Err)
@@ -3693,12 +3676,6 @@ func validateModelReasoningLevel(model *ModelInfo, level string) string {
 }
 
 func validateConversationOptions(opts db.ConversationOptions) string {
-	if opts.Type != "" && opts.Type != "normal" && opts.Type != "orchestrator" {
-		return fmt.Sprintf("Invalid conversation options type: %s", opts.Type)
-	}
-	if opts.SubagentBackend != "" && opts.SubagentBackend != "shelley" && opts.SubagentBackend != "claude-cli" && opts.SubagentBackend != "codex-cli" {
-		return fmt.Sprintf("Invalid subagent_backend: %s; must be one of: shelley, claude-cli, codex-cli", opts.SubagentBackend)
-	}
 	for name, v := range opts.ToolOverrides {
 		if v != "on" && v != "off" {
 			return fmt.Sprintf("Invalid tool_overrides[%s]=%q; must be \"on\" or \"off\"", name, v)

@@ -1,6 +1,6 @@
 <!-- Vue port of components/SubagentTool.tsx.
      Preserves: .tool, .tool-header, .tool-summary, .tool-emoji ⚡, .tool-name,
-     .tool-badge, .cli-agent-badge, .subagent-model-badge, .tool-error,
+     .tool-badge, .subagent-model-badge, .tool-error,
      .tool-success, .tool-command, .tool-toggle, .tool-details, .tool-section,
      .tool-label, .tool-code, .tool-time, .subagent-link,
      data-testid tool-call-running/completed.
@@ -15,7 +15,6 @@
       <div class="tool-summary">
         <span class="tool-emoji" :class="{ running: isRunning }">⚡</span>
         <span class="tool-name">subagent</span>
-        <span v-if="cliAgentLabel" class="tool-badge cli-agent-badge">{{ cliAgentLabel }}</span>
         <span v-if="isComplete && hasError" class="tool-error">✗</span>
         <span v-if="isComplete && !hasError" class="tool-success">✓</span>
         <span class="tool-command" :title="prompt">{{ commandText }}</span>
@@ -97,7 +96,7 @@ const props = defineProps<{
   toolResult?: LLMContent[];
   hasError?: boolean;
   executionTime?: string;
-  displayData?: { slug?: string; conversation_id?: string; cli_agent?: string; status?: string };
+  displayData?: { slug?: string; conversation_id?: string; status?: string };
 }>();
 
 const isExpanded = useToolExpanded();
@@ -113,12 +112,6 @@ const prompt = computed(() => input.value.prompt || "");
 const model = computed(() => input.value.model || "");
 const wait = computed(() => input.value.wait !== false);
 const timeout = computed(() => input.value.timeout_seconds || 60);
-
-// Detect CLI agent backend from display data
-const cliAgentLabel = computed(() => {
-  const cliAgent = props.displayData?.cli_agent; // "claude-cli" or "codex-cli"
-  return cliAgent === "claude-cli" ? "Claude CLI" : cliAgent === "codex-cli" ? "Codex CLI" : null;
-});
 
 // Extract result text
 const resultText = computed(

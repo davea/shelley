@@ -259,7 +259,7 @@ func extractPiFileOps(messages []llm.Message) (readFiles, modifiedFiles []string
 			// plain "read" tool (file reads go through bash); "patch" is the
 			// only file-mutating tool with a path.
 			switch c.ToolName {
-			case "read_image", "read_context_file":
+			case "read_image":
 				read[path] = true
 			case "patch":
 				modified[path] = true

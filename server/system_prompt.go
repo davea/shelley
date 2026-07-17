@@ -28,15 +28,6 @@ var systemPromptTemplate string
 //go:embed subagent_system_prompt.txt
 var subagentSystemPromptTemplate string
 
-//go:embed orchestrator_system_prompt.txt
-var orchestratorSystemPromptTemplate string
-
-//go:embed operational_context.txt
-var operationalContextTemplate string
-
-//go:embed orchestrator_subagent_system_prompt.txt
-var orchestratorSubagentSystemPromptTemplate string
-
 // SystemPromptData contains all the data needed to render the system prompt template
 type SystemPromptData struct {
 	WorkingDirectory string
@@ -183,8 +174,7 @@ func HookHeaders(h http.Header) [][2]string {
 //	  "readonly": {
 //	    "conversation_id": "abc-123",
 //	    "is_subagent": false,
-//	    "parent_id": "",
-//	    "is_orchestrator": false
+//	    "parent_id": ""
 //	  }
 //	}
 //
@@ -211,7 +201,6 @@ type NewConversationReadonly struct {
 	ConversationID string `json:"conversation_id"`
 	IsSubagent     bool   `json:"is_subagent"`
 	ParentID       string `json:"parent_id,omitempty"`
-	IsOrchestrator bool   `json:"is_orchestrator"`
 	// Headers is the list of HTTP request headers from the incoming request
 	// that triggered the new conversation, as [name, value] pairs sorted by
 	// name. Multi-valued headers produce one pair per value. Empty for
@@ -474,7 +463,6 @@ type SlashCommandHookInput struct {
 	Cwd               string `json:"cwd,omitempty"`
 	Model             string `json:"model,omitempty"`
 	UserEmail         string `json:"user_email,omitempty"`
-	IsOrchestrator    bool   `json:"is_orchestrator,omitempty"`
 }
 
 // SlashCommandHookResult describes the effect of a slash-command hook.
@@ -957,29 +945,12 @@ func isSudoAvailable() bool {
 }
 
 // SubagentSystemPromptData contains data for subagent system prompts (minimal subset).
-// Used in two contexts:
-//   - Non-orchestrator subagents (GenerateSubagentSystemPrompt): WorkingDirectory, GitInfo,
-//     ShelleyDBPath, and ConversationID are populated; OperationalContext is not used.
-//   - Orchestrator subagents (GenerateOrchestratorSubagentSystemPrompt): only OperationalContext
-//     is populated (it already contains pwd, git root, codebase info, etc.).
 type SubagentSystemPromptData struct {
-	WorkingDirectory   string
-	GitInfo            *GitInfo
-	ShelleyDBPath      string
-	ConversationID     string // Parent conversation ID for querying user messages
-	OperationalContext string // Rendered operational context (orchestrator subagents only)
-	SkillsXML          string // XML block for available skills
-}
-
-// OrchestratorSystemPromptData contains data for orchestrator system prompts.
-type OrchestratorSystemPromptData struct {
-	WorkingDirectory           string
-	GitInfo                    *GitInfo
-	ContextDir                 string
-	Codebase                   *CodebaseInfo
-	ShelleyDBPath              string
-	ConversationID             string // This conversation's ID for querying user messages
-	IncludeConversationHistory bool   // Whether to include the sqlite query in operational context
+	WorkingDirectory string
+	GitInfo          *GitInfo
+	ShelleyDBPath    string
+	ConversationID   string // Parent conversation ID for querying user messages
+	SkillsXML        string // XML block for available skills
 }
 
 // GenerateSubagentSystemPrompt generates a minimal system prompt for subagent conversations.
@@ -1021,127 +992,6 @@ func GenerateSubagentSystemPrompt(workingDir, parentConversationID string) (stri
 	err = tmpl.Execute(&buf, data)
 	if err != nil {
 		return "", fmt.Errorf("failed to execute subagent template: %w", err)
-	}
-
-	prompt := collapseBlankLines(buf.String())
-	return runHook(hookSystemPrompt, prompt)
-}
-
-// renderOperationalContext renders the operational context template for the given working directory
-// and conversation ID. If includeConversationHistory is true, the sqlite query for looking up
-// user messages is included (useful for subagents, not needed by the orchestrator).
-func renderOperationalContext(workingDir, conversationID string, includeConversationHistory bool) (string, error) {
-	if workingDir == "" {
-		var err error
-		workingDir, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("failed to get working directory: %w", err)
-		}
-	}
-
-	data := &OrchestratorSystemPromptData{
-		WorkingDirectory:           workingDir,
-		ShelleyDBPath:              DBPath,
-		ConversationID:             conversationID,
-		IncludeConversationHistory: includeConversationHistory,
-	}
-
-	if gitInfo, err := collectGitInfo(workingDir); err == nil {
-		data.GitInfo = gitInfo
-	}
-
-	if codebaseInfo, err := collectCodebaseInfo(workingDir, data.GitInfo); err == nil {
-		data.Codebase = codebaseInfo
-	}
-
-	tmpl, err := template.New("operational_context").Parse(operationalContextTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse operational context template: %w", err)
-	}
-
-	var buf strings.Builder
-	if err = tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to execute operational context template: %w", err)
-	}
-
-	return collapseBlankLines(buf.String()), nil
-}
-
-// GenerateOrchestratorSystemPrompt generates the system prompt for orchestrator conversations.
-// Operational context (without conversation history) is appended to the prompt.
-func GenerateOrchestratorSystemPrompt(workingDir, contextDir, conversationID string) (string, error) {
-	wd := workingDir
-	if wd == "" {
-		var err error
-		wd, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("failed to get working directory: %w", err)
-		}
-	}
-
-	data := &OrchestratorSystemPromptData{
-		WorkingDirectory: wd,
-		ContextDir:       contextDir,
-		ShelleyDBPath:    DBPath,
-		ConversationID:   conversationID,
-	}
-
-	tmpl, err := template.New("orchestrator_system_prompt").Parse(orchestratorSystemPromptTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse orchestrator template: %w", err)
-	}
-
-	var buf strings.Builder
-	if err = tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to execute orchestrator template: %w", err)
-	}
-
-	operationalCtx, err := renderOperationalContext(wd, conversationID, false)
-	if err != nil {
-		return "", err
-	}
-
-	prompt := collapseBlankLines(buf.String() + "\n\n" + operationalCtx)
-	return runHook(hookSystemPrompt, prompt)
-}
-
-// GenerateOrchestratorSubagentSystemPrompt generates the system prompt for
-// subagents spawned by an orchestrator conversation.
-func GenerateOrchestratorSubagentSystemPrompt(workingDir, parentConversationID string) (string, error) {
-	wd := workingDir
-	if wd == "" {
-		var err error
-		wd, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("failed to get working directory: %w", err)
-		}
-	}
-
-	operationalCtx, err := renderOperationalContext(wd, parentConversationID, true)
-	if err != nil {
-		return "", err
-	}
-
-	// Collect git info for skills
-	gitInfo, _ := collectGitInfo(wd)
-	gitRoot := ""
-	if gitInfo != nil {
-		gitRoot = gitInfo.Root
-	}
-
-	data := &SubagentSystemPromptData{
-		OperationalContext: operationalCtx,
-		SkillsXML:          collectSkills(wd, gitRoot, skills.Env{ExeDev: isExeDev()}),
-	}
-
-	tmpl, err := template.New("orchestrator_subagent_system_prompt").Parse(orchestratorSubagentSystemPromptTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse orchestrator subagent template: %w", err)
-	}
-
-	var buf strings.Builder
-	if err = tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to execute orchestrator subagent template: %w", err)
 	}
 
 	prompt := collapseBlankLines(buf.String())

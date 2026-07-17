@@ -1346,11 +1346,6 @@ body {
   white-space: nowrap;
 }
 
-.cli-agent-badge {
-  background: var(--blue-bg);
-  color: var(--blue-text);
-}
-
 .subagent-model-badge {
   background: var(--bg-tertiary);
   color: var(--text-tertiary);
@@ -4143,23 +4138,6 @@ svg {
   flex: 1;
 }
 
-.tool-override-suboption {
-  padding-left: 1rem;
-  justify-content: flex-start;
-  gap: 0.5rem;
-}
-
-.tool-override-suboption .orchestrator-backend-dropdown {
-  width: auto;
-  max-width: 200px;
-}
-
-.tool-override-suboption-label {
-  font-size: 0.6875rem;
-  color: var(--text-tertiary);
-  letter-spacing: 0.02em;
-}
-
 .tool-override-choices {
   display: inline-flex;
   border: 1px solid var(--border);
@@ -4233,81 +4211,6 @@ svg {
 
 .advanced-settings-reset:disabled {
   opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.orchestrator-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  cursor: pointer;
-  user-select: none;
-  font-size: 0.75rem;
-  padding: 0.25rem 0;
-}
-
-.orchestrator-toggle input[type="checkbox"] {
-  width: 0.875rem;
-  height: 0.875rem;
-  accent-color: var(--blue-text, #3b82f6);
-  cursor: pointer;
-  margin: 0;
-  flex-shrink: 0;
-}
-
-.orchestrator-toggle-label {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.orchestrator-toggle input:checked + .orchestrator-toggle-label {
-  color: var(--blue-text, #3b82f6);
-}
-
-.experimental-badge {
-  font-size: 0.5625rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--yellow-text, #ca8a04);
-  background: rgba(202, 138, 4, 0.15);
-  border: 1px solid rgba(202, 138, 4, 0.3);
-  border-radius: 0.25rem;
-  padding: 0.0625rem 0.3rem;
-  line-height: 1.4;
-}
-
-.orchestrator-backend-select {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.25rem 0 0.125rem;
-  margin-top: 0.125rem;
-  border-top: 1px solid var(--border-color);
-}
-
-.orchestrator-backend-label {
-  font-size: 0.6875rem;
-  color: var(--text-tertiary);
-  letter-spacing: 0.02em;
-}
-
-.orchestrator-backend-dropdown {
-  padding: 0.25rem 0.375rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.25rem;
-  background: var(--bg-base);
-  color: var(--text-primary);
-  font-size: 0.75rem;
-  cursor: pointer;
-  appearance: auto;
-}
-
-.orchestrator-backend-dropdown:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
 }
 

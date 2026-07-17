@@ -598,8 +598,6 @@ async function handleFirstMessage(
   message: string,
   model: string,
   cwd?: string,
-  conversationType?: "normal" | "orchestrator",
-  subagentBackend?: "shelley" | "claude-cli" | "codex-cli",
   toolOverrides?: Record<string, "on" | "off">,
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh",
 ) {
@@ -607,11 +605,8 @@ async function handleFirstMessage(
     const hasOverrides = toolOverrides && Object.keys(toolOverrides).length > 0;
     const hasThinking = !!thinkingLevel;
     const convOpts =
-      conversationType === "orchestrator" || hasOverrides || hasThinking
+      hasOverrides || hasThinking
         ? {
-            ...(conversationType === "orchestrator"
-              ? { type: "orchestrator" as const, subagent_backend: subagentBackend || "shelley" }
-              : {}),
             ...(hasOverrides ? { tool_overrides: toolOverrides } : {}),
             ...(hasThinking ? { thinking_level: thinkingLevel } : {}),
           }

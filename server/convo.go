@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -580,7 +578,6 @@ func (cm *ConversationManager) Hydrate(ctx context.Context) error {
 
 	// Generate system prompt if missing:
 	// - For user-initiated conversations: full system prompt
-	// - For orchestrator conversations: orchestrator system prompt
 	// - For subagent conversations (has parent): minimal subagent prompt
 	var messages []generated.Message
 	err = cm.db.Queries(ctx, func(q *generated.Queries) error {
@@ -596,23 +593,7 @@ func (cm *ConversationManager) Hydrate(ctx context.Context) error {
 		var systemMsg *generated.Message
 		var err error
 		if conversation.ParentConversationID != nil {
-			parentID := *conversation.ParentConversationID
-			// Check if the parent is an orchestrator to use the specialized subagent prompt
-			var parentOpts string
-			if qErr := cm.db.Queries(ctx, func(q *generated.Queries) error {
-				var e error
-				parentOpts, e = q.GetConversationOptions(ctx, parentID)
-				return e
-			}); qErr != nil {
-				cm.logger.Warn("Failed to get parent conversation options", "error", qErr)
-			}
-			if db.ParseConversationOptions(parentOpts).IsOrchestrator() {
-				systemMsg, err = cm.createOrchestratorSubagentSystemPrompt(ctx, parentID)
-			} else {
-				systemMsg, err = cm.createSubagentSystemPrompt(ctx, parentID)
-			}
-		} else if cm.conversationOptions.IsOrchestrator() {
-			systemMsg, err = cm.createOrchestratorSystemPrompt(ctx)
+			systemMsg, err = cm.createSubagentSystemPrompt(ctx, *conversation.ParentConversationID)
 		} else if conversation.UserInitiated {
 			systemMsg, err = cm.createSystemPrompt(ctx)
 		}
@@ -1475,96 +1456,6 @@ func (cm *ConversationManager) createSubagentSystemPrompt(ctx context.Context, p
 	return created, nil
 }
 
-// orchestratorContextDir returns the path to the shared context directory for this orchestrator conversation.
-func (cm *ConversationManager) orchestratorContextDir(cwd string) string {
-	if cwd == "" {
-		cwd = os.TempDir()
-	}
-	return filepath.Join(cwd, ".shelley-orchestrator", cm.conversationID)
-}
-
-func (cm *ConversationManager) createOrchestratorSystemPrompt(ctx context.Context) (*generated.Message, error) {
-	cwd := cm.cwd
-	contextDir := cm.orchestratorContextDir(cwd)
-	systemPrompt, err := GenerateOrchestratorSystemPrompt(cwd, contextDir, cm.conversationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate orchestrator system prompt: %w", err)
-	}
-
-	if systemPrompt == "" {
-		cm.logger.Info("Skipping empty orchestrator system prompt generation")
-		return nil, nil
-	}
-
-	systemMessage := llm.Message{
-		Role:    llm.MessageRoleUser,
-		Content: []llm.Content{{Type: llm.ContentTypeText, Text: systemPrompt}},
-	}
-
-	// Build orchestrator-specific display data with the orchestrator's tool set.
-	// Pass SubagentRunner/SubagentDB/EnableBrowser so the tool list matches what ensureLoop creates.
-	ts := claudetool.NewOrchestratorToolSet(ctx, claudetool.OrchestratorToolSetConfig{
-		ContextDir:           contextDir,
-		WorkingDir:           cwd,
-		LLMProvider:          cm.toolSetConfig.LLMProvider,
-		SubagentRunner:       cm.toolSetConfig.SubagentRunner,
-		SubagentDB:           cm.toolSetConfig.SubagentDB,
-		ParentConversationID: cm.conversationID,
-		EnableBrowser:        cm.toolSetConfig.EnableBrowser,
-		BuildAvailableModels: cm.toolSetConfig.BuildAvailableModels,
-		ModelID:              cm.toolSetConfig.ModelID,
-		CLIAgent:             cm.conversationOptions.SubagentBackend,
-		ToolOverrides:        cm.conversationOptions.ToolOverrides,
-		DisableAllTools:      cm.conversationOptions.DisableAllTools,
-	})
-	defer ts.Cleanup()
-
-	created, err := cm.db.CreateMessage(ctx, db.CreateMessageParams{
-		ConversationID: cm.conversationID,
-		Type:           db.MessageTypeSystem,
-		LLMData:        systemMessage,
-		UsageData:      llm.Usage{},
-		DisplayData:    toolDisplayData(ts.Tools()),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to store orchestrator system prompt: %w", err)
-	}
-
-	cm.logger.Info("Stored orchestrator system prompt", "length", len(systemPrompt), "contextDir", contextDir)
-	return created, nil
-}
-
-func (cm *ConversationManager) createOrchestratorSubagentSystemPrompt(ctx context.Context, parentConversationID string) (*generated.Message, error) {
-	systemPrompt, err := GenerateOrchestratorSubagentSystemPrompt(cm.cwd, parentConversationID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate orchestrator subagent system prompt: %w", err)
-	}
-
-	if systemPrompt == "" {
-		cm.logger.Info("Skipping empty orchestrator subagent system prompt generation")
-		return nil, nil
-	}
-
-	systemMessage := llm.Message{
-		Role:    llm.MessageRoleUser,
-		Content: []llm.Content{{Type: llm.ContentTypeText, Text: systemPrompt}},
-	}
-
-	created, err := cm.db.CreateMessage(ctx, db.CreateMessageParams{
-		ConversationID: cm.conversationID,
-		Type:           db.MessageTypeSystem,
-		LLMData:        systemMessage,
-		UsageData:      llm.Usage{},
-		DisplayData:    cm.systemPromptDisplayData(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to store orchestrator subagent system prompt: %w", err)
-	}
-
-	cm.logger.Info("Stored orchestrator subagent system prompt", "length", len(systemPrompt))
-	return created, nil
-}
-
 func (cm *ConversationManager) partitionMessages(messages []generated.Message) ([]llm.Message, []llm.SystemContent) {
 	var history []llm.Message
 	var system []llm.SystemContent
@@ -1718,31 +1609,10 @@ func (cm *ConversationManager) ensureLoop(service llm.Service, modelID string) e
 	baseCtx := llmhttp.WithConversationID(context.Background(), conversationID)
 	processCtx, cancel := context.WithTimeout(baseCtx, 12*time.Hour)
 
-	var toolSet *claudetool.ToolSet
-	if conversationOpts.IsOrchestrator() {
-		contextDir := cm.orchestratorContextDir(cwd)
-		toolSet = claudetool.NewOrchestratorToolSet(processCtx, claudetool.OrchestratorToolSetConfig{
-			ContextDir:           contextDir,
-			SubagentRunner:       toolSetConfig.SubagentRunner,
-			SubagentDB:           toolSetConfig.SubagentDB,
-			ParentConversationID: conversationID,
-			ModelID:              modelID,
-			LLMProvider:          toolSetConfig.LLMProvider,
-			BuildAvailableModels: toolSetConfig.BuildAvailableModels,
-			WorkingDir:           cwd,
-			OnWorkingDirChange:   toolSetConfig.OnWorkingDirChange,
-			EnableBrowser:        toolSetConfig.EnableBrowser,
-			CLIAgent:             conversationOpts.SubagentBackend,
-			ToolOverrides:        conversationOpts.ToolOverrides,
-			DisableAllTools:      conversationOpts.DisableAllTools,
-			ReasoningLevel:       conversationOpts.ThinkingLevel,
-		})
-	} else {
-		toolSetConfig.ToolOverrides = conversationOpts.ToolOverrides
-		toolSetConfig.DisableAllTools = conversationOpts.DisableAllTools
-		toolSetConfig.ReasoningLevel = conversationOpts.ThinkingLevel
-		toolSet = claudetool.NewToolSet(processCtx, toolSetConfig)
-	}
+	toolSetConfig.ToolOverrides = conversationOpts.ToolOverrides
+	toolSetConfig.DisableAllTools = conversationOpts.DisableAllTools
+	toolSetConfig.ReasoningLevel = conversationOpts.ThinkingLevel
+	toolSet := claudetool.NewToolSet(processCtx, toolSetConfig)
 
 	// streamFlusher batches LLM stream deltas and flushes them periodically
 	// to avoid overwhelming the subpub channel (buffer=10) with hundreds

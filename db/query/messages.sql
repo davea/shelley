@@ -123,8 +123,8 @@ UPDATE messages SET user_data = ? WHERE message_id = ?;
 -- Returns the agent messages produced during the most recent user turn,
 -- ordered newest-first. "Most recent user turn" = all agent messages
 -- whose sequence_id is greater than the sequence_id of the most recent
--- user message (or all agent messages if there is no user message yet,
--- e.g. orchestrator-spawned conversations). Used by the end-of-turn
+-- user message (or all agent messages if there is no user message yet).
+-- Used by the end-of-turn
 -- notification builder to pick a useful body line.
 SELECT m.message_id, m.conversation_id, m.sequence_id, m.type,
        m.llm_data, m.user_data, m.usage_data, m.created_at,

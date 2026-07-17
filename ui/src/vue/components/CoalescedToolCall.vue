@@ -119,7 +119,6 @@ import ChangeDirTool from "./tools/ChangeDirTool.vue";
 import SubagentTool from "./tools/SubagentTool.vue";
 import LLMOneShotTool from "./tools/LLMOneShotTool.vue";
 import OutputIframeTool from "./tools/OutputIframeTool.vue";
-import ReadContextFileTool from "./tools/ReadContextFileTool.vue";
 import WebSearchTool from "./tools/WebSearchTool.vue";
 
 const props = defineProps<{
@@ -150,7 +149,6 @@ const TOOL_COMPONENTS: Record<string, any> = {
   change_dir: ChangeDirTool,
   subagent: SubagentTool,
   output_iframe: OutputIframeTool,
-  read_context_file: ReadContextFileTool,
   llm_one_shot: LLMOneShotTool,
   browser_emulate: BrowserEmulateTool,
   browser_network: BrowserNetworkTool,

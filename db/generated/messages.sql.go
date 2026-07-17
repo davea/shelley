@@ -323,8 +323,8 @@ type ListAgentMessagesSinceLastUserParams struct {
 // Returns the agent messages produced during the most recent user turn,
 // ordered newest-first. "Most recent user turn" = all agent messages
 // whose sequence_id is greater than the sequence_id of the most recent
-// user message (or all agent messages if there is no user message yet,
-// e.g. orchestrator-spawned conversations). Used by the end-of-turn
+// user message (or all agent messages if there is no user message yet).
+// Used by the end-of-turn
 // notification builder to pick a useful body line.
 func (q *Queries) ListAgentMessagesSinceLastUser(ctx context.Context, arg ListAgentMessagesSinceLastUserParams) ([]Message, error) {
 	rows, err := q.db.QueryContext(ctx, listAgentMessagesSinceLastUser, arg.ConversationID, arg.ConversationID_2)

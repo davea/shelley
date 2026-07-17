@@ -579,7 +579,6 @@ func TestRunNewConversationHookReceivesJSON(t *testing.T) {
 			ConversationID: "conv-456",
 			IsSubagent:     true,
 			ParentID:       "conv-parent",
-			IsOrchestrator: true,
 		},
 	})
 
@@ -605,7 +604,6 @@ func TestRunNewConversationHookReceivesJSON(t *testing.T) {
 		`"conversation_id":"conv-456"`,
 		`"is_subagent":true`,
 		`"parent_id":"conv-parent"`,
-		`"is_orchestrator":true`,
 	} {
 		if !strings.Contains(input, expected) {
 			t.Errorf("hook input missing %q\ngot: %s", expected, input)
@@ -788,65 +786,6 @@ This is a test skill.
 	}
 	if !strings.Contains(prompt, "Skills extend your capabilities") {
 		t.Errorf("subagent prompt should contain skills introduction text")
-	}
-}
-
-// TestOrchestratorSubagentSystemPromptIncludesSkills verifies that skills are
-// included in orchestrator subagent system prompts.
-func TestOrchestratorSubagentSystemPromptIncludesSkills(t *testing.T) {
-	t.Parallel()
-	// Create a temp directory with a .skills directory
-	tmpDir, err := os.MkdirTemp("", "shelley_orch_subagent_skills_test")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Initialize a git repo (skills discovery works better in git repos)
-	cmd := exec.Command("git", "init")
-	cmd.Dir = tmpDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git init failed: %v\n%s", err, out)
-	}
-
-	// Create a .skills directory with a test skill
-	skillsDir := filepath.Join(tmpDir, ".skills")
-	if err := os.Mkdir(skillsDir, 0o755); err != nil {
-		t.Fatalf("failed to create .skills dir: %v", err)
-	}
-
-	// Create a test skill directory and file
-	orchSkillDir := filepath.Join(skillsDir, "orchestrator-test-skill")
-	if err := os.Mkdir(orchSkillDir, 0o755); err != nil {
-		t.Fatalf("failed to create orchestrator-test-skill dir: %v", err)
-	}
-
-	skillContent := `---
-name: orchestrator-test-skill
-description: An orchestrator test skill
----
-This is a test skill for orchestrators.
-`
-	skillFile := filepath.Join(orchSkillDir, "SKILL.md")
-	if err := os.WriteFile(skillFile, []byte(skillContent), 0o644); err != nil {
-		t.Fatalf("failed to write skill file: %v", err)
-	}
-
-	// Generate orchestrator subagent system prompt
-	prompt, err := GenerateOrchestratorSubagentSystemPrompt(tmpDir, "parent-conv-id")
-	if err != nil {
-		t.Fatalf("GenerateOrchestratorSubagentSystemPrompt failed: %v", err)
-	}
-
-	// Verify the skills section is present
-	if !strings.Contains(prompt, "<skills>") {
-		t.Errorf("orchestrator subagent prompt should contain <skills> section")
-	}
-	if !strings.Contains(prompt, "orchestrator-test-skill") {
-		t.Errorf("orchestrator subagent prompt should contain the test skill name")
-	}
-	if !strings.Contains(prompt, "An orchestrator test skill") {
-		t.Errorf("orchestrator subagent prompt should contain the test skill description")
 	}
 }
 

@@ -148,9 +148,6 @@
               <div class="tool-override-row">
                 <div class="tool-override-info">
                   <span class="tool-override-name">{{ tool.name }}</span>
-                  <span v-if="tool.name === 'orchestrator'" class="experimental-badge"
-                    >experimental</span
-                  >
                   <span class="tool-override-summary">{{ tool.summary }}</span>
                 </div>
                 <div class="tool-override-choices" role="radiogroup">
@@ -167,29 +164,6 @@
                     {{ choice.label }}
                   </button>
                 </div>
-              </div>
-              <div
-                v-if="tool.name === 'orchestrator' && toolOverrides['orchestrator'] === 'on'"
-                class="tool-override-row tool-override-suboption"
-              >
-                <label class="tool-override-suboption-label" for="subagent-backend-select"
-                  >Subagent backend</label
-                >
-                <select
-                  id="subagent-backend-select"
-                  class="orchestrator-backend-dropdown"
-                  :value="subagentBackend"
-                  :disabled="sending"
-                  @change="onSubagentBackendChange"
-                >
-                  <option value="shelley">Shelley (native)</option>
-                  <option v-if="cliAgents.includes('claude-cli')" value="claude-cli">
-                    Claude CLI
-                  </option>
-                  <option v-if="cliAgents.includes('codex-cli')" value="codex-cli">
-                    Codex CLI
-                  </option>
-                </select>
               </div>
             </template>
           </div>
@@ -280,8 +254,6 @@ const props = defineProps<{
   toolOverrides: Record<string, "on" | "off">;
   toolOverrideList: ToolInfo[];
   toolOverrideCount: number;
-  subagentBackend: "shelley" | "claude-cli" | "codex-cli";
-  cliAgents: string[];
   cwdError: string | null;
   // callbacks
   onUnarchive: () => void;
@@ -295,7 +267,6 @@ const props = defineProps<{
   onThinkingChange: (level: ThinkingLevel) => void;
   onSetToolOverride: (name: string, value: "default" | "on" | "off") => void;
   onResetToolOverrides: () => void;
-  onSubagentBackend: (backend: "shelley" | "claude-cli" | "codex-cli") => void;
   onOpenDirectoryPicker: () => void;
 }>();
 
@@ -325,10 +296,5 @@ function choicesFor(tool: ToolInfo): { val: "default" | "on" | "off"; label: str
     { val: "on", label: "On" },
     { val: "off", label: "Off" },
   ];
-}
-function onSubagentBackendChange(e: Event) {
-  props.onSubagentBackend(
-    (e.target as HTMLSelectElement).value as "shelley" | "claude-cli" | "codex-cli",
-  );
 }
 </script>

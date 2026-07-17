@@ -9,7 +9,7 @@ Auth-bearing headers (`Cookie`, `Set-Cookie`, `Authorization`, `Proxy-Authorizat
 
 ## `system-prompt`
 
-Runs on every system prompt (main, subagent, orchestrator, orchestrator-subagent).
+Runs on every system prompt (main, subagent).
 
 - stdin: prompt text
 - stdout: replacement prompt text (non-empty)
@@ -25,7 +25,6 @@ stdin JSON:
   "readonly": {
     "conversation_id": "cXXXXXX",
     "is_subagent": false, "parent_id": "...",
-    "is_orchestrator": false,
     "headers": [["X-Exedev-Email", "user@example.com"]]
   }
 }
@@ -107,8 +106,7 @@ stdin JSON:
   "is_new_conversation": false,
   "cwd": "/home/user/project",
   "model": "claude-sonnet-4.5",
-  "user_email": "you@example.com",
-  "is_orchestrator": false
+  "user_email": "you@example.com"
 }
 ```
 

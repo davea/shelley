@@ -433,8 +433,6 @@ const props = withDefaults(
       message: string,
       model: string,
       cwd?: string,
-      conversationType?: "normal" | "orchestrator",
-      subagentBackend?: "shelley" | "claude-cli" | "codex-cli",
       toolOverrides?: Record<string, "on" | "off">,
       thinkingLevel?: Exclude<ThinkingLevel, "default">,
     ) => Promise<void>;
@@ -658,10 +656,8 @@ const cancelling = ref(false);
 const contextWindowSize = ref(0);
 const toolProgress = ref<Record<string, ToolProgress>>({});
 const streamingText = ref("");
-const subagentBackend = ref<"shelley" | "claude-cli" | "codex-cli">("shelley");
 const showAdvancedSettings = ref(false);
 const advancedSettingsRef = ref<HTMLDivElement | null>(null);
-const cliAgents = window.__SHELLEY_INIT__?.cli_agents || [];
 const availableTools = ref<Array<{ name: string; summary: string; default_on: boolean }>>([]);
 
 const showScrollToBottom = ref(false);
@@ -731,12 +727,7 @@ function resetToolOverrides() {
 }
 const toolOverrideCount = computed(() => Object.keys(toolOverrides.value).length);
 
-const orchestratorPseudoTool = {
-  name: "orchestrator",
-  summary: "Shelley orchestrator mode (delegates to subagents).",
-  default_on: false,
-};
-const toolOverrideList = computed(() => [orchestratorPseudoTool, ...availableTools.value]);
+const toolOverrideList = computed(() => availableTools.value);
 
 // ---- per-conversation localStorage helpers ----
 function msgCountKey(): string | null {
@@ -1413,28 +1404,19 @@ const queuedGhosts = computed(() =>
 );
 
 // Build the conversation_options bundle from the current composer selection
-// (orchestrator mode, tool overrides, thinking level). "default" omits the
+// (tool overrides, thinking level). "default" omits the
 // thinking override so the model's configured/provider default applies. Used
 // when promoting an autosaved draft on
 // first send — the draft is created (via POST /draft autosave) without
 // options, so the selection only reaches the server on the promoting chat
 // request.
 function buildConversationOptions(): ChatRequest["conversation_options"] | undefined {
-  const orchestratorOn = toolOverrides.value["orchestrator"] === "on";
-  const realOverrides: Record<string, "on" | "off"> = {};
-  for (const [k, v] of Object.entries(toolOverrides.value)) {
-    if (k === "orchestrator") continue;
-    realOverrides[k] = v;
-  }
-  const hasOverrides = Object.keys(realOverrides).length > 0;
+  const hasOverrides = Object.keys(toolOverrides.value).length > 0;
   const explicitThinking = thinkingLevel.value === "default" ? undefined : thinkingLevel.value;
   const hasThinking = explicitThinking !== undefined;
-  if (!orchestratorOn && !hasOverrides && !hasThinking) return undefined;
+  if (!hasOverrides && !hasThinking) return undefined;
   return {
-    ...(orchestratorOn
-      ? { type: "orchestrator" as const, subagent_backend: subagentBackend.value }
-      : {}),
-    ...(hasOverrides ? { tool_overrides: realOverrides } : {}),
+    ...(hasOverrides ? { tool_overrides: { ...toolOverrides.value } } : {}),
     ...(explicitThinking ? { thinking_level: explicitThinking } : {}),
   };
 }
@@ -1447,19 +1429,11 @@ async function sendFirstMessage(prompt: string) {
       throw new Error(`Invalid working directory: ${validation.error}`);
     }
   }
-  const orchestratorOn = toolOverrides.value["orchestrator"] === "on";
-  const realOverrides: Record<string, "on" | "off"> = {};
-  for (const [k, v] of Object.entries(toolOverrides.value)) {
-    if (k === "orchestrator") continue;
-    realOverrides[k] = v;
-  }
   await props.onFirstMessage(
     prompt,
     selectedModel.value,
     selectedCwd.value || undefined,
-    orchestratorOn ? "orchestrator" : undefined,
-    orchestratorOn ? subagentBackend.value : undefined,
-    Object.keys(realOverrides).length > 0 ? realOverrides : undefined,
+    Object.keys(toolOverrides.value).length > 0 ? { ...toolOverrides.value } : undefined,
     thinkingLevel.value === "default" ? undefined : thinkingLevel.value,
   );
 }
@@ -1621,7 +1595,7 @@ async function sendMessage(message: string) {
       await sendFirstMessage(message.trim());
     } else if (effectiveId) {
       // When this send promotes an autosaved draft, carry the composer's
-      // conversation_options (thinking level, orchestrator, tool overrides).
+      // conversation_options (thinking level, tool overrides).
       // The draft was created without them, and PromoteDraft only preserves
       // what's stored — so without this the selection is lost and reasoning
       // is silently disabled for adaptive models. Follow-up messages on an
@@ -1938,8 +1912,6 @@ const statusContentProps = computed(() => ({
   toolOverrides: toolOverrides.value,
   toolOverrideList: toolOverrideList.value,
   toolOverrideCount: toolOverrideCount.value,
-  subagentBackend: subagentBackend.value,
-  cliAgents,
   cwdError: cwdError.value,
   onUnarchive: handleUnarchive,
   onClearError: () => (error.value = null),
@@ -1952,8 +1924,6 @@ const statusContentProps = computed(() => ({
   onThinkingChange: setThinkingLevel,
   onSetToolOverride: setToolOverride,
   onResetToolOverrides: resetToolOverrides,
-  onSubagentBackend: (backend: "shelley" | "claude-cli" | "codex-cli") =>
-    (subagentBackend.value = backend),
   onOpenDirectoryPicker: () => (showDirectoryPicker.value = true),
 }));
 
@@ -1977,13 +1947,12 @@ watch(
   },
 );
 
-// Reset cwdInitialized + subagent backend when switching to new conversation.
+// Reset cwdInitialized when switching to new conversation.
 watch(
   () => props.conversationId,
   (id) => {
     if (id === null) {
       cwdInitialized.value = false;
-      subagentBackend.value = "shelley";
       showAdvancedSettings.value = false;
     }
   },

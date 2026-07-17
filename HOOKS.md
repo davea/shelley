@@ -57,7 +57,6 @@ non-empty result is required.
   "readonly": {
     "conversation_id": "cH3UICU",
     "is_subagent": false,
-    "is_orchestrator": false,
     "headers": [
       ["Accept", "*/*"],
       ["Content-Length", "49"],

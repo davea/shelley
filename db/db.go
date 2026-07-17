@@ -247,8 +247,6 @@ type ConversationHook struct {
 }
 
 type ConversationOptions struct {
-	Type            string `json:"type,omitempty"`             // "normal" (default) or "orchestrator"
-	SubagentBackend string `json:"subagent_backend,omitempty"` // "shelley" (default), "claude-cli", "codex-cli"
 	// ToolOverrides maps tool name to "on" or "off". Tools not listed use their default.
 	ToolOverrides map[string]string `json:"tool_overrides,omitempty"`
 	// DisableAllTools disables every tool by default; ToolOverrides with "on" re-enable individual tools.
@@ -266,13 +264,8 @@ type ConversationOptions struct {
 	DisableNotifications bool `json:"disable_notifications,omitempty"`
 }
 
-// IsOrchestrator returns true if the conversation is in orchestrator mode.
-func (o ConversationOptions) IsOrchestrator() bool {
-	return o.Type == "orchestrator"
-}
-
 // ParseConversationOptions parses a JSON string into ConversationOptions.
-// Returns zero-value options (type=normal) for empty or invalid input.
+// Returns zero-value options for empty or invalid input.
 func ParseConversationOptions(s string) ConversationOptions {
 	var opts ConversationOptions
 	if s != "" {

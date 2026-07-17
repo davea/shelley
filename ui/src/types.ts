@@ -81,8 +81,6 @@ export interface ChatRequest {
   model?: string;
   cwd?: string;
   conversation_options?: {
-    type?: "normal" | "orchestrator";
-    subagent_backend?: "shelley" | "claude-cli" | "codex-cli";
     tool_overrides?: Record<string, "on" | "off">;
     disable_all_tools?: boolean;
     thinking_level?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -145,7 +143,6 @@ export interface InitData {
   user_agents_md_path?: string;
   notification_channel_types?: import("./services/api").ChannelTypeInfo[];
   exe_notify_available?: boolean; // VM has an exe.dev "notify" integration (push notifications)
-  cli_agents?: string[]; // Available CLI agents (e.g., "claude-cli", "codex-cli")
   banner?: string; // If set, shown as a top-of-page banner (e.g. to mark demo instances)
 }
 

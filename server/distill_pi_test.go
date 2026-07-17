@@ -99,11 +99,10 @@ func TestExtractPiFileOps(t *testing.T) {
 		{Role: llm.MessageRoleAssistant, Content: []llm.Content{
 			{Type: llm.ContentTypeToolUse, ToolName: "read_image", ToolInput: json.RawMessage(`{"path":"a.go"}`)},
 			{Type: llm.ContentTypeToolUse, ToolName: "patch", ToolInput: json.RawMessage(`{"path":"b.go"}`)},
-			{Type: llm.ContentTypeToolUse, ToolName: "read_context_file", ToolInput: json.RawMessage(`{"path":"b.go"}`)},
 		}},
 	}
 	read, modified := extractPiFileOps(msgs)
-	// b.go was both read and patched -> counts only as modified.
+	// a.go was read (read_image), b.go was patched.
 	if len(read) != 1 || read[0] != "a.go" {
 		t.Errorf("read files = %v, want [a.go]", read)
 	}
