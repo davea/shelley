@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -46,6 +47,9 @@ type VersionInfo struct {
 	PublishedAt         time.Time    `json:"published_at,omitempty"`
 	HasUpdate           bool         `json:"has_update"`    // True if minor version is newer (for showing upgrade button)
 	ShouldNotify        bool         `json:"should_notify"` // True if should show red dot (newer + 5 days old)
+	Customized          bool         `json:"customized"`    // True for user-customized builds (see customizing-shelley skill)
+	CustomizationDir    string       `json:"customization_dir,omitempty"`
+	CustomCommits       []CommitInfo `json:"custom_commits,omitempty"` // Commits the customization branch carries on top of mainline
 	DownloadURL         string       `json:"download_url,omitempty"`
 	ExecutablePath      string       `json:"executable_path,omitempty"`
 	Commits             []CommitInfo `json:"commits,omitempty"`
@@ -104,18 +108,80 @@ func NewVersionChecker() *VersionChecker {
 	}
 }
 
+// CustomizationDir returns the canonical checkout location for user-customized
+// Shelley builds (see the customizing-shelley skill).
+func CustomizationDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "shelley", "shelley-customization")
+}
+
+// existingCustomizationDir returns CustomizationDir if it exists on disk,
+// else "". The version dialog uses it as the cwd for rebase-upgrade
+// conversations, which must not start in a nonexistent directory.
+func existingCustomizationDir() string {
+	dir := CustomizationDir()
+	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+		return dir
+	}
+	return ""
+}
+
+// customCommits lists the commits the customization checkout carries on top
+// of mainline (reachable from HEAD but not origin/main), newest first. The
+// list is display-only; errors (no checkout, mid-rebase, missing remote ref)
+// just yield an empty list.
+func customCommits(dir string) []CommitInfo {
+	if dir == "" {
+		return nil
+	}
+	out, err := exec.Command("git", "-C", dir, "log", "-n", "50",
+		"--format=%h%x1f%s%x1f%an%x1f%aI", "origin/main..HEAD").Output()
+	if err != nil {
+		return nil
+	}
+	var commits []CommitInfo
+	for line := range strings.Lines(string(out)) {
+		sha, rest, _ := strings.Cut(strings.TrimSuffix(line, "\n"), "\x1f")
+		msg, rest, _ := strings.Cut(rest, "\x1f")
+		author, dateStr, _ := strings.Cut(rest, "\x1f")
+		if sha == "" || msg == "" {
+			continue
+		}
+		date, _ := time.Parse(time.RFC3339, dateStr)
+		commits = append(commits, CommitInfo{SHA: sha, Message: msg, Author: author, Date: date})
+	}
+	return commits
+}
+
+// baseVersionInfo builds a VersionInfo populated from the running build,
+// before any release-metadata fetch.
+func baseVersionInfo() *VersionInfo {
+	currentInfo := version.GetInfo()
+	execPath, _ := os.Executable()
+	info := &VersionInfo{
+		CurrentVersion:      currentInfo.Version,
+		CurrentTag:          currentInfo.Tag,
+		CurrentCommit:       currentInfo.Commit,
+		CurrentCommitTime:   currentInfo.CommitTime,
+		Customized:          currentInfo.Customized,
+		CustomizationDir:    existingCustomizationDir(),
+		ExecutablePath:      execPath,
+		CheckedAt:           time.Now(),
+		RunningUnderSystemd: os.Getenv("INVOCATION_ID") != "",
+	}
+	if info.Customized {
+		info.CustomCommits = customCommits(info.CustomizationDir)
+	}
+	return info
+}
+
 // Check checks for a new version, using the cache if still valid.
 func (vc *VersionChecker) Check(ctx context.Context, forceRefresh bool) (*VersionInfo, error) {
 	if vc.skipCheck {
-		info := version.GetInfo()
-		return &VersionInfo{
-			CurrentVersion:      info.Version,
-			CurrentTag:          info.Tag,
-			CurrentCommit:       info.Commit,
-			HasUpdate:           false,
-			CheckedAt:           time.Now(),
-			RunningUnderSystemd: os.Getenv("INVOCATION_ID") != "",
-		}, nil
+		return baseVersionInfo(), nil
 	}
 
 	vc.mu.Lock()
@@ -129,16 +195,9 @@ func (vc *VersionChecker) Check(ctx context.Context, forceRefresh bool) (*Versio
 	info, err := vc.fetchVersionInfo(ctx)
 	if err != nil {
 		// On error, return current version info with error
-		currentInfo := version.GetInfo()
-		return &VersionInfo{
-			CurrentVersion:      currentInfo.Version,
-			CurrentTag:          currentInfo.Tag,
-			CurrentCommit:       currentInfo.Commit,
-			HasUpdate:           false,
-			CheckedAt:           time.Now(),
-			Error:               err.Error(),
-			RunningUnderSystemd: os.Getenv("INVOCATION_ID") != "",
-		}, nil
+		info := baseVersionInfo()
+		info.Error = err.Error()
+		return info, nil
 	}
 
 	vc.cachedInfo = info
@@ -148,17 +207,7 @@ func (vc *VersionChecker) Check(ctx context.Context, forceRefresh bool) (*Versio
 
 // fetchVersionInfo fetches the latest release info from GitHub Pages.
 func (vc *VersionChecker) fetchVersionInfo(ctx context.Context) (*VersionInfo, error) {
-	currentInfo := version.GetInfo()
-	execPath, _ := os.Executable()
-	info := &VersionInfo{
-		CurrentVersion:      currentInfo.Version,
-		CurrentTag:          currentInfo.Tag,
-		CurrentCommit:       currentInfo.Commit,
-		CurrentCommitTime:   currentInfo.CommitTime,
-		ExecutablePath:      execPath,
-		CheckedAt:           time.Now(),
-		RunningUnderSystemd: os.Getenv("INVOCATION_ID") != "",
-	}
+	info := baseVersionInfo()
 
 	// Fetch latest release from static metadata
 	latestRelease, err := vc.fetchLatestRelease(ctx)
@@ -182,7 +231,7 @@ func (vc *VersionChecker) fetchVersionInfo(ctx context.Context) (*VersionInfo, e
 	info.DownloadURL = vc.findDownloadURL(latestRelease)
 
 	// Check if latest has a newer minor version
-	info.HasUpdate = vc.isNewerMinor(currentInfo.Tag, latestRelease.TagName)
+	info.HasUpdate = vc.isNewerMinor(info.CurrentTag, latestRelease.TagName)
 
 	// Headless shell version info
 	info.HeadlessShellCurrent = getLocalHeadlessShellVersion(ctx)
@@ -192,8 +241,8 @@ func (vc *VersionChecker) fetchVersionInfo(ctx context.Context) (*VersionInfo, e
 	}
 
 	// For ShouldNotify, compare commit times if we have an update
-	if info.HasUpdate && currentInfo.CommitTime != "" {
-		currentTime, err1 := time.Parse(time.RFC3339, currentInfo.CommitTime)
+	if info.HasUpdate && info.CurrentCommitTime != "" {
+		currentTime, err1 := time.Parse(time.RFC3339, info.CurrentCommitTime)
 		latestTime, err2 := time.Parse(time.RFC3339, latestRelease.CommitTime)
 		if err1 == nil && err2 == nil {
 			// Show notification if the latest release is 5+ days newer than current
@@ -458,6 +507,10 @@ func parseMinorVersion(tag string) int {
 func (vc *VersionChecker) DoUpgrade(ctx context.Context) error {
 	if vc.skipCheck {
 		return fmt.Errorf("version checking is disabled")
+	}
+
+	if version.GetInfo().Customized {
+		return fmt.Errorf("this is a customized build; upgrade by rebasing %s onto origin/main (see the customizing-shelley skill)", CustomizationDir())
 	}
 
 	// Get cached info or fetch fresh

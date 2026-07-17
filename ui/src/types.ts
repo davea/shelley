@@ -273,6 +273,9 @@ export interface VersionInfo {
   published_at?: string;
   has_update: boolean; // True if minor version is newer (show upgrade button)
   should_notify: boolean; // True if should show red dot (newer + 5 days apart)
+  customized: boolean; // True for user-customized builds (upgrade via rebase)
+  customization_dir?: string; // Canonical customization checkout (~/.config/shelley/shelley-customization)
+  custom_commits?: CommitInfo[]; // Commits the customization branch carries on top of mainline
   download_url?: string;
   executable_path?: string;
   commits?: CommitInfo[];

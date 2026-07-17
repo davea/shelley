@@ -6935,6 +6935,32 @@ svg {
   font-size: 0.75rem;
 }
 
+.version-badge-custom {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #7c3aed 10%, transparent);
+  border: 1px solid color-mix(in srgb, #7c3aed 30%, transparent);
+  color: #6d28d9;
+  font-size: 0.688rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.dark .version-badge-custom {
+  background: color-mix(in srgb, #a78bfa 12%, transparent);
+  border-color: color-mix(in srgb, #a78bfa 35%, transparent);
+  color: #c4b5fd;
+}
+
+.version-customized-note {
+  color: var(--text-secondary);
+  font-size: 0.813rem;
+  line-height: 1.4;
+  margin-bottom: 0.75rem;
+}
+
 .version-error {
   padding: 0.75rem;
   background: var(--error-bg);

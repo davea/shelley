@@ -1939,6 +1939,11 @@ func (s *Server) tryAutoUpgrade() {
 		return
 	}
 
+	if versionInfo.Customized {
+		s.logger.Info("Auto-upgrade: skipping customized build (upgrade via rebase; see customizing-shelley skill)")
+		return
+	}
+
 	s.logger.Info("Auto-upgrade: update available", "current", versionInfo.CurrentTag, "latest", versionInfo.LatestTag)
 
 	// Try to find an idle spot for up to 1 hour (check every 10 minutes)

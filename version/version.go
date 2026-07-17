@@ -7,10 +7,14 @@ import (
 	"runtime/debug"
 )
 
-// Version and Tag are set at build time via ldflags
+// Version, Tag, and Customized are set at build time via ldflags.
+// Customized is set to "true" by 'make build-custom' for user-customized
+// builds (see the customizing-shelley skill); Tag then holds the upstream
+// release tag the custom branch diverged from.
 var (
-	Version = "dev"
-	Tag     = ""
+	Version    = "dev"
+	Tag        = ""
+	Customized = ""
 )
 
 var buildInfoFS fs.FS
@@ -49,20 +53,28 @@ type Info struct {
 	Tag        string `json:"tag,omitempty"`
 	Commit     string `json:"commit,omitempty"`
 	CommitTime string `json:"commit_time,omitempty"`
+	Customized bool   `json:"customized,omitempty"`
 }
 
 // GetInfo returns build information using runtime/debug.ReadBuildInfo,
 // falling back to a registered build-info.json filesystem when available.
-// The SHELLEY_VERSION_OVERRIDE environment variable can override the tag for testing.
+// Environment overrides for testing:
+//   - SHELLEY_VERSION_OVERRIDE overrides the tag
+//   - SHELLEY_CUSTOMIZED_OVERRIDE=true marks the build as customized
 func GetInfo() Info {
 	tag := Tag
 	if override := os.Getenv("SHELLEY_VERSION_OVERRIDE"); override != "" {
 		tag = override
 	}
+	customized := Customized == "true"
+	if os.Getenv("SHELLEY_CUSTOMIZED_OVERRIDE") == "true" {
+		customized = true
+	}
 
 	info := Info{
-		Version: Version,
-		Tag:     tag,
+		Version:    Version,
+		Tag:        tag,
+		Customized: customized,
 	}
 
 	buildInfo, ok := debug.ReadBuildInfo()

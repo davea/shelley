@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -138,6 +140,93 @@ func TestVersionCheckerSkipCheck(t *testing.T) {
 	}
 	if info.HasUpdate {
 		t.Error("Expected HasUpdate to be false when skip check is enabled")
+	}
+}
+
+func TestVersionCheckerCustomized(t *testing.T) {
+	t.Setenv("SHELLEY_CUSTOMIZED_OVERRIDE", "true")
+	t.Setenv("SHELLEY_SKIP_VERSION_CHECK", "true")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	vc := NewVersionChecker()
+	info, err := vc.Check(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Check() returned error: %v", err)
+	}
+	if !info.Customized {
+		t.Error("expected Customized to be true")
+	}
+	// No checkout on disk: don't advertise a dir the rebase-upgrade
+	// conversation can't start in.
+	if info.CustomizationDir != "" {
+		t.Errorf("expected empty CustomizationDir without a checkout, got %q", info.CustomizationDir)
+	}
+
+	dir := CustomizationDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	info, err = vc.Check(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Check() returned error: %v", err)
+	}
+	if info.CustomizationDir != dir {
+		t.Errorf("expected CustomizationDir %q, got %q", dir, info.CustomizationDir)
+	}
+}
+
+func TestDoUpgradeRefusesCustomizedBuild(t *testing.T) {
+	t.Setenv("SHELLEY_CUSTOMIZED_OVERRIDE", "true")
+
+	vc := &VersionChecker{}
+	err := vc.DoUpgrade(context.Background())
+	if err == nil {
+		t.Fatal("expected DoUpgrade to refuse customized builds")
+	}
+	if !strings.Contains(err.Error(), "customized") {
+		t.Errorf("expected error to mention customized build, got: %v", err)
+	}
+}
+
+func TestCustomCommits(t *testing.T) {
+	t.Parallel()
+	if commits := customCommits(""); commits != nil {
+		t.Errorf("expected nil for empty dir, got %v", commits)
+	}
+	if commits := customCommits(t.TempDir()); commits != nil {
+		t.Errorf("expected nil for non-repo dir, got %v", commits)
+	}
+
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-b", "main")
+	git("commit", "--allow-empty", "-m", "mainline commit")
+	git("update-ref", "refs/remotes/origin/main", "main")
+	git("checkout", "-b", "custom")
+	git("commit", "--allow-empty", "-m", "custom: first tweak")
+	git("commit", "--allow-empty", "-m", "custom: second tweak")
+
+	commits := customCommits(dir)
+	if len(commits) != 2 {
+		t.Fatalf("expected 2 custom commits, got %d: %v", len(commits), commits)
+	}
+	if commits[0].Message != "custom: second tweak" || commits[1].Message != "custom: first tweak" {
+		t.Errorf("unexpected commit order/messages: %v", commits)
+	}
+	for _, c := range commits {
+		if c.SHA == "" || c.Author != "Test" || c.Date.IsZero() {
+			t.Errorf("incomplete commit info: %+v", c)
+		}
 	}
 }
 
