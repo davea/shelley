@@ -10,13 +10,14 @@ package models
 //   - Tier 1: the models worth surfacing prominently. Nothing we also offer
 //     clearly supersedes them.
 //   - Tier 2: models that are "overshadowed" by another model in the same
-//     available set. Still selectable, just tucked behind a "more models"
-//     affordance in the UI and omitted from the subagent tool's model enum.
+//     available set, or models not present in Shelley's built-in catalog. Still
+//     selectable, just tucked behind a "more models" affordance in the UI and
+//     omitted from the subagent tool's model enum.
 //
 // The shadow relationships below are hand-curated. Each pair reads
 // "better shadows worse": if `better` is present in the available set, then
-// `worse` is demoted to tier 2. A model that is never shadowed by an available
-// model stays in tier 1.
+// `worse` is demoted to tier 2. A known model that is never shadowed by an
+// available model stays in tier 1. Unknown integration models default to tier 2.
 
 const (
 	Tier1 = 1
@@ -59,9 +60,11 @@ var shadowPairs = []shadowPair{
 }
 
 // AssignTiers computes the tier (Tier1 or Tier2) for each of the given model
-// IDs. A model is Tier2 when some other available model shadows it (per
-// shadowPairs); otherwise it is Tier1. The result maps every input ID to a
-// tier, so callers can look up any model they know about.
+// IDs. A model is Tier2 when it is outside Shelley's built-in catalog or when
+// some other available model shadows it (per shadowPairs); otherwise it is
+// Tier1. The result maps every input ID to a tier, so callers can look up any
+// model they know about. Callers promote explicitly configured custom models
+// back to Tier1.
 func AssignTiers(availableIDs []string) map[string]int {
 	available := make(map[string]bool, len(availableIDs))
 	for _, id := range availableIDs {
@@ -69,7 +72,11 @@ func AssignTiers(availableIDs []string) map[string]int {
 	}
 	tiers := make(map[string]int, len(availableIDs))
 	for _, id := range availableIDs {
-		tiers[id] = Tier1
+		if ByID(id) == nil {
+			tiers[id] = Tier2
+		} else {
+			tiers[id] = Tier1
+		}
 	}
 	for _, p := range shadowPairs {
 		if available[p.Better] && available[p.Worse] {

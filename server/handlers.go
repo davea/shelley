@@ -2626,7 +2626,11 @@ func assignModelTiers(modelList []ModelInfo) {
 	tiers := models.AssignTiers(readyIDs)
 	for i := range modelList {
 		if modelList[i].Ready {
-			modelList[i].Tier = tiers[modelList[i].ID]
+			if modelList[i].Source == models.SourceCustomLabel {
+				modelList[i].Tier = models.Tier1
+			} else {
+				modelList[i].Tier = tiers[modelList[i].ID]
+			}
 		}
 	}
 }

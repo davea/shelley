@@ -20,10 +20,17 @@ func TestAssignTiers(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown model defaults to tier 1", func(t *testing.T) {
+	t.Run("unknown model defaults to tier 2", func(t *testing.T) {
 		tiers := AssignTiers([]string{"some-brand-new-model"})
-		if tiers["some-brand-new-model"] != Tier1 {
-			t.Errorf("unknown tier = %d, want %d", tiers["some-brand-new-model"], Tier1)
+		if tiers["some-brand-new-model"] != Tier2 {
+			t.Errorf("unknown tier = %d, want %d", tiers["some-brand-new-model"], Tier2)
+		}
+	})
+
+	t.Run("known unshadowed model stays tier 1", func(t *testing.T) {
+		tiers := AssignTiers([]string{"gpt-5.6-sol"})
+		if tiers["gpt-5.6-sol"] != Tier1 {
+			t.Errorf("known tier = %d, want %d", tiers["gpt-5.6-sol"], Tier1)
 		}
 	})
 

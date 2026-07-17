@@ -96,3 +96,24 @@ func TestHandleModelsAssignsTiers(t *testing.T) {
 		t.Errorf("opus-4.7 tier = %d, want %d", tiers["claude-opus-4.7"], models.Tier2)
 	}
 }
+
+func TestAssignModelTiersKeepsCustomModelsProminent(t *testing.T) {
+	modelList := []ModelInfo{
+		{ID: "gpt-5.6-sol", Source: "llm.int.exe.xyz", Ready: true},
+		{ID: "upstream-only", Source: "llm.int.exe.xyz", Ready: true},
+		{ID: "my-custom-model", Source: models.SourceCustomLabel, Ready: true},
+	}
+
+	assignModelTiers(modelList)
+
+	want := map[string]int{
+		"gpt-5.6-sol":     models.Tier1,
+		"upstream-only":   models.Tier2,
+		"my-custom-model": models.Tier1,
+	}
+	for _, model := range modelList {
+		if model.Tier != want[model.ID] {
+			t.Errorf("%s tier = %d, want %d", model.ID, model.Tier, want[model.ID])
+		}
+	}
+}

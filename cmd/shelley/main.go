@@ -355,14 +355,16 @@ func setupToolSetConfig(llmProvider claudetool.LLMServiceProvider, llmManager se
 		tiers := models.AssignTiers(availableIDs)
 		var out []claudetool.AvailableModel
 		for _, id := range availableIDs {
+			info := llmManager.GetModelInfo(id)
 			// Only surface tier-1 models to agents; tier-2 models are
 			// overshadowed by a better available sibling (see
-			// models.AssignTiers) and would just clutter the model enum.
-			if tiers[id] == models.Tier2 {
+			// models.AssignTiers) or are unknown integration models and would
+			// just clutter the model enum. Explicit custom models stay visible.
+			if tiers[id] == models.Tier2 && (info == nil || info.Source != models.SourceCustomLabel) {
 				continue
 			}
 			am := claudetool.AvailableModel{ID: id}
-			if info := llmManager.GetModelInfo(id); info != nil && info.DisplayName != "" && info.DisplayName != id {
+			if info != nil && info.DisplayName != "" && info.DisplayName != id {
 				am.DisplayName = info.DisplayName
 			}
 			out = append(out, am)

@@ -15,10 +15,24 @@ import (
 	"testing"
 	"time"
 
+	"shelley.exe.dev/llm"
 	"shelley.exe.dev/models"
 	"shelley.exe.dev/modelsources"
 	"shelley.exe.dev/slug"
 )
+
+type tieredModelProvider struct {
+	ids   []string
+	infos map[string]*models.ModelInfo
+}
+
+func (p *tieredModelProvider) GetService(string) (llm.Service, error) { return nil, nil }
+func (p *tieredModelProvider) GetAvailableModels() []string           { return p.ids }
+func (p *tieredModelProvider) HasModel(string) bool                   { return true }
+func (p *tieredModelProvider) GetModelInfo(id string) *models.ModelInfo {
+	return p.infos[id]
+}
+func (p *tieredModelProvider) RefreshCustomModels() error { return nil }
 
 func TestSanitizeSlug(t *testing.T) {
 	tests := []struct {
@@ -71,6 +85,22 @@ func TestBuildLLMConfigSkipsGatewayWhenReflectionFoundLLMIntegration(t *testing.
 	}
 	if findBuiltModelSource(cfg.Models, "predictable") != "builtin" {
 		t.Fatalf("predictable model missing from config")
+	}
+}
+
+func TestToolModelsHideUnknownIntegrationModelsButKeepCustomModels(t *testing.T) {
+	provider := &tieredModelProvider{
+		ids: []string{"gpt-5.6-sol", "upstream-only", "my-custom-model"},
+		infos: map[string]*models.ModelInfo{
+			"gpt-5.6-sol":     {Source: "llm.int.exe.xyz"},
+			"upstream-only":   {Source: "llm.int.exe.xyz"},
+			"my-custom-model": {Source: models.SourceCustomLabel},
+		},
+	}
+
+	got := setupToolSetConfig(nil, provider).BuildAvailableModels()
+	if len(got) != 2 || got[0].ID != "gpt-5.6-sol" || got[1].ID != "my-custom-model" {
+		t.Fatalf("available tool models = %+v, want known and custom models", got)
 	}
 }
 
