@@ -265,7 +265,18 @@ body {
 }
 
 /* Buttons */
-button {
+/* Migrated PrimeVue <Button>s inherit the legacy .btn-* letter-spacing so text
+   buttons match the un-migrated ones exactly. (PrimeVue has no letter-spacing
+   token, so it lives here.) */
+.p-button {
+  letter-spacing: -0.01em;
+}
+/* Bare-element reset for legacy native <button>s. Wrapped in :where() so it has
+   ZERO specificity: it still resets plain <button>s but loses to the .btn-*
+   design-system classes (otherwise the reset would strip their chrome). The
+   :not(.p-button) keeps it from touching PrimeVue <Button>s at all — styles.css
+   is unlayered and would otherwise beat PrimeVue's layered .p-button rules. */
+:where(button:not(.p-button)) {
   font-family: inherit;
   cursor: pointer;
   border: none;
@@ -2949,8 +2960,11 @@ button {
 }
 
 /* Keep the Refresh / Add Model buttons on a single line each; on narrow
-   viewports they were wrapping ("+ Add" / "Model") and inflating the header. */
-.models-header-actions .btn-sm {
+   viewports they were wrapping ("+ Add" / "Model") and inflating the header.
+   These are PrimeVue <Button size="small"> (.p-button-sm); the .btn-sm selector
+   is kept for any legacy small buttons. */
+.models-header-actions .btn-sm,
+.models-header-actions .p-button-sm {
   white-space: nowrap;
 }
 
@@ -3019,7 +3033,8 @@ button {
     width: 100%;
   }
 
-  .modal-xwide .models-header-actions .btn-sm {
+  .modal-xwide .models-header-actions .btn-sm,
+  .modal-xwide .models-header-actions .p-button-sm {
     flex: 1;
   }
 }

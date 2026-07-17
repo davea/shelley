@@ -51,18 +51,19 @@
     </div>
 
     <div class="form-actions">
-      <button class="btn btn-secondary" @click="handleCancel">{{ t("cancel") }}</button>
-      <button
+      <Button severity="secondary" :label="t('cancel')" @click="handleCancel" />
+      <Button
         v-if="editingChannelId"
-        class="btn btn-secondary"
+        severity="secondary"
+        :label="testing ? t('testingButton') : t('testButton')"
         :disabled="testing"
         @click="handleTest(editingChannelId)"
-      >
-        {{ testing ? t("testingButton") : t("testButton") }}
-      </button>
-      <button class="btn btn-primary" :disabled="!canSave" @click="handleSave">
-        {{ editingChannelId ? t("save") : t("addChannel") }}
-      </button>
+      />
+      <Button
+        :label="editingChannelId ? t('save') : t('addChannel')"
+        :disabled="!canSave"
+        @click="handleSave"
+      />
     </div>
   </Modal>
 
@@ -75,7 +76,7 @@
     @close="emit('close')"
   >
     <template v-if="channelTypes.length > 0" #title-right>
-      <button class="btn btn-primary btn-sm" @click="handleAdd">+ {{ t("addChannel") }}</button>
+      <Button size="small" @click="handleAdd">+ {{ t("addChannel") }}</Button>
     </template>
 
     <div v-if="error" class="test-result error notifications-error-message">{{ error }}</div>
@@ -99,20 +100,20 @@
           </div>
         </div>
         <div class="notifications-card-actions">
-          <button
+          <Button
             v-if="browserPermission === 'default' && !browserEnabled"
-            class="btn btn-secondary btn-sm"
+            severity="secondary"
+            size="small"
+            label="Enable"
             @click="enableBrowser"
-          >
-            Enable
-          </button>
-          <button
+          />
+          <Button
             v-if="browserPermission === 'granted'"
-            :class="`btn btn-sm ${browserEnabled ? 'btn-primary' : 'btn-secondary'}`"
+            size="small"
+            :severity="browserEnabled ? undefined : 'secondary'"
+            :label="browserEnabled ? t('on') : t('off')"
             @click="toggleBrowser"
-          >
-            {{ browserEnabled ? t("on") : t("off") }}
-          </button>
+          />
           <span v-if="browserPermission === 'denied'" class="notifications-denied-text">
             {{ t("denied") }}
           </span>
@@ -127,12 +128,12 @@
             {{ t("exeDevPushNotificationsDescription") }}
           </div>
         </div>
-        <button
-          :class="`btn btn-sm ${exeNotifyEnabled ? 'btn-primary' : 'btn-secondary'}`"
+        <Button
+          size="small"
+          :severity="exeNotifyEnabled ? undefined : 'secondary'"
+          :label="exeNotifyEnabled ? t('on') : t('off')"
           @click="handleToggleExeNotify"
-        >
-          {{ exeNotifyEnabled ? t("on") : t("off") }}
-        </button>
+        />
       </div>
 
       <!-- Favicon -->
@@ -141,12 +142,12 @@
           <div class="notifications-card-title">{{ t("faviconBadge") }}</div>
           <div class="notifications-card-description">Tab icon changes when agent finishes</div>
         </div>
-        <button
-          :class="`btn btn-sm ${faviconEnabled ? 'btn-primary' : 'btn-secondary'}`"
+        <Button
+          size="small"
+          :severity="faviconEnabled ? undefined : 'secondary'"
+          :label="faviconEnabled ? t('on') : t('off')"
           @click="toggleFavicon"
-        >
-          {{ faviconEnabled ? t("on") : t("off") }}
-        </button>
+        />
       </div>
     </div>
 
@@ -160,9 +161,7 @@
         {{ t("noServerChannelsConfigured") }}
         <template v-if="channelTypes.length > 0">
           {{ " " }}
-          <button class="btn-link notifications-link-button" @click="handleAdd">
-            {{ t("addOne") }}
-          </button>
+          <Button link class="notifications-link-button" :label="t('addOne')" @click="handleAdd" />
         </template>
       </div>
 
@@ -176,14 +175,14 @@
           </div>
         </div>
         <div class="notifications-channel-actions">
-          <button
-            :class="`btn btn-sm ${ch.enabled ? 'btn-primary' : 'btn-secondary'}`"
+          <Button
+            size="small"
+            :severity="ch.enabled ? undefined : 'secondary'"
+            :label="ch.enabled ? t('on') : t('off')"
             @click="handleToggleEnabled(ch)"
-          >
-            {{ ch.enabled ? t("on") : t("off") }}
-          </button>
-          <button class="btn btn-secondary btn-sm" @click="handleEdit(ch)">{{ t("edit") }}</button>
-          <button class="btn btn-secondary btn-sm" @click="handleDelete(ch.channel_id)">
+          />
+          <Button severity="secondary" size="small" :label="t('edit')" @click="handleEdit(ch)" />
+          <Button severity="secondary" size="small" @click="handleDelete(ch.channel_id)">
             <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 stroke-linecap="round"
@@ -192,7 +191,7 @@
                 d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
               />
             </svg>
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -202,6 +201,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import Modal from "./Modal.vue";
+import Button from "primevue/button";
 import { useI18n } from "../composables/i18n";
 import ConfigFieldInput from "./ConfigFieldInput.vue";
 import {

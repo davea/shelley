@@ -7,8 +7,10 @@
     <!-- Header -->
     <div class="header">
       <div class="header-left">
-        <button
+        <Button
           class="btn-icon hide-on-desktop"
+          text
+          severity="secondary"
           :aria-label="t('openConversations')"
           @click="props.onOpenDrawer()"
         >
@@ -20,11 +22,13 @@
               d="M4 6h16M4 12h16M4 18h16"
             />
           </svg>
-        </button>
+        </Button>
 
-        <button
+        <Button
           v-if="isDrawerCollapsed && onToggleDrawerCollapse"
           class="btn-icon show-on-desktop-only"
+          text
+          severity="secondary"
           :aria-label="t('expandSidebar')"
           v-tooltip.top="t('expandSidebar')"
           @click="onToggleDrawerCollapse && onToggleDrawerCollapse()"
@@ -37,7 +41,7 @@
               d="M13 5l7 7-7 7M5 5l7 7-7 7"
             />
           </svg>
-        </button>
+        </Button>
 
         <h1 class="header-title" :title="currentConversation?.slug || 'Shelley'">
           {{ displayTitle }}
@@ -354,6 +358,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from "vue";
+import Button from "primevue/button";
 import {
   type Message,
   type Conversation,
@@ -888,8 +893,7 @@ const usageEntries = computed<UsageEntry[]>(() => {
     const endsTurn = !!m.end_of_turn;
     if (m.usage_data) {
       try {
-        const u: Usage =
-          typeof m.usage_data === "string" ? JSON.parse(m.usage_data) : m.usage_data;
+        const u: Usage = typeof m.usage_data === "string" ? JSON.parse(m.usage_data) : m.usage_data;
         if (
           (u.input_tokens || 0) +
             (u.cache_creation_input_tokens || 0) +

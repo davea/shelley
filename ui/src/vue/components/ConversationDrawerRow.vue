@@ -140,8 +140,11 @@
           <DeleteButton :conversation-id="conversation.conversation_id" />
         </div>
         <div v-if="!isDraft && !itemArchived" class="conversation-actions drawer-actions-row">
-          <button
+          <Button
             class="btn-icon-sm"
+            text
+            severity="secondary"
+            size="small"
             v-tooltip.top="ctx.t('rename')"
             :aria-label="ctx.t('rename')"
             @click="ctx.handleStartRename($event, conversation)"
@@ -154,9 +157,12 @@
                 d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
               />
             </svg>
-          </button>
-          <button
+          </Button>
+          <Button
             class="btn-icon-sm"
+            text
+            severity="secondary"
+            size="small"
             v-tooltip.top="ctx.t('editTags')"
             :aria-label="ctx.t('editTags')"
             @click="ctx.handleOpenTagEditor($event, conversation.conversation_id)"
@@ -169,9 +175,12 @@
                 d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z"
               />
             </svg>
-          </button>
-          <button
+          </Button>
+          <Button
             class="btn-icon-sm"
+            text
+            severity="secondary"
+            size="small"
             v-tooltip.top="ctx.t('archive')"
             :aria-label="ctx.t('archive')"
             @click="ctx.handleArchive($event, conversation.conversation_id)"
@@ -184,7 +193,7 @@
                 d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
               />
             </svg>
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -216,8 +225,11 @@
     </div>
 
     <div v-if="itemArchived" class="conversation-actions drawer-actions-row-offset">
-      <button
+      <Button
         class="btn-icon-sm"
+        text
+        severity="secondary"
+        size="small"
         v-tooltip.top="ctx.t('restore')"
         :aria-label="ctx.t('restore')"
         @click="ctx.handleUnarchive($event, conversation.conversation_id)"
@@ -230,7 +242,7 @@
             d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
           />
         </svg>
-      </button>
+      </Button>
       <DeleteButton :conversation-id="conversation.conversation_id" />
     </div>
   </div>
@@ -276,6 +288,7 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, inject, ref, watch, type VNode } from "vue";
+import Button from "primevue/button";
 import type { Conversation, ConversationWithState } from "../../types";
 import {
   DrawerCtxKey,

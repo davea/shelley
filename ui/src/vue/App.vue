@@ -20,7 +20,7 @@
   <div v-else-if="error && conversations.length === 0" class="error-container">
     <div class="error-content">
       <p class="error-message" style="margin-bottom: 1rem">{{ error }}</p>
-      <button class="btn-primary" @click="loadConversations">{{ t("retry") }}</button>
+      <Button :label="t('retry')" @click="loadConversations" />
     </div>
   </div>
 
@@ -192,6 +192,7 @@ import CommandPalette from "./components/CommandPalette.vue";
 import ModelsModal from "./components/ModelsModal.vue";
 import NotificationsModal from "./components/NotificationsModal.vue";
 import FeatureFlagsModal from "./components/FeatureFlagsModal.vue";
+import Button from "primevue/button";
 import type { EphemeralTerminal } from "./components/terminalTypes";
 import { focusMessageInputIfUnfocused } from "../utils/focusMessageInput";
 import {

@@ -27,7 +27,13 @@
           <div v-if="$slots['title-right']" class="modal-title-right">
             <slot name="title-right" />
           </div>
-          <button class="btn-icon" aria-label="Close modal" @click="emit('close')">
+          <Button
+            class="btn-icon"
+            text
+            severity="secondary"
+            aria-label="Close modal"
+            @click="emit('close')"
+          >
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 stroke-linecap="round"
@@ -36,7 +42,7 @@
                 d="M6 18L18 6M6 6l12 12"
               />
             </svg>
-          </button>
+          </Button>
         </div>
         <div class="modal-body">
           <slot />
@@ -52,6 +58,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
 import Dialog from "primevue/dialog";
+import Button from "primevue/button";
 import { popModalEscape, pushModalEscape } from "../composables/modalEscapeStack";
 
 const props = defineProps<{

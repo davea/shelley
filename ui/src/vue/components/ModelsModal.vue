@@ -15,14 +15,14 @@
   >
     <template #title-right>
       <div class="models-header-actions">
-        <button
-          class="btn-secondary btn-sm"
+        <Button
+          :label="refreshing ? t('refreshingModels') : t('refreshModels')"
+          severity="secondary"
+          size="small"
           :disabled="refreshing || loading"
           @click="handleRefreshModels"
-        >
-          {{ refreshing ? t("refreshingModels") : t("refreshModels") }}
-        </button>
-        <button class="btn-primary btn-sm" @click="handleAddNew">+ {{ t("addModel") }}</button>
+        />
+        <Button size="small" @click="handleAddNew">+ {{ t("addModel") }}</Button>
       </div>
     </template>
 
@@ -71,23 +71,24 @@
         </Column>
         <Column :header="t('columnSource')" field="source">
           <template #body="{ data }">
-            <span :class="{ 'models-cell-muted': data.source === 'custom' }">{{ data.source }}</span>
+            <span :class="{ 'models-cell-muted': data.source === 'custom' }">{{
+              data.source
+            }}</span>
           </template>
         </Column>
         <Column :header="t('endpoint')" field="endpoint">
           <template #body="{ data }">
-            <span
-              v-if="data.endpoint"
-              class="models-cell-endpoint"
-              :title="data.endpoint"
-              >{{ data.endpoint }}</span
-            >
+            <span v-if="data.endpoint" class="models-cell-endpoint" :title="data.endpoint">{{
+              data.endpoint
+            }}</span>
             <span v-else class="models-cell-muted">—</span>
           </template>
         </Column>
         <Column :header="t('tags')" field="tags">
           <template #body="{ data }">
-            <span v-if="data.tags" class="models-cell-tags" :title="data.tags">{{ data.tags }}</span>
+            <span v-if="data.tags" class="models-cell-tags" :title="data.tags">{{
+              data.tags
+            }}</span>
             <span v-else class="models-cell-muted">—</span>
           </template>
         </Column>
@@ -111,8 +112,10 @@
           </template>
           <template #body="{ data }">
             <div v-if="data.model" class="models-cell-actions">
-              <button
+              <Button
                 class="btn-icon"
+                text
+                severity="secondary"
                 v-tooltip.top="t('duplicate')"
                 :aria-label="t('duplicate')"
                 @click="handleDuplicate(data.model)"
@@ -125,9 +128,11 @@
                     d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
                   />
                 </svg>
-              </button>
-              <button
+              </Button>
+              <Button
                 class="btn-icon"
+                text
+                severity="secondary"
                 v-tooltip.top="t('editModel')"
                 :aria-label="t('editModel')"
                 @click="handleEdit(data.model)"
@@ -140,9 +145,11 @@
                     d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
                   />
                 </svg>
-              </button>
-              <button
+              </Button>
+              <Button
                 class="btn-icon btn-danger"
+                text
+                severity="danger"
                 v-tooltip.top="t('delete_')"
                 :aria-label="t('delete_')"
                 @click="handleDelete(data.model.model_id)"
@@ -155,7 +162,7 @@
                     d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
                   />
                 </svg>
-              </button>
+              </Button>
             </div>
           </template>
         </Column>
@@ -176,6 +183,7 @@
 import { computed, ref, watch } from "vue";
 import DataTable from "primevue/datatable";
 import Column from "primevue/column";
+import Button from "primevue/button";
 import Modal from "./Modal.vue";
 import ModelFormModal from "./ModelFormModal.vue";
 import { modelsTableDt } from "./modelsTableDt";

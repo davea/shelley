@@ -40,13 +40,11 @@
             @input="draft[flag.name] = ($event.target as HTMLTextAreaElement).value"
           />
           <div class="feature-flag-actions">
-            <button
-              class="btn-primary"
+            <Button
+              label="Save"
               :disabled="busy[flag.name] || draft[flag.name] === effectiveJSON(flag)"
               @click="commitJSON(flag)"
-            >
-              Save
-            </button>
+            />
           </div>
         </template>
 
@@ -54,14 +52,14 @@
           <span>
             default: <code>{{ JSON.stringify(flag.default) }}</code>
           </span>
-          <button
+          <Button
             v-if="isOverridden(flag)"
-            class="btn-secondary feature-flag-clear"
+            severity="secondary"
+            class="feature-flag-clear"
+            label="Reset to default"
             :disabled="busy[flag.name]"
             @click="clear(flag)"
-          >
-            Reset to default
-          </button>
+          />
         </div>
 
         <div v-if="rowError[flag.name]" class="feature-flag-error">{{ rowError[flag.name] }}</div>
@@ -73,6 +71,7 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from "vue";
 import Modal from "./Modal.vue";
+import Button from "primevue/button";
 import { featureFlagsApi, type FeatureFlag } from "../../services/api";
 import { refreshFeatureFlags } from "../composables/featureFlags";
 

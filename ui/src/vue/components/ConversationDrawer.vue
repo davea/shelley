@@ -36,8 +36,10 @@
       <div class="drawer-header-actions">
         <!-- Group by button -->
         <div v-if="!showArchived" ref="groupMenuRef" class="group-by-wrapper">
-          <button
+          <Button
             :class="`btn-icon${groupBy !== 'none' ? ' group-by-active' : ''}`"
+            text
+            severity="secondary"
             :aria-label="t('groupConversations')"
             v-tooltip.top="t('groupConversations')"
             @click="groupMenuOpen = !groupMenuOpen"
@@ -50,7 +52,7 @@
                 d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
               />
             </svg>
-          </button>
+          </Button>
           <div v-if="groupMenuOpen" class="group-by-menu">
             <button
               v-for="value in ['none', 'cwd', 'git_repo'] as GroupBy[]"
@@ -90,9 +92,11 @@
           </div>
         </div>
         <!-- New conversation button - mobile only -->
-        <button
+        <Button
           v-if="!showArchived"
           class="btn-icon hide-on-desktop"
+          text
+          severity="secondary"
           :aria-label="t('newConversation')"
           @click="onNewConversationClick"
         >
@@ -104,9 +108,11 @@
               d="M12 4v16m8-8H4"
             />
           </svg>
-        </button>
-        <button
+        </Button>
+        <Button
           class="btn-icon hide-on-desktop"
+          text
+          severity="secondary"
           :aria-label="t('closeConversations')"
           @click="emit('close')"
         >
@@ -118,10 +124,12 @@
               d="M6 18L18 6M6 6l12 12"
             />
           </svg>
-        </button>
+        </Button>
         <!-- Collapse button - desktop only -->
-        <button
+        <Button
           class="btn-icon show-on-desktop-only"
+          text
+          severity="secondary"
           :aria-label="t('collapseSidebar')"
           v-tooltip.top="t('collapseSidebar')"
           @click="emit('toggle-collapse')"
@@ -134,7 +142,7 @@
               d="M11 19l-7-7 7-7m8 14l-7-7 7-7"
             />
           </svg>
-        </button>
+        </Button>
       </div>
     </div>
 
@@ -252,7 +260,11 @@
 
     <!-- Footer with archived toggle -->
     <div class="drawer-footer">
-      <button class="btn-secondary drawer-footer-button" @click="showArchived = !showArchived">
+      <Button
+        class="drawer-footer-button"
+        severity="secondary"
+        @click="showArchived = !showArchived"
+      >
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="drawer-icon-size">
           <path
             v-if="showArchived"
@@ -270,7 +282,7 @@
           />
         </svg>
         <span>{{ showArchived ? t("backToConversations") : t("viewArchived") }}</span>
-      </button>
+      </Button>
     </div>
   </div>
 </template>
@@ -290,6 +302,7 @@ import {
 import { tildifyPath } from "../../utils/tildify";
 import { handleModifiedNavClick } from "../utils/openInNewTab";
 import ConversationRow from "./ConversationDrawerRow.vue";
+import Button from "primevue/button";
 import { DrawerCtxKey, type GroupBy, parseTags } from "./conversationDrawerShared";
 
 const props = defineProps<{

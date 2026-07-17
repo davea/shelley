@@ -230,10 +230,8 @@
         New Folder
       </button>
       <div class="directory-picker-footer-spacer"></div>
-      <button class="btn" @click="emit('close')">Cancel</button>
-      <button class="btn-primary" :disabled="loading || !!error" @click="handleSelect">
-        Select
-      </button>
+      <Button label="Cancel" text severity="secondary" @click="emit('close')" />
+      <Button label="Select" :disabled="loading || !!error" @click="handleSelect" />
     </template>
   </Modal>
 </template>
@@ -241,6 +239,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { api } from "../../services/api";
+import Button from "primevue/button";
 import Modal from "./Modal.vue";
 
 interface DirectoryEntry {

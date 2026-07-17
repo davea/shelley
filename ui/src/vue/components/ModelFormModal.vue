@@ -229,12 +229,11 @@
 
       <!-- Form Actions -->
       <div class="form-actions">
-        <button type="button" class="btn-secondary" @click="emit('close')">
-          {{ t("cancel") }}
-        </button>
-        <button
+        <Button type="button" severity="secondary" :label="t('cancel')" @click="emit('close')" />
+        <Button
           type="button"
-          class="btn-secondary"
+          severity="secondary"
+          :label="testing ? t('testingButton') : t('testButton')"
           :disabled="testing || (!form.api_key && !editModel) || !form.model_name"
           :title="
             !form.model_name
@@ -244,17 +243,13 @@
                 : ''
           "
           @click="handleTest"
-        >
-          {{ testing ? t("testingButton") : t("testButton") }}
-        </button>
-        <button
+        />
+        <Button
           type="button"
-          class="btn-primary"
+          :label="editModel ? t('save') : t('addModel')"
           :disabled="!form.display_name || !form.api_key || !form.model_name"
           @click="handleSave"
-        >
-          {{ editModel ? t("save") : t("addModel") }}
-        </button>
+        />
       </div>
     </div>
   </Modal>
@@ -262,6 +257,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
+import Button from "primevue/button";
 import Modal from "./Modal.vue";
 import { useI18n } from "../composables/i18n";
 import {

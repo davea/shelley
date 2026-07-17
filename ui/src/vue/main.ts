@@ -4,7 +4,7 @@
 import { createApp } from "vue";
 import PrimeVue from "primevue/config";
 import Tooltip from "primevue/tooltip";
-import Aura from "@primeuix/themes/aura";
+import { ShelleyPreset } from "./theme/shelley-preset";
 
 import "primeicons/primeicons.css";
 import "@xterm/xterm/css/xterm.css";
@@ -24,7 +24,7 @@ if (!rootContainer) throw new Error("Root container not found");
 
 const primeVueOptions = {
   theme: {
-    preset: Aura,
+    preset: ShelleyPreset,
     options: {
       // Match the legacy app's dark-mode contract: <html class="dark">.
       darkModeSelector: ".dark",

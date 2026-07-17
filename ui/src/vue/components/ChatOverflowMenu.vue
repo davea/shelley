@@ -26,8 +26,10 @@
 -->
 <template>
   <div class="chat-overflow-menu-wrapper">
-    <button
+    <Button
       class="btn-icon"
+      text
+      severity="secondary"
       :aria-label="t('moreOptions')"
       aria-haspopup="true"
       :aria-expanded="open"
@@ -42,7 +44,7 @@
         />
       </svg>
       <span v-if="hasUpdate" class="version-update-dot" />
-    </button>
+    </Button>
 
     <Popover
       ref="popoverRef"
@@ -244,6 +246,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import Popover from "primevue/popover";
+import Button from "primevue/button";
 import SelectButton from "primevue/selectbutton";
 import Select from "primevue/select";
 import type { Link } from "../../types";
