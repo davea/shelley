@@ -12,10 +12,14 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"shelley.exe.dev/exeenv"
+	"shelley.exe.dev/llm"
+	"shelley.exe.dev/llm/ant"
 	"shelley.exe.dev/llm/llmhttp"
+	"shelley.exe.dev/llm/oai"
 	"shelley.exe.dev/models"
 )
 
@@ -51,9 +55,9 @@ type Source struct {
 	// the env source where each provider has its own env-var name).
 	providerLabels map[models.Provider]string
 
-	// allowedAPIModels, when non-empty, restricts this source to models
-	// whose APIModelName is in the set (used for LLM integrations).
-	allowedAPIModels map[string]bool
+	// integration is set only for exe.dev LLM integrations, whose
+	// models.json catalog is authoritative instead of Shelley's catalog.
+	integration *LLMIntegrationConfig
 }
 
 func (s *Source) labelFor(p models.Provider) string {
@@ -125,24 +129,10 @@ func Env(anthropicKey, openAIKey, geminiKey, fireworksKey string) Source {
 // integration. idSuffix, when non-empty, is appended to each
 // materialized model ID to disambiguate multiple integrations.
 func LLMIntegration(integ *LLMIntegrationConfig, idSuffix string) Source {
-	allowed := make(map[string]bool, len(integ.Models))
-	for _, m := range integ.Models {
-		if apiModelName := m.apiModelName(); apiModelName != "" {
-			allowed[apiModelName] = true
-		}
-	}
 	return Source{
-		label:    integ.Host,
-		idSuffix: idSuffix,
-		providers: map[models.Provider]*providerConn{
-			models.ProviderAnthropic: {baseURL: integ.URL, apiKey: "implicit"},
-			models.ProviderOpenAI:    {baseURL: integ.URL, apiKey: "implicit"},
-			models.ProviderFireworks: {baseURL: integ.URL, apiKey: "implicit"},
-			models.ProviderXAI:       {baseURL: integ.URL, apiKey: "implicit"},
-			// Gemini: the integration's /v1/models is OpenAI-shaped and does
-			// not expose Gemini-native endpoints. Omit.
-		},
-		allowedAPIModels: allowed,
+		label:       integ.Host,
+		idSuffix:    idSuffix,
+		integration: integ,
 	}
 }
 
@@ -175,13 +165,37 @@ func Build(catalog []models.Model, sources []Source, httpc *http.Client, logger 
 	}
 	var out []models.Built
 	seen := map[string]bool{}
+	reservedIDs := nonIntegrationModelIDs(catalog, sources)
+	candidateCounts := integrationModelCandidateCounts(sources)
 	for _, src := range sources {
+		if src.integration != nil {
+			ids := integrationModelIDs(src.integration.Models, src.idSuffix, candidateCounts, reservedIDs, seen)
+			for i, m := range src.integration.Models {
+				id := ids[i]
+				if m.ID == "" || seen[id] {
+					continue
+				}
+				apiType, svc, ok := buildIntegrationService(catalog, m, src.integration.URL, httpc)
+				if !ok {
+					continue
+				}
+				seen[id] = true
+				out = append(out, models.Built{
+					ID:          id,
+					DisplayName: id,
+					Provider:    models.Provider(m.Provider),
+					Source:      src.label,
+					Service:     svc,
+					APIType:     apiType,
+					BaseURL:     src.integration.URL,
+				})
+				logger.Debug("Materialized integration model", "id", id, "source", src.label)
+			}
+			continue
+		}
 		for _, m := range catalog {
 			conn := src.providers[m.Provider]
 			if conn == nil {
-				continue
-			}
-			if src.allowedAPIModels != nil && !src.allowedAPIModels[m.APIModelName] {
 				continue
 			}
 			id := m.ID + src.idSuffix
@@ -211,6 +225,162 @@ func Build(catalog []models.Model, sources []Source, httpc *http.Client, logger 
 	return out
 }
 
+func nonIntegrationModelIDs(catalog []models.Model, sources []Source) map[string]bool {
+	ids := map[string]bool{}
+	for _, src := range sources {
+		if src.integration != nil {
+			continue
+		}
+		for _, model := range catalog {
+			if src.providers[model.Provider] != nil {
+				ids[model.ID+src.idSuffix] = true
+			}
+		}
+	}
+	return ids
+}
+
+func integrationModelCandidateCounts(sources []Source) map[string]int {
+	counts := map[string]int{}
+	for _, src := range sources {
+		if src.integration == nil {
+			continue
+		}
+		for _, model := range src.integration.Models {
+			if model.ID == "" || model.apiModelName() == "" || !integrationModelSupportedByShelley(model) {
+				continue
+			}
+			counts[providerStrippedIntegrationID(model.ID)]++
+		}
+	}
+	return counts
+}
+
+func integrationModelIDs(integrationModels []IntegrationModel, idSuffix string, candidateCounts map[string]int, reservedIDs, seen map[string]bool) []string {
+	candidates := make([]string, len(integrationModels))
+	for i, model := range integrationModels {
+		if model.ID == "" || model.apiModelName() == "" || !integrationModelSupportedByShelley(model) {
+			continue
+		}
+		candidates[i] = providerStrippedIntegrationID(model.ID)
+	}
+
+	qualified := make([]bool, len(integrationModels))
+	for i, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		shortID := candidate + idSuffix
+		qualified[i] = candidateCounts[candidate] > 1 || reservedIDs[shortID] || seen[shortID]
+	}
+
+	ids := make([]string, len(integrationModels))
+	for i, model := range integrationModels {
+		if candidates[i] == "" {
+			continue
+		}
+		if qualified[i] {
+			ids[i] = model.ID + idSuffix
+		} else {
+			ids[i] = candidates[i] + idSuffix
+		}
+	}
+	return ids
+}
+
+func providerStrippedIntegrationID(id string) string {
+	_, candidate, ok := strings.Cut(id, "/")
+	if !ok || candidate == "" {
+		return id
+	}
+	return candidate
+}
+
+func buildIntegrationService(catalog []models.Model, model IntegrationModel, baseURL string, httpc *http.Client) (models.APIType, llm.Service, bool) {
+	modelName := model.apiModelName()
+	if modelName == "" {
+		return "", nil, false
+	}
+	if catalogModel, ok := compatibleCatalogModel(catalog, model); ok {
+		return catalogModel.APIType, catalogModel.Build(baseURL, "implicit", httpc), true
+	}
+	apiType, ok := integrationAPIType(model)
+	if !ok {
+		return "", nil, false
+	}
+	supportsImages := model.supportsImages()
+	switch apiType {
+	case models.APITypeAnthropicMessages:
+		return apiType, &ant.Service{
+			APIKey:          "implicit",
+			URL:             baseURL + "/v1/messages",
+			Model:           modelName,
+			HTTPC:           httpc,
+			ThinkingLevel:   llm.ThinkingLevelMedium,
+			SupportsImages_: supportsImages,
+		}, true
+	case models.APITypeOpenAIResponses:
+		return apiType, &oai.ResponsesService{
+			APIKey:        "implicit",
+			ModelURL:      baseURL + "/v1",
+			Model:         oai.Model{ModelName: modelName, SupportsImages: supportsImages},
+			HTTPC:         httpc,
+			ThinkingLevel: llm.ThinkingLevelMedium,
+			ProviderName:  model.Provider,
+		}, true
+	case models.APITypeOpenAIChat:
+		return apiType, &oai.Service{
+			APIKey:       "implicit",
+			ModelURL:     baseURL + "/v1",
+			Model:        oai.Model{ModelName: modelName, SupportsImages: supportsImages},
+			HTTPC:        httpc,
+			ProviderName: model.Provider,
+		}, true
+	default:
+		return "", nil, false
+	}
+}
+
+func compatibleCatalogModel(catalog []models.Model, integrationModel IntegrationModel) (models.Model, bool) {
+	modelName := integrationModel.apiModelName()
+	for _, catalogModel := range catalog {
+		if catalogModel.Provider == models.Provider(integrationModel.Provider) &&
+			catalogModel.APIModelName == modelName &&
+			integrationAdvertisesAPI(integrationModel, catalogModel.APIType) {
+			return catalogModel, true
+		}
+	}
+	return models.Model{}, false
+}
+
+func integrationAdvertisesAPI(model IntegrationModel, apiType models.APIType) bool {
+	var api string
+	switch apiType {
+	case models.APITypeAnthropicMessages:
+		api = "anthropic_messages"
+	case models.APITypeOpenAIResponses:
+		api = "openai_responses"
+	case models.APITypeOpenAIChat:
+		api = "openai_chat"
+	default:
+		return false
+	}
+	return slices.Contains(model.APIs, api)
+}
+
+func integrationAPIType(model IntegrationModel) (models.APIType, bool) {
+	if slices.Contains(model.APIs, "anthropic_messages") {
+		return models.APITypeAnthropicMessages, true
+	}
+	if slices.Contains(model.APIs, "openai_responses") {
+		return models.APITypeOpenAIResponses, true
+	}
+	if slices.Contains(model.APIs, "openai_chat") {
+		return models.APITypeOpenAIChat, true
+	}
+	return "", false
+}
+
 // --- exe.dev LLM integration discovery ------------------------------------
 
 // integrationDiscoveryTimeout bounds each HTTP call made during exe.dev
@@ -222,10 +392,15 @@ var exeDevMarkerPath = "/exe.dev"
 
 // IntegrationModel is one entry from an LLM integration's models.json catalog.
 type IntegrationModel struct {
-	ID       string   `json:"id"`
-	Provider string   `json:"provider,omitempty"`
-	NativeID string   `json:"native_id,omitempty"`
-	APIs     []string `json:"apis,omitempty"`
+	ID           string                       `json:"id"`
+	Provider     string                       `json:"provider,omitempty"`
+	NativeID     string                       `json:"native_id,omitempty"`
+	APIs         []string                     `json:"apis,omitempty"`
+	Architecture IntegrationModelArchitecture `json:"architecture,omitempty"`
+}
+
+type IntegrationModelArchitecture struct {
+	InputModalities []string `json:"input_modalities,omitempty"`
 }
 
 func (m IntegrationModel) apiModelName() string {
@@ -233,6 +408,10 @@ func (m IntegrationModel) apiModelName() string {
 		return m.NativeID
 	}
 	return m.ID
+}
+
+func (m IntegrationModel) supportsImages() bool {
+	return slices.Contains(m.Architecture.InputModalities, "image")
 }
 
 // LLMIntegrationConfig describes one exe.dev "llm" integration that
@@ -359,7 +538,7 @@ func integrationModelsFromCatalog(catalog llmIntegrationModelCatalog) []Integrat
 	}
 	var out []IntegrationModel
 	for _, model := range catalog.Models {
-		if model.apiModelName() == "" || !integrationModelSupportedByShelley(model) {
+		if model.ID == "" || model.apiModelName() == "" || !integrationModelSupportedByShelley(model) {
 			continue
 		}
 		out = append(out, model)
@@ -368,18 +547,8 @@ func integrationModelsFromCatalog(catalog llmIntegrationModelCatalog) []Integrat
 }
 
 func integrationModelSupportedByShelley(model IntegrationModel) bool {
-	switch model.Provider {
-	case string(models.ProviderAnthropic):
-		return slices.Contains(model.APIs, "anthropic_messages")
-	case string(models.ProviderOpenAI):
-		return slices.Contains(model.APIs, "openai_responses") || slices.Contains(model.APIs, "openai_chat")
-	case string(models.ProviderFireworks):
-		return slices.Contains(model.APIs, "openai_chat")
-	case string(models.ProviderXAI):
-		return slices.Contains(model.APIs, "openai_responses") || slices.Contains(model.APIs, "openai_chat")
-	default:
-		return false
-	}
+	_, ok := integrationAPIType(model)
+	return ok
 }
 
 // fetchJSON GETs url with a per-call timeout and decodes JSON into out.
