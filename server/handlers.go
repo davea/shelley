@@ -2260,14 +2260,19 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 
 // ModelInfo represents a model in the API response
 type ModelInfo struct {
-	ID                string   `json:"id"`
-	DisplayName       string   `json:"display_name,omitempty"`
-	Source            string   `json:"source,omitempty"`   // Human-readable source (e.g., "exe.dev gateway", "$ANTHROPIC_API_KEY")
-	BaseURL           string   `json:"base_url,omitempty"` // Upstream origin (e.g., "https://llm.int.exe.xyz")
-	APIType           string   `json:"api_type,omitempty"` // Wire protocol (e.g., "anthropic-messages")
-	Ready             bool     `json:"ready"`
-	MaxContextTokens  int      `json:"max_context_tokens,omitempty"`
-	IsDefault         bool     `json:"is_default,omitempty"`
+	ID               string `json:"id"`
+	DisplayName      string `json:"display_name,omitempty"`
+	Source           string `json:"source,omitempty"`   // Human-readable source (e.g., "exe.dev gateway", "$ANTHROPIC_API_KEY")
+	BaseURL          string `json:"base_url,omitempty"` // Upstream origin (e.g., "https://llm.int.exe.xyz")
+	APIType          string `json:"api_type,omitempty"` // Wire protocol (e.g., "anthropic-messages")
+	Ready            bool   `json:"ready"`
+	MaxContextTokens int    `json:"max_context_tokens,omitempty"`
+	IsDefault        bool   `json:"is_default,omitempty"`
+	// Tier is 1 for prominent models and 2 for models overshadowed by a
+	// better available sibling (see models.AssignTiers). The UI keeps tier-2
+	// models behind a "more models" affordance. Older iOS/Android clients that
+	// don't know about this field simply ignore it.
+	Tier              int      `json:"tier,omitempty"`
 	SupportsImages    bool     `json:"supports_images"`
 	SupportsReasoning bool     `json:"supports_reasoning"`
 	ReasoningLevels   []string `json:"reasoning_levels,omitempty"`
@@ -2604,7 +2609,26 @@ func (s *Server) getModelList() []ModelInfo {
 			modelList = append(modelList, info)
 		}
 	}
+	assignModelTiers(modelList)
 	return modelList
+}
+
+// assignModelTiers stamps each ready model with its tier (1 or 2) based on the
+// set of ready models and the curated shadow relationships in package models.
+// Not-ready models are left at their zero tier (omitted from JSON).
+func assignModelTiers(modelList []ModelInfo) {
+	var readyIDs []string
+	for _, m := range modelList {
+		if m.Ready {
+			readyIDs = append(readyIDs, m.ID)
+		}
+	}
+	tiers := models.AssignTiers(readyIDs)
+	for i := range modelList {
+		if modelList[i].Ready {
+			modelList[i].Tier = tiers[modelList[i].ID]
+		}
+	}
 }
 
 // effectiveDefaultModel returns the model id to use when the client

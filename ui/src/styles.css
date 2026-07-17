@@ -11370,6 +11370,13 @@ kbd {
 .p-select-overlay.model-picker-panel .model-picker-refresh-icon.spinning {
   animation: spin 1s linear infinite;
 }
+.p-select-overlay.model-picker-panel .model-picker-more-icon {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.p-select-overlay.model-picker-panel .model-picker-more-icon.expanded {
+  transform: rotate(180deg);
+}
 
 /* =========================================================================
    Modal.vue — the base modal rebuilt on PrimeVue Dialog. The #container slot

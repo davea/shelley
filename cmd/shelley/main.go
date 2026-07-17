@@ -351,8 +351,16 @@ func setupToolSetConfig(llmProvider claudetool.LLMServiceProvider, llmManager se
 	// built. This lets newly-added custom models become visible to subagents
 	// (and llm_one_shot) without restarting the server. See issue #195.
 	buildAvailableModels := func() []claudetool.AvailableModel {
+		availableIDs := llmManager.GetAvailableModels()
+		tiers := models.AssignTiers(availableIDs)
 		var out []claudetool.AvailableModel
-		for _, id := range llmManager.GetAvailableModels() {
+		for _, id := range availableIDs {
+			// Only surface tier-1 models to agents; tier-2 models are
+			// overshadowed by a better available sibling (see
+			// models.AssignTiers) and would just clutter the model enum.
+			if tiers[id] == models.Tier2 {
+				continue
+			}
 			am := claudetool.AvailableModel{ID: id}
 			if info := llmManager.GetModelInfo(id); info != nil && info.DisplayName != "" && info.DisplayName != id {
 				am.DisplayName = info.DisplayName

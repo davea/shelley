@@ -1,0 +1,52 @@
+package models
+
+import "testing"
+
+func TestAssignTiers(t *testing.T) {
+	t.Run("shadowed model drops to tier 2 when both present", func(t *testing.T) {
+		tiers := AssignTiers([]string{"claude-opus-4.8", "claude-opus-4.7"})
+		if tiers["claude-opus-4.8"] != Tier1 {
+			t.Errorf("opus-4.8 tier = %d, want %d", tiers["claude-opus-4.8"], Tier1)
+		}
+		if tiers["claude-opus-4.7"] != Tier2 {
+			t.Errorf("opus-4.7 tier = %d, want %d", tiers["claude-opus-4.7"], Tier2)
+		}
+	})
+
+	t.Run("worse model stays tier 1 when better absent", func(t *testing.T) {
+		tiers := AssignTiers([]string{"claude-opus-4.7"})
+		if tiers["claude-opus-4.7"] != Tier1 {
+			t.Errorf("opus-4.7 tier = %d, want %d (no shadowing model present)", tiers["claude-opus-4.7"], Tier1)
+		}
+	})
+
+	t.Run("unknown model defaults to tier 1", func(t *testing.T) {
+		tiers := AssignTiers([]string{"some-brand-new-model"})
+		if tiers["some-brand-new-model"] != Tier1 {
+			t.Errorf("unknown tier = %d, want %d", tiers["some-brand-new-model"], Tier1)
+		}
+	})
+
+	t.Run("multiple shadows demote several models", func(t *testing.T) {
+		avail := []string{"gpt-5.6-luna", "gpt-5.3-codex", "gpt-5.2-codex", "claude-haiku-4.5"}
+		tiers := AssignTiers(avail)
+		if tiers["gpt-5.6-luna"] != Tier1 {
+			t.Errorf("luna tier = %d, want %d", tiers["gpt-5.6-luna"], Tier1)
+		}
+		for _, worse := range []string{"gpt-5.3-codex", "gpt-5.2-codex", "claude-haiku-4.5"} {
+			if tiers[worse] != Tier2 {
+				t.Errorf("%s tier = %d, want %d", worse, tiers[worse], Tier2)
+			}
+		}
+	})
+
+	t.Run("every input id is assigned a tier", func(t *testing.T) {
+		avail := IDs()
+		tiers := AssignTiers(avail)
+		for _, id := range avail {
+			if tiers[id] != Tier1 && tiers[id] != Tier2 {
+				t.Errorf("%s tier = %d, want 1 or 2", id, tiers[id])
+			}
+		}
+	})
+}

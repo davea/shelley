@@ -71,6 +71,10 @@ export interface Model {
   supports_images?: boolean;
   supports_reasoning?: boolean;
   reasoning_levels?: ("off" | "minimal" | "low" | "medium" | "high" | "xhigh")[];
+  // Tier is 1 for prominent models and 2 for models overshadowed by a better
+  // available sibling. The picker keeps tier-2 models behind a "more models"
+  // toggle. Absent/0 is treated as tier 1 by the UI.
+  tier?: number;
   // Reasoning level applied when a conversation carries no explicit
   // thinking_level override. Empty when the provider picks its own default.
   default_reasoning_level?: string;

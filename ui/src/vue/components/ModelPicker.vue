@@ -10,7 +10,7 @@
   <Select
     ref="selectRef"
     :model-value="selectedModel"
-    :options="models"
+    :options="visibleModels"
     :option-label="(m: Model) => m.display_name || m.id"
     option-value="id"
     :option-disabled="(m: Model) => !m.ready"
@@ -34,6 +34,25 @@
       <span v-if="!option.ready" class="model-picker-option-badge">not ready</span>
     </template>
     <template #footer>
+      <button
+        v-if="tier2Models.length > 0"
+        class="model-picker-manage model-picker-more"
+        type="button"
+        @click="toggleMore"
+      >
+        <svg
+          :class="`model-picker-more-icon ${showMore ? 'expanded' : ''}`"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+        <span>{{ showMore ? "Fewer models" : `More models (${tier2Models.length})` }}</span>
+      </button>
       <div class="model-picker-divider" />
       <button class="model-picker-manage" type="button" @click="handleManageModels">
         <svg
@@ -94,6 +113,27 @@ const emit = defineEmits<{
 
 const selectRef = ref<InstanceType<typeof Select> | null>(null);
 
+// Tier 2 models are overshadowed by a better available sibling; they're kept
+// behind a "more models" toggle so the common case stays uncluttered. Absent
+// tier is treated as tier 1 (backward compatible with older servers).
+const isTier2 = (m: Model) => m.tier === 2;
+const tier1Models = computed(() => props.models.filter((m) => !isTier2(m)));
+const tier2Models = computed(() => props.models.filter(isTier2));
+
+const showMore = ref(false);
+
+// When collapsed, only show tier-1 models — plus the currently selected model
+// if it happens to be a tier-2 one, so the selection always renders.
+const visibleModels = computed(() => {
+  if (showMore.value) return props.models;
+  const base = tier1Models.value;
+  const selected = props.models.find((m) => m.id === props.selectedModel);
+  if (selected && isTier2(selected) && !base.includes(selected)) {
+    return [...base, selected];
+  }
+  return base;
+});
+
 const selectedModelObj = computed(() => props.models.find((m) => m.id === props.selectedModel));
 const displayName = computed(() => selectedModelObj.value?.display_name || props.selectedModel);
 const displayWithSource = computed(() =>
@@ -104,6 +144,10 @@ const displayWithSource = computed(() =>
 
 function handleSelect(modelId: string) {
   emit("selectModel", modelId);
+}
+
+function toggleMore() {
+  showMore.value = !showMore.value;
 }
 
 function handleManageModels() {

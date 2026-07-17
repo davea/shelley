@@ -60,3 +60,39 @@ func TestHandleModelRefreshReturnsRefreshedModels(t *testing.T) {
 		t.Fatal("old built model was not removed")
 	}
 }
+
+func TestHandleModelsAssignsTiers(t *testing.T) {
+	mgr, err := models.NewManager(&models.Config{
+		Models: []models.Built{
+			{ID: "claude-opus-4.8", Provider: models.ProviderAnthropic, Service: loop.NewPredictableService()},
+			{ID: "claude-opus-4.7", Provider: models.ProviderAnthropic, Service: loop.NewPredictableService()},
+		},
+		Logger: slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	s := &Server{llmManager: mgr, logger: slog.Default()}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/models", nil)
+	rec := httptest.NewRecorder()
+	s.handleModels(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	var got []ModelInfo
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	tiers := map[string]int{}
+	for _, m := range got {
+		tiers[m.ID] = m.Tier
+	}
+	if tiers["claude-opus-4.8"] != models.Tier1 {
+		t.Errorf("opus-4.8 tier = %d, want %d", tiers["claude-opus-4.8"], models.Tier1)
+	}
+	if tiers["claude-opus-4.7"] != models.Tier2 {
+		t.Errorf("opus-4.7 tier = %d, want %d", tiers["claude-opus-4.7"], models.Tier2)
+	}
+}
