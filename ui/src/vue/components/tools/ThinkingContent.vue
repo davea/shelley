@@ -1,5 +1,5 @@
 <!-- Vue port of components/ThinkingContent.tsx. Collapsible chain-of-thought,
-     default expanded. Preserves: .thinking-content, .thinking-content-wrapper,
+     default collapsed. Preserves: .thinking-content, .thinking-content-wrapper,
      data-testid thinking-content, .thinking-clickable-area, .thinking-emoji 💭,
      .thinking-text, .thinking-toggle, .thinking-toggle-button. -->
 <template>
@@ -39,7 +39,7 @@ import { computed, ref } from "vue";
 
 const props = defineProps<{ thinking: string }>();
 
-const isExpanded = ref(true);
+const isExpanded = ref(false);
 
 // Truncate thinking for display - get first 80 chars
 const truncateThinking = (text: string, maxLen = 80) => {
