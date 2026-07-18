@@ -1202,6 +1202,7 @@ const renderModel = computed<GenerationBlock[]>(() => {
 const showStreamingPreview = computed(() => !!streamingText.value && agentWorking.value);
 
 // ---- scroll ----
+const MAX_SCROLL_OFFSET = 0x7fffffff;
 let bottomPinFrame: number | null = null;
 let bottomPinActive = false;
 
@@ -1225,7 +1226,7 @@ function scrollToBottom() {
       stopBottomPin();
       return;
     }
-    el.scrollTop = Number.MAX_SAFE_INTEGER;
+    el.scrollTop = MAX_SCROLL_OFFSET;
     lastObservedScrollTop = el.scrollTop;
     if (!bottomPinActive) return;
     bottomPinFrame = requestAnimationFrame(step);
@@ -2410,7 +2411,7 @@ function setupScrollObservers() {
       return;
     }
     if (!userScrolled && !catchingUp) {
-      container.scrollTop = Number.MAX_SAFE_INTEGER;
+      container.scrollTop = MAX_SCROLL_OFFSET;
       lastObservedScrollTop = container.scrollTop;
     }
   });

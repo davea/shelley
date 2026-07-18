@@ -40,7 +40,9 @@ test.describe("Scroll behavior", () => {
       };
       const originalRect = Element.prototype.getBoundingClientRect;
       const scrollHeight = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight");
+      const scrollTop = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
       if (!scrollHeight?.get) throw new Error("Element.scrollHeight getter not found");
+      if (!scrollTop?.get || !scrollTop.set) throw new Error("Element.scrollTop accessors not found");
       state.__messageRectReads = 0;
       state.__messagesScrollHeightReads = 0;
       Element.prototype.getBoundingClientRect = function () {
@@ -57,6 +59,17 @@ test.describe("Scroll behavior", () => {
             state.__messagesScrollHeightReads = (state.__messagesScrollHeightReads || 0) + 1;
           }
           return scrollHeight.get!.call(this);
+        },
+      });
+      Object.defineProperty(Element.prototype, "scrollTop", {
+        configurable: scrollTop.configurable,
+        enumerable: scrollTop.enumerable,
+        get() {
+          return scrollTop.get!.call(this);
+        },
+        set(value: number) {
+          // WebKit can wrap extremely large scroll offsets back to zero.
+          scrollTop.set!.call(this, value > 0x7fffffff ? 0 : value);
         },
       });
     });
