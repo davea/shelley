@@ -30,6 +30,21 @@ test.describe("Scroll behavior", () => {
     const messagesContainer = page.locator(".messages-container");
     const scrollButton = page.locator(".scroll-to-bottom-button");
 
+    // The TOC must not synchronously measure every message during scroll.
+    // That forces Safari to lay out content-visibility:auto messages that are
+    // far off screen and turns one scroll event into a long main-thread stall.
+    await page.evaluate(() => {
+      const state = window as Window & { __messageRectReads?: number };
+      const original = Element.prototype.getBoundingClientRect;
+      state.__messageRectReads = 0;
+      Element.prototype.getBoundingClientRect = function () {
+        if (this instanceof HTMLElement && this.hasAttribute("data-message-id")) {
+          state.__messageRectReads = (state.__messageRectReads || 0) + 1;
+        }
+        return original.call(this);
+      };
+    });
+
     // Scroll up to the top and verify the scroll-to-bottom button appears.
     //
     // Setting scrollTop dispatches the 'scroll' event asynchronously, so the
@@ -39,11 +54,25 @@ test.describe("Scroll behavior", () => {
     // good. Re-scroll inside a poll so such a yank-back can't permanently fail
     // the test, then assert the button stays visible once it's settled.
     await expect(async () => {
+      await page.evaluate(() => {
+        (window as Window & { __messageRectReads?: number }).__messageRectReads = 0;
+      });
       await messagesContainer.evaluate((el) => {
         el.scrollTop = 0;
       });
       await expect(scrollButton).toBeVisible({ timeout: 1000 });
     }).toPass({ timeout: 30000 });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as Window & { __messageRectReads?: number }).__messageRectReads || 0,
+        ),
+      )
+      .toBe(0);
+
+    await page.locator(".toc-button").click();
+    await expect(page.locator(".toc-entry-top")).toHaveClass(/toc-entry-active/);
+    await page.keyboard.press("Escape");
 
     // Click the button to return to the bottom. A late streaming-driven
     // auto-scroll may beat us to it and hide the button first; that's fine —

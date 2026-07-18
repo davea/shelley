@@ -202,6 +202,32 @@ function scrollToFragment(
 }
 
 const entries = computed(() => buildEntries(props.messages));
+const activeEntryByMessageId = computed(() => {
+  const entryByMessageId = new Map<string, string>();
+  for (const entry of entries.value) {
+    if (entry.messageId) entryByMessageId.set(entry.messageId, entry.id);
+  }
+
+  const result = new Map<string, string>();
+  let active = "top";
+  for (const message of props.messages) {
+    active = entryByMessageId.get(message.message_id) ?? active;
+    result.set(message.message_id, active);
+  }
+  return result;
+});
+
+function messageAtCutoff(container: HTMLElement): HTMLElement | null {
+  const rect = container.getBoundingClientRect();
+  const x = rect.left + rect.width / 2;
+  const cutoff = Math.min(rect.bottom - 1, rect.top + 80);
+  for (const offset of [0, -1, 1, -2, 2, -4, 4]) {
+    const target = document.elementFromPoint(x, cutoff + offset);
+    const message = target?.closest<HTMLElement>("[data-message-id]");
+    if (message && container.contains(message)) return message;
+  }
+  return null;
+}
 
 // Active-entry tracking on scroll.
 let scrollContainer: HTMLElement | null = null;
@@ -212,24 +238,18 @@ function attachScroll() {
   const container = props.containerRef;
   if (!container) return;
   const update = () => {
-    let active: string | null = null;
-    const containerRect = container.getBoundingClientRect();
-    const cutoff = containerRect.top + 80;
-    for (const entry of entries.value) {
-      if (entry.kind === "top") {
-        if (container.scrollTop <= 40) active = entry.id;
-        continue;
-      }
-      if (entry.kind === "bottom") continue;
-      if (entry.kind === "gen") continue;
-      if (!entry.messageId) continue;
-      const el = findMessageElement(container, entry.messageId);
-      if (!el) continue;
-      if (el.getBoundingClientRect().top <= cutoff) active = entry.id;
+    if (container.scrollTop <= 40) {
+      activeId.value = "top";
+      return;
     }
     const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
-    if (nearBottom) active = "bottom";
-    activeId.value = active;
+    if (nearBottom) {
+      activeId.value = "bottom";
+      return;
+    }
+
+    const messageId = messageAtCutoff(container)?.dataset.messageId;
+    if (messageId) activeId.value = activeEntryByMessageId.value.get(messageId) ?? null;
   };
   update();
   container.addEventListener("scroll", update, { passive: true });
