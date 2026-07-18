@@ -83,6 +83,33 @@ func TestTokenContextWindow(t *testing.T) {
 	}
 }
 
+func TestSupportsServerSideWebSearch(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		want  bool
+	}{
+		{"default model", "", true},
+		{"Claude46Sonnet", Claude46Sonnet, true},
+		{"Claude48Opus", Claude48Opus, true},
+		// Non-Claude models reached over the Anthropic Messages wire protocol
+		// (e.g. a third-party model an LLM integration serves via
+		// anthropic_messages) can't run the Anthropic web_search tool.
+		{"third-party model with vendor prefix", "accounts/vendor/models/some-model", false},
+		{"bare third-party model", "some-model", false},
+		{"unknown model", "some-other-model", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Service{Model: tt.model}
+			if got := s.SupportsServerSideWebSearch(); got != tt.want {
+				t.Errorf("SupportsServerSideWebSearch() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMaxImageDimension(t *testing.T) {
 	s := &Service{}
 	want := 2000

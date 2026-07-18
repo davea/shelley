@@ -84,6 +84,16 @@ func ClaudeModelName(userName string) string {
 
 func (s *Service) Provider() string { return "anthropic" }
 
+// SupportsServerSideWebSearch reports whether this service can run the
+// Anthropic server-side `web_search_20250305` tool. Only genuine Claude
+// models understand it. The Anthropic Messages wire protocol is also used to
+// reach non-Anthropic models (e.g. when an LLM integration advertises
+// anthropic_messages for a third-party model); those reject the tool, so gate
+// on the model name.
+func (s *Service) SupportsServerSideWebSearch() bool {
+	return strings.HasPrefix(strings.ToLower(cmp.Or(s.Model, DefaultModel)), "claude")
+}
+
 // DefaultReasoningLevel reports the reasoning level applied to requests that
 // carry no per-conversation override. applyAnthropicThinking treats both
 // ThinkingLevelDefault and ThinkingLevelOff as "send no thinking", so those

@@ -457,8 +457,9 @@ type mockServiceWithWebSearch struct {
 func (m *mockServiceWithWebSearch) SupportsServerSideWebSearch() bool { return true }
 
 // mockLLMProviderWithProviders is a mock that maps model IDs to providers.
-// OpenAI-flavored services are returned as mockServiceWithWebSearch so they
-// satisfy ServerSideWebSearchCapable (mirroring oai.ResponsesService).
+// Both anthropic and OpenAI-flavored services are returned as
+// mockServiceWithWebSearch so they satisfy ServerSideWebSearchCapable
+// (mirroring genuine Claude models and oai.ResponsesService).
 type mockLLMProviderWithProviders struct {
 	providers map[string]string
 }
@@ -468,7 +469,7 @@ func (m *mockLLMProviderWithProviders) GetService(modelID string) (llm.Service, 
 	if p == "" {
 		return nil, fmt.Errorf("unknown model: %s", modelID)
 	}
-	if p == "openai" {
+	if p == "openai" || p == "anthropic" {
 		return &mockServiceWithWebSearch{mockServiceWithProvider: mockServiceWithProvider{provider: p}}, nil
 	}
 	return &mockServiceWithProvider{provider: p}, nil
@@ -486,6 +487,18 @@ func (p *plainOpenAIProvider) GetService(modelID string) (llm.Service, error) {
 	return &mockServiceWithProvider{provider: "openai"}, nil
 }
 func (p *plainOpenAIProvider) GetAvailableModels() []string { return nil }
+
+// plainAnthropicProvider returns a mockServiceWithProvider (no web search
+// capability) reporting provider "anthropic". This mirrors a non-Claude model
+// reached over the Anthropic Messages wire protocol (e.g. a third-party model
+// an LLM integration serves via anthropic_messages): it reports provider
+// "anthropic" but cannot run the Anthropic server-side web_search tool.
+type plainAnthropicProvider struct{}
+
+func (p *plainAnthropicProvider) GetService(modelID string) (llm.Service, error) {
+	return &mockServiceWithProvider{provider: "anthropic"}, nil
+}
+func (p *plainAnthropicProvider) GetAvailableModels() []string { return nil }
 
 func TestNewToolSet_WebSearchForAnthropicModels(t *testing.T) {
 	provider := &mockLLMProviderWithProviders{
@@ -557,6 +570,23 @@ func TestNewToolSet_WebSearchForAnthropicModels(t *testing.T) {
 		ts := NewToolSet(context.Background(), cfg)
 		if hasWebSearchTool(ts) {
 			t.Error("expected no web_search tool for a chat-completions openai service")
+		}
+	})
+
+	// A non-Claude model reached over the Anthropic Messages wire protocol
+	// (e.g. a third-party model an LLM integration serves via anthropic_messages)
+	// reports provider "anthropic" but cannot run the Anthropic server-side
+	// web_search tool. Sending it would produce a 400 Bad Request (issue #242),
+	// so it must NOT get a web_search tool.
+	t.Run("anthropic-protocol non-claude service has no web_search", func(t *testing.T) {
+		cfg := ToolSetConfig{
+			LLMProvider: &plainAnthropicProvider{},
+			ModelID:     "third-party-model",
+			WorkingDir:  "/test",
+		}
+		ts := NewToolSet(context.Background(), cfg)
+		if hasWebSearchTool(ts) {
+			t.Error("expected no web_search tool for a non-Claude anthropic-protocol service")
 		}
 	})
 

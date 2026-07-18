@@ -118,9 +118,10 @@ func (ts *ToolSet) WorkingDir() *MutableWorkingDir {
 	return ts.wd
 }
 
-// ServerSideWebSearchCapable is implemented by services that support OpenAI
-// server-side web search. Only the Responses API supports web search; the
-// legacy Chat Completions API does not.
+// ServerSideWebSearchCapable is implemented by services that support
+// server-side web search. Only certain services/models qualify: the OpenAI
+// Responses API (not legacy Chat Completions), and genuine Anthropic Claude
+// models (not other models reached over the Anthropic Messages wire protocol).
 type ServerSideWebSearchCapable interface {
 	SupportsServerSideWebSearch() bool
 }
@@ -128,6 +129,14 @@ type ServerSideWebSearchCapable interface {
 // serverSideTools returns server-side tools appropriate for the given service.
 // Server-side tools are executed on the LLM provider's infrastructure.
 func serverSideTools(svc llm.Service) []*llm.Tool {
+	// Every service that can run server-side web search advertises it via the
+	// optional ServerSideWebSearchCapable interface. Bail out otherwise so we
+	// never send a web_search tool a model can't handle (e.g. a third-party
+	// model served over the Anthropic Messages or OpenAI Chat Completions wire
+	// protocol by an LLM integration).
+	if c, ok := svc.(ServerSideWebSearchCapable); !ok || !c.SupportsServerSideWebSearch() {
+		return nil
+	}
 	switch svc.Provider() {
 	case "anthropic":
 		return []*llm.Tool{
@@ -138,11 +147,6 @@ func serverSideTools(svc llm.Service) []*llm.Tool {
 			},
 		}
 	case "openai":
-		// Only OpenAI's Responses API supports server-side web search; skip
-		// Chat Completions services for OpenAI-compatible endpoints.
-		if c, ok := svc.(ServerSideWebSearchCapable); !ok || !c.SupportsServerSideWebSearch() {
-			return nil
-		}
 		return []*llm.Tool{
 			{
 				Name:       "web_search",
