@@ -102,7 +102,38 @@ test.describe("Scroll behavior", () => {
 
     await page.locator(".toc-button").click();
     await expect(page.locator(".toc-entry-top")).toHaveClass(/toc-entry-active/);
-    await page.keyboard.press("Escape");
+
+    // The TOC's bottom action must stay pinned while lazy content expands.
+    await messagesContainer.evaluate((container) => {
+      const list = container.querySelector(".messages-list");
+      const sentinel = container.querySelector(".messages-bottom-sentinel");
+      if (!list || !sentinel) throw new Error("message list sentinel not found");
+      const spacer = document.createElement("div");
+      spacer.dataset.testid = "lazy-bottom-growth";
+      list.insertBefore(spacer, sentinel);
+      let height = 0;
+      const grow = () => {
+        height += 400;
+        spacer.style.height = `${height}px`;
+        if (height < 1200) requestAnimationFrame(grow);
+      };
+      requestAnimationFrame(grow);
+    });
+    await page.locator(".toc-entry-bottom").click();
+    await expect
+      .poll(() =>
+        messagesContainer.evaluate(
+          (el) => Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop) <= 1,
+        ),
+      )
+      .toBe(true);
+
+    await expect(async () => {
+      await messagesContainer.evaluate((el) => {
+        el.scrollTop = 0;
+      });
+      await expect(scrollButton).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 30000 });
 
     // Click the button to return to the bottom. A late streaming-driven
     // auto-scroll may beat us to it and hide the button first; that's fine —

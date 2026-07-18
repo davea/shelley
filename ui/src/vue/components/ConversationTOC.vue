@@ -81,6 +81,9 @@ const props = defineProps<{
   nearBottom: boolean;
   conversationSlug?: string | null;
 }>();
+const emit = defineEmits<{
+  (e: "scroll-bottom"): void;
+}>();
 
 const open = ref(false);
 const activeId = ref<string | null>(null);
@@ -299,7 +302,7 @@ function handleGoto(entry: TOCEntry) {
     return;
   }
   if (entry.kind === "bottom") {
-    container.scrollTop = Number.MAX_SAFE_INTEGER;
+    if (!props.nearBottom) emit("scroll-bottom");
     history.replaceState(null, "", window.location.pathname + window.location.search);
     return;
   }

@@ -226,6 +226,7 @@
           :container-ref="messagesContainerRef"
           :near-bottom="!showScrollToBottom"
           :conversation-slug="currentConversation?.slug"
+          @scroll-bottom="scrollToBottom"
         />
         <button
           v-if="showScrollToBottom"
@@ -1201,13 +1202,35 @@ const renderModel = computed<GenerationBlock[]>(() => {
 const showStreamingPreview = computed(() => !!streamingText.value && agentWorking.value);
 
 // ---- scroll ----
+let bottomPinFrame: number | null = null;
+let bottomPinActive = false;
+
+function stopBottomPin() {
+  bottomPinActive = false;
+  if (bottomPinFrame !== null) cancelAnimationFrame(bottomPinFrame);
+  bottomPinFrame = null;
+}
+
 function scrollToBottom() {
   const container = messagesContainerRef.value;
   if (!container) return;
+  stopBottomPin();
   userScrolled = false;
   showScrollToBottom.value = false;
-  container.scrollTop = Number.MAX_SAFE_INTEGER;
-  lastObservedScrollTop = container.scrollTop;
+  let framesRemaining = 120;
+  bottomPinActive = true;
+  const step = () => {
+    const el = messagesContainerRef.value;
+    if (!el || userScrolled || framesRemaining-- <= 0) {
+      stopBottomPin();
+      return;
+    }
+    el.scrollTop = Number.MAX_SAFE_INTEGER;
+    lastObservedScrollTop = el.scrollTop;
+    if (!bottomPinActive) return;
+    bottomPinFrame = requestAnimationFrame(step);
+  };
+  step();
 }
 
 function syncFromStore(focusedId: string) {
@@ -2352,7 +2375,7 @@ let lastObservedScrollTop = 0;
 function handleScroll() {
   const container = messagesContainerRef.value;
   if (!container) return;
-  if (container.scrollTop < lastObservedScrollTop) {
+  if (!bottomPinActive && container.scrollTop < lastObservedScrollTop) {
     userScrolled = true;
     showScrollToBottom.value = true;
   }
@@ -2372,12 +2395,15 @@ function setupScrollObservers() {
     ([entry]) => {
       const nearBottom = entry?.isIntersecting ?? false;
       showScrollToBottom.value = !nearBottom;
-      if (nearBottom) userScrolled = false;
+      if (nearBottom) {
+        userScrolled = false;
+        stopBottomPin();
+      }
     },
     { root: container, rootMargin: "0px 0px 100px 0px", threshold: 0 },
   );
   ro = new ResizeObserver(() => {
-    if (container.scrollTop < lastObservedScrollTop) {
+    if (!bottomPinActive && container.scrollTop < lastObservedScrollTop) {
       userScrolled = true;
       showScrollToBottom.value = true;
       lastObservedScrollTop = container.scrollTop;
@@ -2471,6 +2497,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   teardownSubscriptions();
+  stopBottomPin();
   const container = messagesContainerRef.value;
   container?.removeEventListener("scroll", handleScroll);
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
