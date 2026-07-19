@@ -10,6 +10,11 @@ overrides:
   '@shikijs/engine-javascript': ^3.22.0
   '@shikijs/transformers': ^3.22.0
 
+patchedDependencies:
+  '@primevue/core@4.5.5':
+    hash: 3c48b1c5b87ee5145e9c30628143c08c0de33f0bb979e61dbaa8347979b9dfc0
+    path: patches/@primevue__core@4.5.5.patch
+
 importers:
 
   .:
@@ -2919,7 +2924,7 @@ snapshots:
 
   '@primeuix/utils@0.6.4': {}
 
-  '@primevue/core@4.5.5(vue@3.5.38(typescript@5.9.3))':
+  '@primevue/core@4.5.5(patch_hash=3c48b1c5b87ee5145e9c30628143c08c0de33f0bb979e61dbaa8347979b9dfc0)(vue@3.5.38(typescript@5.9.3))':
     dependencies:
       '@primeuix/styled': 0.7.4
       '@primeuix/utils': 0.6.4
@@ -2928,7 +2933,7 @@ snapshots:
   '@primevue/icons@4.5.5(vue@3.5.38(typescript@5.9.3))':
     dependencies:
       '@primeuix/utils': 0.6.4
-      '@primevue/core': 4.5.5(vue@3.5.38(typescript@5.9.3))
+      '@primevue/core': 4.5.5(patch_hash=3c48b1c5b87ee5145e9c30628143c08c0de33f0bb979e61dbaa8347979b9dfc0)(vue@3.5.38(typescript@5.9.3))
     transitivePeerDependencies:
       - vue
 
@@ -4688,7 +4693,7 @@ snapshots:
       '@primeuix/styled': 0.7.4
       '@primeuix/styles': 2.0.3
       '@primeuix/utils': 0.6.4
-      '@primevue/core': 4.5.5(vue@3.5.38(typescript@5.9.3))
+      '@primevue/core': 4.5.5(patch_hash=3c48b1c5b87ee5145e9c30628143c08c0de33f0bb979e61dbaa8347979b9dfc0)(vue@3.5.38(typescript@5.9.3))
       '@primevue/icons': 4.5.5(vue@3.5.38(typescript@5.9.3))
     transitivePeerDependencies:
       - vue

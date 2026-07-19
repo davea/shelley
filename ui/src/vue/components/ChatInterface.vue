@@ -272,8 +272,8 @@
     <!-- No :key here, matching React: MessageInput must NOT remount on the
          first-message conversationId flip, or its post-await setMessage("")
          would run on a destroyed instance and the fresh instance would
-         re-seed from a stale draftValue. Text sync across conversation
-         switches is handled by MessageInput's draftValue watch. -->
+         re-seed from a stale draft seed. Text sync across conversation
+         switches is handled by MessageInput's draftSeed watch. -->
     <MessageInput
       v-if="!currentConversation?.archived"
       :on-send="sendMessage"
@@ -285,7 +285,7 @@
       :disabled="sending || loading"
       :auto-focus="true"
       :injected-text="messageInputInjectedText"
-      :draft-value="draftValue"
+      :draft-seed="draftSeed"
       :initial-rows="messageInputInitialRows"
       :conversation-id="conversationId"
       :lazy-draft-id="lazyDraftId"
@@ -1737,7 +1737,21 @@ function onNewConversationClick(e: MouseEvent) {
 }
 
 // ---- draft autosave ----
-const draftValue = ref("");
+// The composer's live text. Deliberately NOT a ref: every keystroke flows
+// through handleDraftChange, and making it reactive would re-render
+// ChatInterface (and re-run every directive's `updated` hook, including
+// v-tooltip's PrimeVue style reload) per keystroke — which in a huge
+// conversation makes typing crawl in Safari. MessageInput owns the live text;
+// ChatInterface only pushes into the composer via draftSeed (below) when
+// reconciliation decides the text must change.
+let draftText = "";
+// Programmatic seed for the composer. Wrapped in an object so re-seeding with
+// an identical string still triggers MessageInput's watch.
+const draftSeed = ref<{ value: string } | null>(null);
+function seedComposer(value: string) {
+  draftText = value;
+  draftSeed.value = { value };
+}
 const lazyDraftId = ref<string | null>(null);
 let draftConvId: string | null = props.conversationId;
 let inflightCreate: Promise<string> | null = null;
@@ -1824,7 +1838,7 @@ async function saveDraft(value: string) {
 
 const draftAutosave = useDraftAutosave(saveDraft);
 function handleDraftChange(value: string) {
-  draftValue.value = value;
+  draftText = value;
   // Mirror to localStorage SYNCHRONOUSLY before the debounced server autosave:
   // if the tab reloads (or the network silently dropped) before the PUT lands,
   // the keystroke survives, stamped with the last server updated_at we synced
@@ -1843,7 +1857,7 @@ function handleDraftSendStarted() {
   draftAutosave.cancel();
 }
 function handleDraftCleared() {
-  draftValue.value = "";
+  draftText = "";
   lastSeededValue = "";
   draftAutosave.cancel();
   // Draft is gone (sent or deleted): drop the local mirror so a later visit
@@ -2219,10 +2233,10 @@ let lastSeededSession: string | null | undefined = undefined;
 // server echo) from one the user has since edited (must not clobber).
 let lastSeededValue = "";
 
-// Initialize draftValue from the conversation row when switching conversations.
-// Drafts and the new-conversation view reconcile the server copy with the
-// localStorage mirror via updated_at; non-draft conversations have no
-// server-side next-message draft, so their localStorage mirror is
+// Initialize the composer from the conversation row when switching
+// conversations. Drafts and the new-conversation view reconcile the server
+// copy with the localStorage mirror via updated_at; non-draft conversations
+// have no server-side next-message draft, so their localStorage mirror is
 // authoritative (client-side only).
 //
 // reconcileComposerDraft() is the pure, unit-tested core; it returns null when
@@ -2245,13 +2259,13 @@ watch(
       serverDraft: props.currentConversation?.draft || "",
       serverUpdatedAt: props.currentConversation?.updated_at || "",
       cached: loadCachedDraft(props.conversationId ?? null),
-      composerValue: draftValue.value,
+      composerValue: draftText,
       lastSeededSession,
       lastSeededValue,
     });
     if (result === null) return;
     draftSyncedAt = result.draftSyncedAt;
-    draftValue.value = result.value;
+    seedComposer(result.value);
     lastSeededValue = result.value;
     lastSeededSession = result.seededSession;
   },

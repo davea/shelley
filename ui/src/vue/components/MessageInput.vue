@@ -409,9 +409,14 @@ const props = withDefaults(
     disabled?: boolean;
     autoFocus?: boolean;
     injectedText?: string;
-    /** Controlled draft text. When provided, MessageInput surfaces every
-     * keystroke via the draft-change emit so the parent can persist it. */
-    draftValue?: string;
+    /** Programmatic composer seed. When the parent's draft reconciliation
+     * decides the composer text must change (conversation switch, server echo
+     * that wins), it pushes a new seed object here. Wrapped in an object so
+     * re-seeding the same string still fires the watch. Deliberately NOT the
+     * live keystroke value: the parent must not re-render per keystroke (that
+     * made typing crawl in huge conversations); it tracks live text via the
+     * draft-change emit instead. */
+    draftSeed?: { value: string } | null;
     initialRows?: number;
     /** Id of the focused conversation. MessageInput is intentionally NOT keyed
      * by this in the parent (remounting would break the first-message
@@ -454,7 +459,7 @@ const hasQueueHandler = computed(() => props.onQueue !== undefined);
 // wired and we're not already mid-compaction (autoQueue signals distilling).
 const canCompact = computed(() => props.onCompact !== undefined && !props.autoQueue);
 
-const message = ref(props.draftValue ?? "");
+const message = ref(props.draftSeed?.value ?? "");
 // setMessage mirrors the React controlled-value path: surfaces every change via
 // draft-change so the parent can persist it.
 function setMessage(next: string | ((prev: string) => string)) {
@@ -464,11 +469,11 @@ function setMessage(next: string | ((prev: string) => string)) {
   message.value = value;
 }
 
-// Sync external draft updates (e.g. switching between draft conversations).
+// Sync programmatic seeds (e.g. switching between draft conversations).
 watch(
-  () => props.draftValue,
-  (dv) => {
-    if (dv !== undefined) message.value = dv;
+  () => props.draftSeed,
+  (seed) => {
+    if (seed != null) message.value = seed.value;
   },
 );
 

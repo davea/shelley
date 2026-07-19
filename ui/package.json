@@ -70,6 +70,9 @@
       "@shikijs/core": "^3.22.0",
       "@shikijs/engine-javascript": "^3.22.0",
       "@shikijs/transformers": "^3.22.0"
+    },
+    "patchedDependencies": {
+      "@primevue/core@4.5.5": "patches/@primevue__core@4.5.5.patch"
     }
   }
 }
