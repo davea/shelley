@@ -333,7 +333,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "../composables/i18n";
 import { pickPlaceholderHint } from "../../utils/placeholderHints";
 import { SLASH_COMMANDS } from "../../utils/slashCommands";
@@ -1104,20 +1104,6 @@ function handleKeyDown(e: KeyboardEvent) {
   }
 }
 
-function adjustTextareaHeight() {
-  const ta = textareaRef.value;
-  if (ta) {
-    ta.style.height = "auto";
-    const scrollHeight = ta.scrollHeight;
-    const maxHeight = 200;
-    ta.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
-  }
-}
-
-watch(message, () => {
-  void nextTick(adjustTextareaHeight);
-});
-
 // Re-focus textarea after submission completes and it's re-enabled.
 watch(submitting, (now) => {
   const isMobile = "ontouchstart" in window;
@@ -1151,7 +1137,6 @@ onMounted(() => {
   if (typeof window !== "undefined" && window.visualViewport) {
     window.visualViewport.addEventListener("resize", handleViewportResize);
   }
-  void nextTick(adjustTextareaHeight);
 });
 
 onUnmounted(() => {

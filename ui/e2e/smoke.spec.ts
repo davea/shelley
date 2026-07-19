@@ -51,6 +51,51 @@ test.describe('Shelley Smoke Tests', () => {
     await expect(messageInput).toHaveAttribute('placeholder', /.+/);
   });
   
+  test('message input auto-grows without synchronous layout reads', async ({ page }) => {
+    await page.goto('/new');
+    await page.waitForLoadState('domcontentloaded');
+
+    const messageInput = page.getByTestId('message-input');
+    await expect(messageInput).toBeVisible();
+    const initialHeight = await messageInput.evaluate((el) => el.getBoundingClientRect().height);
+
+    await page.evaluate(() => {
+      const state = window as Window & { __textareaScrollHeightReads?: number };
+      const scrollHeight = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollHeight');
+      if (!scrollHeight?.get) throw new Error('Element.scrollHeight getter not found');
+      state.__textareaScrollHeightReads = 0;
+      Object.defineProperty(Element.prototype, 'scrollHeight', {
+        configurable: scrollHeight.configurable,
+        enumerable: scrollHeight.enumerable,
+        get() {
+          if (this instanceof HTMLElement && this.classList.contains('message-textarea')) {
+            state.__textareaScrollHeightReads = (state.__textareaScrollHeightReads || 0) + 1;
+          }
+          return scrollHeight.get!.call(this);
+        },
+      });
+    });
+
+    await messageInput.fill('one\ntwo\nthree\nfour\nfive\nsix');
+    await expect
+      .poll(() => messageInput.evaluate((el) => el.getBoundingClientRect().height))
+      .toBeGreaterThan(initialHeight);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as Window & { __textareaScrollHeightReads?: number })
+              .__textareaScrollHeightReads || 0,
+        ),
+      )
+      .toBe(0);
+
+    await messageInput.fill(Array.from({ length: 20 }, (_, i) => `line ${i}`).join('\n'));
+    await expect
+      .poll(() => messageInput.evaluate((el) => el.getBoundingClientRect().height))
+      .toBeLessThanOrEqual(202);
+  });
+
   test('send button is disabled when input is empty', async ({ page }) => {
     await page.goto('/new');
     await page.waitForLoadState('domcontentloaded');
