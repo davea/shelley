@@ -1203,6 +1203,7 @@ const showStreamingPreview = computed(() => !!streamingText.value && agentWorkin
 
 // ---- scroll ----
 const MAX_SCROLL_OFFSET = 0x7fffffff;
+const BOTTOM_PIN_SCROLL_RELEASE_DELTA = 128;
 let bottomPinFrame: number | null = null;
 let bottomPinActive = false;
 
@@ -2391,7 +2392,11 @@ let lastObservedScrollTop = 0;
 function handleScroll() {
   const container = messagesContainerRef.value;
   if (!container) return;
-  if (!bottomPinActive && container.scrollTop < lastObservedScrollTop) {
+  const upwardDelta = lastObservedScrollTop - container.scrollTop;
+  if (bottomPinActive && upwardDelta >= BOTTOM_PIN_SCROLL_RELEASE_DELTA) {
+    stopBottomPin();
+  }
+  if (!bottomPinActive && upwardDelta > 0) {
     userScrolled = true;
     showScrollToBottom.value = true;
   }

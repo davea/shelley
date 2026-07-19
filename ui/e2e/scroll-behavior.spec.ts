@@ -164,6 +164,8 @@ test.describe("Scroll behavior", () => {
       el.scrollTop = 0;
     });
     await expect(scrollButton).toBeVisible({ timeout: 5000 });
+    // A large upward jump (for example Home or a scrollbar drag) must also
+    // release the pin, even when no wheel event preceded it.
     await messagesContainer.evaluate((container) => {
       const button = document.querySelector<HTMLButtonElement>(".scroll-to-bottom-button");
       const list = container.querySelector(".messages-list");
@@ -173,7 +175,6 @@ test.describe("Scroll behavior", () => {
       const spacer = document.createElement("div");
       spacer.style.height = "1200px";
       list.insertBefore(spacer, sentinel);
-      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, bubbles: true }));
       container.scrollTop = Math.max(0, container.scrollTop - 200);
     });
     await expect
