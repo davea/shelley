@@ -894,15 +894,26 @@ body {
   gap: 0.25rem;
 }
 
-.messages-list > * {
+/* Off-screen rendering containment. Applied per *chunk* of ~50 rendered rows
+   (see chunkRenderNodes in ChatInterface.vue), not per row and not per
+   generation section. Granularity is critical for WebKit typing performance
+   in huge conversations: one giant content-visibility box (a whole generation
+   section) is always partially visible, can never be skipped, and costs
+   150-200ms of containment bookkeeping per composite; per-row boxes make every
+   frame re-check thousands of viewport-relevancy candidates. Chunked, both
+   costs collapse (~16ms/frame while typing). */
+.messages-chunk {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
   content-visibility: auto;
-  contain-intrinsic-size: auto 80px;
+  /* ~50 rows x 80px estimate; `auto` remembers the real laid-out size after
+     first paint so the estimate only matters for never-visited chunks. */
+  contain-intrinsic-size: auto 4000px;
 }
 
 .messages-bottom-sentinel {
   height: 1px;
-  content-visibility: visible;
-  contain: none;
 }
 
 .message {

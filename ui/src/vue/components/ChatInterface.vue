@@ -173,17 +173,19 @@
                 :key="sp.key"
                 :message="sp.message"
               />
-              <MessageRenderNode
-                v-for="node in block.nodes"
-                :key="node.key"
-                :node="node"
-                :tool-progress="toolProgress"
-                :conversation-id="conversationId"
-                :on-open-diff-viewer="handleOpenDiffViewer"
-                :on-comment-text-change="setDiffCommentText"
-                :on-cancel-queued="cancelQueuedMessages"
-                :on-fork="forkHandler"
-              />
+              <div v-for="chunk in block.chunks" :key="chunk.key" class="messages-chunk">
+                <MessageRenderNode
+                  v-for="node in chunk.nodes"
+                  :key="node.key"
+                  :node="node"
+                  :tool-progress="toolProgress"
+                  :conversation-id="conversationId"
+                  :on-open-diff-viewer="handleOpenDiffViewer"
+                  :on-comment-text-change="setDiffCommentText"
+                  :on-cancel-queued="cancelQueuedMessages"
+                  :on-fork="forkHandler"
+                />
+              </div>
             </div>
           </template>
           <!-- streaming preview -->
@@ -398,7 +400,7 @@ import { formatDay } from "../../utils/messageTime";
 import { SLASH_COMMANDS } from "../../utils/slashCommands";
 import type { UsageEntry } from "../../utils/tokenCostGraph";
 import { coalesceMessages, type CoalescedItem } from "./coalesce";
-import type { RenderNode, GenerationBlock } from "./renderNode";
+import type { RenderNode, RenderChunk, GenerationBlock } from "./renderNode";
 import type { EphemeralTerminal } from "./terminalTypes";
 import { DEFAULT_THINKING_LEVEL, type ThinkingLevel } from "./thinkingLevel";
 
@@ -1192,12 +1194,32 @@ const renderModel = computed<GenerationBlock[]>(() => {
         key: `system-prompt-${m.message_id}`,
         message: m,
       })),
-      nodes: sectionNodes,
+      chunks: chunkRenderNodes(sectionNodes),
     });
   });
 
   return blocks;
 });
+
+// Wrap consecutive render nodes into fixed-size chunks. Each chunk gets
+// content-visibility:auto (see .messages-chunk in styles.css) so WebKit can
+// skip layout/paint for off-screen chunks without paying per-frame containment
+// bookkeeping for one giant always-visible box (which cost 150-200ms per
+// composite while typing) or for thousands of per-row boxes (which made every
+// frame re-check thousands of viewport-relevancy candidates).
+//
+// Chunk keys reuse the first node's key: appending messages only ever touches
+// the last chunk, so earlier chunk elements (and their laid-out sizes,
+// remembered via contain-intrinsic-size:auto) stay stable.
+const RENDER_CHUNK_SIZE = 50;
+function chunkRenderNodes(nodes: RenderNode[]): RenderChunk[] {
+  const chunks: RenderChunk[] = [];
+  for (let i = 0; i < nodes.length; i += RENDER_CHUNK_SIZE) {
+    const slice = nodes.slice(i, i + RENDER_CHUNK_SIZE);
+    chunks.push({ key: `chunk-${slice[0].key}`, nodes: slice });
+  }
+  return chunks;
+}
 
 const showStreamingPreview = computed(() => !!streamingText.value && agentWorking.value);
 
