@@ -3831,6 +3831,10 @@ svg {
 }
 .toc-popover-list {
   width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: min(448px, 52vh);
+  overscroll-behavior: contain;
 }
 .toc-entry {
   box-sizing: border-box;

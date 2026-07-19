@@ -21,7 +21,7 @@ test.describe("Conversation TOC popover", () => {
     await tocButton.click();
     const popover = page.locator(".toc-popover");
     await expect(popover).toBeVisible();
-    await expect(popover.locator(".p-virtualscroller")).toBeVisible();
+    await expect(popover.locator(".toc-popover-list")).toBeVisible();
     await expect(tocButton).toHaveAttribute("aria-expanded", "true");
     await expect(popover.locator(".toc-popover-title")).toHaveText("Jump to…");
 

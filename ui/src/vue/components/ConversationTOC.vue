@@ -1,10 +1,18 @@
 <!-- Vue port of components/ConversationTOC.tsx. Floating table-of-contents
-     button + popover, now backed by PrimeVue Popover (outside-click dismissal,
+     button + popover, backed by PrimeVue Popover (outside-click dismissal,
      Escape, viewport-aware positioning come for free — the manual
      getBoundingClientRect math and document listeners are gone). Preserves the
      toc-* class contract and the aria labels "Conversation table of contents"
      (button) and "Table of contents" (popover dialog), plus the "Jump to…"
-     header. `containerRef` is passed as a plain HTMLElement (or null). -->
+     header. `containerRef` is passed as a plain HTMLElement (or null).
+
+     The entry list is a plain scrollable div, NOT a PrimeVue VirtualScroller.
+     Even huge conversations produce only a few hundred TOC entries, so
+     virtualization buys nothing — and it cost a lot: VirtualScroller lazily
+     injected three stylesheets on first open, which invalidates styles for
+     the whole document (1.5s+ of recalc in a 5,000-message conversation), and
+     its absolutely-positioned content div shrink-wraps the nowrap entry
+     labels, forcing horizontal overflow instead of ellipsis. -->
 <template>
   <button
     :class="`toc-button${open ? ' toc-button-open' : ''}`"
@@ -36,35 +44,28 @@
     <div class="toc-popover-header">
       <span class="toc-popover-title">Jump to…</span>
     </div>
-    <VirtualScroller
-      ref="scrollerRef"
-      :items="entries"
-      :item-size="30"
-      :scroll-height="tocScrollHeight"
-      class="toc-popover-list"
-    >
-      <template #item="{ item: entry }">
-        <button
-          :class="`toc-entry toc-entry-${entry.kind}${activeId === entry.id ? ' toc-entry-active' : ''}`"
-          @click="handleGoto(entry)"
-        >
-          <span v-if="entry.kind !== 'gen'" class="toc-entry-icon" aria-hidden="true">
-            <template v-if="entry.kind === 'top'">↑</template>
-            <template v-if="entry.kind === 'bottom'">↓</template>
-            <template v-if="entry.kind === 'user'">•</template>
-            <template v-if="entry.kind === 'eot'">✓</template>
-          </span>
-          <span class="toc-entry-label">{{ entry.label }}</span>
-        </button>
-      </template>
-    </VirtualScroller>
+    <div ref="listRef" class="toc-popover-list">
+      <button
+        v-for="entry in entries"
+        :key="entry.id"
+        :class="`toc-entry toc-entry-${entry.kind}${activeId === entry.id ? ' toc-entry-active' : ''}`"
+        @click="handleGoto(entry)"
+      >
+        <span v-if="entry.kind !== 'gen'" class="toc-entry-icon" aria-hidden="true">
+          <template v-if="entry.kind === 'top'">↑</template>
+          <template v-if="entry.kind === 'bottom'">↓</template>
+          <template v-if="entry.kind === 'user'">•</template>
+          <template v-if="entry.kind === 'eot'">✓</template>
+        </span>
+        <span class="toc-entry-label">{{ entry.label }}</span>
+      </button>
+    </div>
   </Popover>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import Popover from "primevue/popover";
-import VirtualScroller from "primevue/virtualscroller";
 import type { Message, LLMMessage, LLMContent } from "../../types";
 
 interface TOCEntry {
@@ -88,7 +89,7 @@ const emit = defineEmits<{
 const open = ref(false);
 const activeId = ref<string | null>(null);
 const popoverRef = ref<InstanceType<typeof Popover> | null>(null);
-const scrollerRef = ref<{ scrollToIndex: (index: number) => void } | null>(null);
+const listRef = ref<HTMLElement | null>(null);
 
 function extractMessageLabel(message: Message, maxLen = 70): string {
   if (!message.llm_data) return "";
@@ -214,10 +215,6 @@ function scrollToFragment(
 }
 
 const entries = computed(() => buildEntries(props.messages));
-const tocScrollHeight = computed(() => {
-  const height = Math.min(Math.max(entries.value.length, 1) * 30, 448);
-  return `min(${height}px, 52vh)`;
-});
 const activeEntryByMessageId = computed(() => {
   const entryByMessageId = new Map<string, string>();
   for (const entry of entries.value) {
@@ -236,8 +233,16 @@ const activeEntryByMessageId = computed(() => {
 function handleShow() {
   open.value = true;
   nextTick(() => {
+    const list = listRef.value;
+    if (!list) return;
     const index = entries.value.findIndex((entry) => entry.id === activeId.value);
-    scrollerRef.value?.scrollToIndex(Math.max(index, 0));
+    if (index <= 0) {
+      list.scrollTop = 0;
+      return;
+    }
+    const el = list.children[index] as HTMLElement | undefined;
+    // Center the active entry (block: "center" without scrolling ancestors).
+    if (el) list.scrollTop = el.offsetTop - (list.clientHeight - el.offsetHeight) / 2;
   });
 }
 
