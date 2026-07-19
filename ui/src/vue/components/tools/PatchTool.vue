@@ -114,8 +114,17 @@
                own <diffs-container> custom element here and renders into its
                shadow root, so the diff's scoped <style> blocks never leak into
                the page. Highlighting runs off the main thread via the shared
-               @pierre/diffs worker pool, matching React's <PatchDiff>. -->
-          <div ref="diffHostEl" class="patch-tool-diff-host"></div>
+               @pierre/diffs worker pool, matching React's <PatchDiff>.
+
+               Hydration is deferred until the tool is near the viewport
+               (useNearViewport): a huge conversation can hold hundreds of
+               diffs, and hydrating them all adds ~200k shadow-DOM elements
+               that make every window resize re-lay-out for seconds. -->
+          <div
+            ref="diffHostEl"
+            class="patch-tool-diff-host"
+            :style="rendered ? undefined : { minHeight: placeholderHeight }"
+          ></div>
           <pre v-if="diffError && rawDiff" class="patch-tool-raw-diff">{{ rawDiff }}</pre>
         </div>
       </div>
@@ -145,6 +154,7 @@ import type {
 import { getSingularPatch, parseDiffFromFile } from "@pierre/diffs";
 import { isDarkModeActive } from "../../../services/theme";
 import { useFileDiffInstance } from "../../composables/fileDiffInstance";
+import { useNearViewport } from "../../composables/nearViewport";
 
 // LocalStorage key for side-by-side preference
 const STORAGE_KEY_SIDE_BY_SIDE = "shelley-diff-side-by-side";
@@ -250,6 +260,10 @@ const isMobile = ref(window.innerWidth < 768);
 const sideBySide = ref(!isMobile.value && getSideBySidePreference());
 // Host element for the FileDiff renderer's <diffs-container>.
 const diffHostEl = ref<HTMLElement | null>(null);
+// Whether this tool has ever been near the viewport. Diff parsing + FileDiff
+// hydration are deferred until then: hundreds of off-screen hydrated diffs
+// otherwise dominate whole-page layout (window resizes).
+const nearViewport = useNearViewport(diffHostEl);
 
 // Reactive theme tracking (mirrors the React useThemeType hook)
 const themeType = ref<ThemeTypes>(isDarkModeActive() ? "dark" : "light");
@@ -373,16 +387,43 @@ const fileDiff = computed<FileDiffMetadata | null>(() => {
 });
 
 // True when we have a diff to show but couldn't parse it into renderable
-// metadata — the template then falls back to the raw <pre>. Derived (no side
-// effects) so it stays correct as inputs change.
-const diffError = computed(() => hasDiff.value && fileDiff.value == null);
+// metadata — the template then falls back to the raw <pre>. Gated on
+// nearViewport so the parse itself is deferred with hydration. Derived (no
+// side effects) so it stays correct as inputs change.
+const diffError = computed(() => nearViewport.value && hasDiff.value && fileDiff.value == null);
+
+// Rough height reserved for a not-yet-hydrated diff so scrolling up through
+// history doesn't shift as diffs hydrate. ~20px per diff line; snapshots
+// (old/new content) render only changed hunks, so estimate conservatively.
+const placeholderHeight = computed(() => {
+  const dd = displayData.value;
+  if (!dd) return "0";
+  let lines = 4;
+  if (dd.diff) {
+    lines = dd.diff.split("\n").length;
+  } else if (dd.newContent != null && dd.oldContent != null) {
+    lines = Math.min(
+      Math.abs(dd.newContent.split("\n").length - dd.oldContent.split("\n").length) + 8,
+      80,
+    );
+  }
+  return `${Math.min(lines * 20, 2000)}px`;
+});
+
+// Where this tool renders relative to the viewport: see nearViewport above.
 
 // Drive the FileDiff renderer (off-main-thread tokenization via the shared
 // worker pool) whenever the parsed diff + options are ready and the section is
 // visible. Returns null inputs (teardown) when the section is collapsed/errored
 // so we don't render hidden diffs.
-useFileDiffInstance(diffHostEl, () => {
-  if (!isExpanded.value || !isComplete.value || props.hasError || !hasDiff.value) {
+const { rendered } = useFileDiffInstance(diffHostEl, () => {
+  if (
+    !nearViewport.value ||
+    !isExpanded.value ||
+    !isComplete.value ||
+    props.hasError ||
+    !hasDiff.value
+  ) {
     return null;
   }
   const fd = fileDiff.value;
