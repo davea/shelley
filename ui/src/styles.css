@@ -11468,6 +11468,28 @@ kbd {
   transform: rotate(180deg);
 }
 
+/* Filter/search box at the top of the model overlay. Match the compact
+   status-bar scale and theme tokens; ensure it stays comfortably tappable on
+   mobile. */
+.p-select-overlay.model-picker-panel .p-select-header {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.p-select-overlay.model-picker-panel .p-select-filter {
+  width: 100%;
+  font-size: 0.875rem;
+  /* Extra right padding leaves room for PrimeVue's trailing search icon. */
+  padding: 0.5rem 2rem 0.5rem 0.625rem;
+  color: var(--text-primary);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+}
+.p-select-overlay.model-picker-panel .p-select-filter:focus {
+  outline: none;
+  border-color: var(--blue-text);
+}
+
 /* =========================================================================
    Modal.vue — the base modal rebuilt on PrimeVue Dialog. The #container slot
    reproduces the legacy .modal markup, so the only PrimeVue-specific styling

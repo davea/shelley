@@ -23,7 +23,15 @@
     :aria-label="`Model: ${displayWithSource}`"
     append-to="self"
     :pt="{ overlay: { class: 'model-picker-panel' } }"
+    filter
+    :filter-fields="['display_name', 'id', 'source']"
+    filter-placeholder="Search models"
+    empty-filter-message="No models found"
+    reset-filter-on-hide
+    auto-filter-focus
     @update:model-value="handleSelect"
+    @filter="onFilter"
+    @hide="filterValue = ''"
   >
     <template #value>{{ displayName }}</template>
     <template #option="{ option }">
@@ -35,7 +43,7 @@
     </template>
     <template #footer>
       <button
-        v-if="tier2Models.length > 0"
+        v-if="tier2Models.length > 0 && !filterValue"
         class="model-picker-manage model-picker-more"
         type="button"
         @click="toggleMore"
@@ -121,11 +129,18 @@ const tier1Models = computed(() => props.models.filter((m) => !isTier2(m)));
 const tier2Models = computed(() => props.models.filter(isTier2));
 
 const showMore = ref(false);
+const filterValue = ref("");
+
+function onFilter(event: { value: string }) {
+  filterValue.value = event.value ?? "";
+}
 
 // When collapsed, only show tier-1 models — plus the currently selected model
-// if it happens to be a tier-2 one, so the selection always renders.
+// if it happens to be a tier-2 one, so the selection always renders. While a
+// filter is active, search across all models (including tier-2) so hidden
+// models remain findable without expanding "More models".
 const visibleModels = computed(() => {
-  if (showMore.value) return props.models;
+  if (showMore.value || filterValue.value) return props.models;
   const base = tier1Models.value;
   const selected = props.models.find((m) => m.id === props.selectedModel);
   if (selected && isTier2(selected) && !base.includes(selected)) {
