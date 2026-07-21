@@ -465,7 +465,7 @@ func (db *DB) PromoteDraft(ctx context.Context, conversationID string, cwd, mode
 			return err
 		}
 		if opts != nil {
-			if err := q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
+			if _, err := q.UpdateConversationOptions(ctx, generated.UpdateConversationOptionsParams{
 				ConversationID:      conversationID,
 				ConversationOptions: string(optsJSON),
 			}); err != nil {
