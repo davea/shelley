@@ -36,7 +36,14 @@ body {
     -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial,
     sans-serif;
   --font-mono:
-    "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace;
+    /* Lead with the ui-monospace generic and the PostScript name
+       SFMono-Regular. The bare "SF Mono" family name can resolve to a
+       bold/heavy face in browsers (SF Mono isn't a normally-installed font; it
+       lives inside Terminal.app), so inline code rendered as "SF Mono" looks
+       heavy on macOS. ui-monospace / SFMono-Regular pick the proper regular
+       weight. */
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, "Cascadia Code", "Roboto Mono",
+    Consolas, "Courier New", monospace;
   --primary: #2563eb;
   --primary-dark: #1d4ed8;
   --bg-base: #ffffff;

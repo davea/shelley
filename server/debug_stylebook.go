@@ -230,7 +230,7 @@ body {
 <h2>Font Families</h2>
 <div class="sb-row">
   <span class="sb-label">Mono (body default)</span>
-  <span class="sb-sample" style="font-family:var(--font-mono);font-size:0.875rem">SF Mono, Monaco, Cascadia Code, Roboto Mono, Consolas</span>
+  <span class="sb-sample" style="font-family:var(--font-mono);font-size:0.875rem">ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Cascadia Code</span>
 </div>
 <div class="sb-row">
   <span class="sb-label">var(--font-mono)</span>
