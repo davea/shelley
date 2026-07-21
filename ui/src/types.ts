@@ -92,7 +92,6 @@ export interface ChatRequest {
   message: string;
   model?: string;
   cwd?: string;
-<<<<<<< HEAD
   conversation_options?: ConversationOptionsObj & {
     thinking_level?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
     disable_notifications?: boolean;
