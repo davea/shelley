@@ -204,5 +204,28 @@ test.describe("Scroll behavior", () => {
 
     // Button should not appear since we're following the conversation
     await expect(scrollButton).not.toBeVisible({ timeout: 5000 });
+
+    // Regression: after a full reload the conversation renders through the
+    // loading spinner, which recreates .messages-list. The scroll observers
+    // must re-attach to the new nodes; otherwise the IntersectionObserver
+    // stays bound to detached DOM and the button never hides at the bottom
+    // (and streaming auto-scroll silently stops). Reload and prove the button
+    // toggles correctly against the freshly rendered list.
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+    await expect(input).toBeVisible({ timeout: 30000 });
+    await expect(messagesContainer).toBeVisible({ timeout: 30000 });
+
+    await expect(async () => {
+      await messagesContainer.evaluate((el) => {
+        el.scrollTop = 0;
+      });
+      await expect(scrollButton).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 30000 });
+
+    await messagesContainer.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await expect(scrollButton).not.toBeVisible({ timeout: 5000 });
   });
 });

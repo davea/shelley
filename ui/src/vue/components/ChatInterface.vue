@@ -120,7 +120,7 @@
             <div class="spinner" />
           </div>
         </template>
-        <div v-else class="messages-list">
+        <div v-else ref="messagesListRef" class="messages-list">
           <!-- empty state -->
           <div v-if="messages.length === 0" class="empty-state">
             <div class="empty-state-content">
@@ -234,7 +234,7 @@
           v-if="showScrollToBottom"
           class="scroll-to-bottom-button"
           aria-label="Scroll to bottom"
-          v-tooltip.top="'Scroll to bottom'"
+          v-tooltip.top="scrollToBottomTooltip"
           @click="scrollToBottom"
         >
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="chat-scroll-icon">
@@ -667,12 +667,20 @@ const advancedSettingsRef = ref<HTMLDivElement | null>(null);
 const availableTools = ref<Array<{ name: string; summary: string; default_on: boolean }>>([]);
 
 const showScrollToBottom = ref(false);
+// Keyboard shortcut for jumping to the newest message, surfaced in the
+// scroll-to-bottom button's tooltip on desktop (mobile has no keyboard).
+const isMac = navigator.platform.toUpperCase().includes("MAC");
+const scrollToBottomShortcut = isMac ? "\u2318\u2193" : "Ctrl+\u2193";
+const scrollToBottomTooltip = computed(() =>
+  isMobile.value ? "Scroll to bottom" : `Scroll to bottom (${scrollToBottomShortcut})`,
+);
 const lastKnownMessageCount = ref<number | null>(null);
 const terminalInjectedText = ref<string | null>(null);
 const terminalAutoFocusId = ref<string | null>(null);
 
 // ---- refs to DOM ----
 const messagesContainerRef = ref<HTMLDivElement | null>(null);
+const messagesListRef = ref<HTMLDivElement | null>(null);
 const bottomSentinelRef = ref<HTMLDivElement | null>(null);
 
 // ---- non-reactive refs (mutable closures) ----
@@ -2418,8 +2426,14 @@ watch(
           const container = messagesContainerRef.value;
           if (container) {
             container.scrollTop = pending;
-            userScrolled = true;
-            showScrollToBottom.value = true;
+            // Only treat a restored position as "user scrolled away" when it's
+            // not already near the bottom. Restoring a saved position that sits
+            // at the bottom must keep auto-scroll armed and the button hidden,
+            // otherwise following conversations silently stops (React parity).
+            const nearBottom =
+              container.scrollHeight - pending - container.clientHeight < 100;
+            userScrolled = !nearBottom;
+            showScrollToBottom.value = !nearBottom;
           }
         } else {
           scrollToBottom();
@@ -2436,7 +2450,6 @@ watch(
 let scrollSaveTimer: number | null = null;
 let ro: ResizeObserver | null = null;
 let bottomObserver: IntersectionObserver | null = null;
-let mo: MutationObserver | null = null;
 let lastObservedScrollTop = 0;
 
 function handleScroll() {
@@ -2487,23 +2500,21 @@ function setupScrollObservers() {
       lastObservedScrollTop = container.scrollTop;
     }
   });
-  const attachObservers = () => {
-    const list = container.querySelector(".messages-list");
-    const sentinel = bottomSentinelRef.value;
-    if (!list || !sentinel) return false;
-    ro!.observe(list);
-    bottomObserver!.observe(sentinel);
-    return true;
-  };
-  if (!attachObservers()) {
-    mo = new MutationObserver((_, self) => {
-      if (attachObservers()) {
-        self.disconnect();
-        mo = null;
-      }
-    });
-    mo.observe(container, { childList: true, subtree: true });
-  }
+  // (Re)attach the element observers whenever the list/sentinel nodes change.
+  // The v-if="loading" spinner tears down and recreates .messages-list on every
+  // conversation load, so observers bound to the old nodes go stale — which is
+  // what silently broke auto-scroll and the scroll-to-bottom button after a
+  // conversation finished loading. A reactive watch re-observes the live nodes.
+  watch(
+    [messagesListRef, bottomSentinelRef],
+    ([list, sentinel]) => {
+      ro?.disconnect();
+      bottomObserver?.disconnect();
+      if (list) ro?.observe(list);
+      if (sentinel) bottomObserver?.observe(sentinel);
+    },
+    { immediate: true, flush: "post" },
+  );
 }
 
 // Save scroll on page hide.
@@ -2576,7 +2587,6 @@ onUnmounted(() => {
   container?.removeEventListener("wheel", handleBottomPinWheel);
   container?.removeEventListener("touchstart", handleBottomPinTouch);
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
-  mo?.disconnect();
   ro?.disconnect();
   bottomObserver?.disconnect();
   document.removeEventListener("visibilitychange", onVisChangeSave);
