@@ -34,6 +34,24 @@
     <div class="drawer-header">
       <h2 class="drawer-title">{{ showArchived ? t("archived") : t("conversations") }}</h2>
       <div class="drawer-header-actions">
+        <!-- Search toggle button -->
+        <Button
+          :class="`btn-icon${searchOpen ? ' search-toggle-active' : ''}`"
+          text
+          severity="secondary"
+          :aria-label="t('searchConversations')"
+          v-tooltip.top="t('searchConversations')"
+          @click="toggleSearch"
+        >
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              :stroke-width="2"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+        </Button>
         <!-- Group by button -->
         <div v-if="!showArchived" ref="groupMenuRef" class="group-by-wrapper">
           <Button
@@ -146,8 +164,8 @@
       </div>
     </div>
 
-    <!-- Search bar -->
-    <div class="drawer-search">
+    <!-- Search bar (hidden until the header search toggle is clicked) -->
+    <div v-if="searchOpen" class="drawer-search">
       <svg
         class="drawer-search-icon"
         fill="none"
@@ -164,6 +182,7 @@
         />
       </svg>
       <input
+        ref="searchInputRef"
         type="text"
         class="drawer-search-input"
         :placeholder="t('searchConversations')"
@@ -288,7 +307,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, provide, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from "vue";
 import type { Conversation, ConversationWithState } from "../../types";
 import { api } from "../../services/api";
 import { useI18n } from "../composables/i18n";
@@ -355,6 +374,8 @@ const showArchived = ref(false);
 const archivedConversations = ref<Conversation[]>([]);
 const loadingArchived = ref(false);
 const searchQuery = ref("");
+const searchOpen = ref(false);
+const searchInputRef = ref<HTMLInputElement | null>(null);
 const searchResults = ref<ConversationWithState[] | null>(null);
 const searching = ref(false);
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -741,10 +762,24 @@ function toggleGroup(groupKey: string) {
   collapsedGroups.value = next;
 }
 
-function onSearchKeyDown(e: KeyboardEvent) {
-  if (e.key === "Escape" && searchQuery.value) {
-    e.preventDefault();
+function toggleSearch() {
+  if (searchOpen.value) {
+    searchOpen.value = false;
     searchQuery.value = "";
+  } else {
+    searchOpen.value = true;
+    void nextTick(() => searchInputRef.value?.focus());
+  }
+}
+
+function onSearchKeyDown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    if (searchQuery.value) {
+      searchQuery.value = "";
+    } else {
+      searchOpen.value = false;
+    }
   }
 }
 

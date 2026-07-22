@@ -644,6 +644,10 @@ body {
   color: var(--primary);
 }
 
+.btn-icon.search-toggle-active {
+  color: var(--primary);
+}
+
 .group-by-menu {
   position: absolute;
   top: 100%;
