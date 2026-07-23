@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createConversationViaAPI } from "./helpers";
+import { createConversationViaAPI, createConversationViaAPIWithDetails } from "./helpers";
 
 test.describe("Scroll behavior", () => {
   test("shows scroll-to-bottom button when scrolled up, auto-scrolls when at bottom", async ({
@@ -227,5 +227,111 @@ test.describe("Scroll behavior", () => {
       el.scrollTop = el.scrollHeight;
     });
     await expect(scrollButton).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test("restores to the true bottom after reload despite content-visibility height estimates", async ({
+    page,
+    request,
+  }) => {
+    // Regression for the "chat jumps toward the top / stops following" bug
+    // (GitHub #245). Message rows are wrapped in .messages-chunk elements with
+    // content-visibility:auto and a contain-intrinsic-size estimate. Off-screen
+    // chunks report the *estimate* rather than their real height, so a reload
+    // computes an inflated scrollHeight. Persisting a numeric scrollTop then no
+    // longer lands at the bottom: the near-bottom check fails and auto-follow
+    // is silently disarmed. Firefox estimates more aggressively, but it
+    // reproduces on Chromium too, so we assert it here in the default project.
+    //
+    // The fix persists a layout-free "at bottom" sentinel (from the bottom
+    // sentinel's IntersectionObserver) instead of a raw offset, so an
+    // at-bottom conversation re-pins to the real bottom on restore.
+    const { conversationId, slug } = await createConversationViaAPIWithDetails(
+      request,
+      "echo seed message",
+    );
+
+    // Build enough turns to span several content-visibility chunks (~50 rows
+    // per chunk; each predictable turn adds a user + agent row). Seed via the
+    // API, serializing on each turn's completion — posting a new chat while the
+    // agent is still working on the previous one gets dropped.
+    const TURNS = 32;
+    for (let i = 0; i < TURNS; i++) {
+      const resp = await request.post(`/api/conversation/${conversationId}/chat`, {
+        data: { message: `echo bulk message number ${i}`, model: "predictable" },
+      });
+      expect(resp.ok(), `chat failed: ${resp.status()}`).toBeTruthy();
+      const want = i + 2; // +1 for the seed turn, +1 for this one
+      await expect(async () => {
+        const r = await request.get(`/api/conversation/${conversationId}`);
+        expect(r.ok()).toBeTruthy();
+        const body = await r.json();
+        const turns = (body.messages || []).filter(
+          (m: { type: string; end_of_turn?: boolean }) => m.type === "agent" && m.end_of_turn,
+        );
+        expect(turns.length).toBeGreaterThanOrEqual(want);
+      }).toPass({ timeout: 30000 });
+    }
+
+    // Narrow viewport => more wrapped rows => taller content => more chunks.
+    await page.setViewportSize({ width: 480, height: 640 });
+    await page.goto(`/c/${slug}`);
+    await page.waitForLoadState("domcontentloaded");
+
+    const input = page.locator('[data-testid="message-input"]');
+    const sendButton = page.locator('[data-testid="send-button"]');
+    const messagesContainer = page.locator(".messages-container");
+    const scrollButton = page.locator(".scroll-to-bottom-button");
+    await expect(input).toBeVisible({ timeout: 30000 });
+    await expect(messagesContainer).toBeVisible({ timeout: 30000 });
+
+    // Confirm we actually built multiple content-visibility chunks; otherwise
+    // the test isn't exercising the estimate path and would pass vacuously.
+    await expect
+      .poll(() => page.locator(".messages-chunk").count(), { timeout: 30000 })
+      .toBeGreaterThanOrEqual(2);
+
+    // Scroll to the true bottom, then reload. The saved position must restore
+    // to the bottom, not somewhere up the (inflated) scrollback. Use the app's
+    // own scroll-to-bottom (button click drives a RAF re-pin loop) rather than
+    // a one-shot scrollTop assignment, which lands short while off-screen
+    // content-visibility chunks still report estimated heights.
+    if (await scrollButton.isVisible()) {
+      await scrollButton.click();
+    }
+    await expect(scrollButton).not.toBeVisible({ timeout: 10000 });
+
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+    await expect(input).toBeVisible({ timeout: 30000 });
+    await expect(messagesContainer).toBeVisible({ timeout: 30000 });
+
+    // After restore we must be pinned at the bottom: the button stays hidden
+    // and the gap to the bottom is ~0 (allowing a small tolerance for the
+    // near-bottom margin).
+    await expect(scrollButton).not.toBeVisible({ timeout: 10000 });
+    await expect
+      .poll(
+        () =>
+          messagesContainer.evaluate(
+            (el) => el.scrollHeight - el.scrollTop - el.clientHeight,
+          ),
+        { timeout: 10000 },
+      )
+      .toBeLessThan(120);
+
+    // And a new message must still auto-scroll into view (auto-follow armed).
+    await input.fill("echo after reload");
+    await sendButton.click();
+    await expect(page.locator("text=echo after reload").last()).toBeVisible({ timeout: 30000 });
+    await expect(scrollButton).not.toBeVisible({ timeout: 5000 });
+    await expect
+      .poll(
+        () =>
+          messagesContainer.evaluate(
+            (el) => el.scrollHeight - el.scrollTop - el.clientHeight,
+          ),
+        { timeout: 10000 },
+      )
+      .toBeLessThan(120);
   });
 });

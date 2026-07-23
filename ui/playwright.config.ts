@@ -50,5 +50,18 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Pixel 5"] },
     },
+    // Firefox is opt-in (PW_FIREFOX=1) rather than part of the default CI
+    // matrix: most specs were authored against Chromium and would flake under
+    // an untuned Firefox run. It exists so scroll/layout regressions that are
+    // easier to trigger in Gecko (e.g. content-visibility height estimates)
+    // can be reproduced locally with `PW_FIREFOX=1 pnpm run test:e2e`.
+    ...(process.env.PW_FIREFOX
+      ? [
+          {
+            name: "firefox",
+            use: { ...devices["Desktop Firefox"] },
+          },
+        ]
+      : []),
   ],
 });

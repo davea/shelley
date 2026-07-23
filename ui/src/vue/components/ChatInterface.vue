@@ -693,6 +693,19 @@ let pendingScroll: number | null | undefined = undefined;
 let loadingProgressDelay: number | null = null;
 let currentConversationId: string | null = props.conversationId;
 let catchingUp = false;
+// Layout-free "is the viewport at/near the bottom" signal, maintained by the
+// bottom sentinel's IntersectionObserver. Persisted (instead of a raw scrollTop)
+// so a reload restores to the true bottom even when content-visibility:auto
+// chunks report inflated contain-intrinsic-size estimates that make scrollHeight
+// unreliable. New conversations start pinned to the bottom.
+let atBottom = true;
+// Scroll bookkeeping shared by handleScroll and the ResizeObserver, declared
+// here (not next to that logic further down) because the immediate
+// conversationId watch resets them during setup; a `let` still in its TDZ at
+// that point throws and leaves the composer stuck disabled. See the
+// ResizeObserver setup for what they mean.
+let lastListHeight = 0;
+let clampBudget = 0;
 let hiddenAt: number | null = null;
 let lastGeneration: { id: string | null; gen: number } | null = null;
 
@@ -775,13 +788,22 @@ function scrollKey(): string | null {
 }
 function saveScroll(scrollTop: number) {
   const key = scrollKey();
-  if (key) localStorage.setItem(key, String(scrollTop));
+  if (!key) return;
+  // When we're at the bottom, persist a sentinel rather than the numeric
+  // offset. content-visibility:auto chunks report estimated heights for
+  // off-screen content, so a saved offset can no longer sit at the bottom
+  // after a reload (scrollHeight is inflated) — which silently disarmed
+  // auto-follow. Restoring the sentinel re-pins to the real bottom instead.
+  localStorage.setItem(key, atBottom ? "bottom" : String(scrollTop));
 }
 function loadScroll(): number | null {
   const key = scrollKey();
   if (!key) return null;
   const v = localStorage.getItem(key);
-  return v != null ? Number(v) : null;
+  // null (no value) and the "bottom" sentinel both mean "restore to bottom".
+  if (v == null || v === "bottom") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 // ---- derived ----
@@ -2188,6 +2210,16 @@ watch(
   (id) => {
     currentConversationId = id;
     teardownSubscriptions();
+    // Reset scroll bookkeeping so state from the previous conversation can't
+    // leak across the switch. lastListHeight/clampBudget are especially
+    // important: the observer re-attach (watch on the recreated .messages-list)
+    // fires an initial ResizeObserver callback, and a stale lastListHeight from
+    // a taller previous conversation would inject a spurious clampBudget that
+    // could swallow the user's first genuine scroll-up. atBottom defaults to
+    // true because a freshly loaded conversation renders pinned to the bottom.
+    lastListHeight = 0;
+    clampBudget = 0;
+    atBottom = true;
     if (!id) {
       messages.value = [];
       contextWindowSize.value = 0;
@@ -2433,9 +2465,16 @@ watch(
             const nearBottom =
               container.scrollHeight - pending - container.clientHeight < 100;
             userScrolled = !nearBottom;
+            atBottom = nearBottom;
             showScrollToBottom.value = !nearBottom;
           }
         } else {
+          // Restoring to the bottom (saved sentinel or a brand-new conversation).
+          // Set atBottom eagerly rather than waiting for the IntersectionObserver
+          // to fire, so a save triggered during the switch window (e.g.
+          // beforeunload/visibilitychange) can't persist a stale non-bottom
+          // offset for a conversation that is actually pinned to the bottom.
+          atBottom = true;
           scrollToBottom();
         }
         return;
@@ -2451,18 +2490,42 @@ let scrollSaveTimer: number | null = null;
 let ro: ResizeObserver | null = null;
 let bottomObserver: IntersectionObserver | null = null;
 let lastObservedScrollTop = 0;
+// Last observed height of the message list, read for free from the
+// ResizeObserver entry's contentRect (no forced layout). When the list shrinks
+// the browser clamps scrollTop down, which is indistinguishable from a user
+// scroll-up if you only watch scrollTop. content-visibility:auto makes this
+// routine: off-screen chunks swap their estimated height for the real one as
+// they lay out, so scrollHeight (and the max scrollTop) keeps changing.
+// Misreading those clamps as scroll-ups wrongly disarmed auto-follow and left
+// the scroll-to-bottom button stranded (GitHub #245). The ResizeObserver fires
+// before the clamp's scroll event, so it hands handleScroll a pixel budget to
+// discount. (lastListHeight/clampBudget are declared with atBottom near the top
+// of setup: the immediate conversationId watch resets them, and a `let` in TDZ
+// there would throw during setup and strand the composer disabled.)
 
 function handleScroll() {
   const container = messagesContainerRef.value;
   if (!container) return;
-  const upwardDelta = lastObservedScrollTop - container.scrollTop;
+  let upwardDelta = lastObservedScrollTop - container.scrollTop;
+  // Discount any scrollTop drop the ResizeObserver already attributed to a
+  // list shrink (a layout clamp, not a gesture).
+  if (upwardDelta > 0 && clampBudget > 0) {
+    const absorbed = Math.min(upwardDelta, clampBudget);
+    upwardDelta -= absorbed;
+    clampBudget -= absorbed;
+  }
   if (bottomPinActive && upwardDelta >= BOTTOM_PIN_SCROLL_RELEASE_DELTA) {
     stopBottomPin();
   }
   if (!bottomPinActive && upwardDelta > 0) {
     userScrolled = true;
+    atBottom = false;
     showScrollToBottom.value = true;
   }
+  // A layout clamp emits its scroll event synchronously right after the resize
+  // that caused it, so any unconsumed budget now is stale; drop it so it can't
+  // silently absorb a later genuine scroll-up.
+  clampBudget = 0;
   lastObservedScrollTop = container.scrollTop;
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
   scrollSaveTimer = window.setTimeout(() => {
@@ -2480,6 +2543,7 @@ function setupScrollObservers() {
   bottomObserver = new IntersectionObserver(
     ([entry]) => {
       const nearBottom = entry?.isIntersecting ?? false;
+      atBottom = nearBottom;
       showScrollToBottom.value = !nearBottom;
       if (nearBottom) {
         userScrolled = false;
@@ -2488,17 +2552,24 @@ function setupScrollObservers() {
     },
     { root: container, rootMargin: "0px 0px 100px 0px", threshold: 0 },
   );
-  ro = new ResizeObserver(() => {
-    if (!bottomPinActive && container.scrollTop < lastObservedScrollTop) {
-      userScrolled = true;
-      showScrollToBottom.value = true;
-      lastObservedScrollTop = container.scrollTop;
-      return;
+  ro = new ResizeObserver((entries) => {
+    // contentRect.height is already computed for the ResizeObserver callback,
+    // so reading it forces no extra layout — unlike container.scrollHeight,
+    // which would lay out off-screen content-visibility chunks and stall the
+    // main thread. A shrink means the imminent scroll event is a clamp, not a
+    // gesture, so record how much handleScroll should discount.
+    const listHeight = entries[entries.length - 1]?.contentRect.height ?? lastListHeight;
+    if (listHeight < lastListHeight) {
+      clampBudget += lastListHeight - listHeight;
     }
+    lastListHeight = listHeight;
+    // Keep following pinned to the bottom as content streams in. User scroll-up
+    // detection lives solely in handleScroll (with clamp discounting); inferring
+    // it from resize events is what misfired on layout clamps.
     if (!userScrolled && !catchingUp) {
       container.scrollTop = MAX_SCROLL_OFFSET;
-      lastObservedScrollTop = container.scrollTop;
     }
+    lastObservedScrollTop = container.scrollTop;
   });
   // (Re)attach the element observers whenever the list/sentinel nodes change.
   // The v-if="loading" spinner tears down and recreates .messages-list on every
