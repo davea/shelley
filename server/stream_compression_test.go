@@ -255,9 +255,9 @@ func TestStreamCompressionUnifiedEndpoint(t *testing.T) {
 	})
 }
 
-// TestParseAcceptEncoding covers the q-value negotiation edge cases that
-// distinguish the new parser from a naive strings.Contains check.
-func TestParseAcceptEncoding(t *testing.T) {
+// TestNegotiateContentEncoding covers q-value negotiation edge cases that
+// distinguish the parser from a naive strings.Contains check.
+func TestNegotiateContentEncoding(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		header     string
@@ -290,9 +290,9 @@ func TestParseAcceptEncoding(t *testing.T) {
 	}
 	for _, tc := range cases {
 		r := &http.Request{Header: http.Header{"Accept-Encoding": []string{tc.header}}}
-		got, acceptable := pickStreamEncoding(r)
+		got, acceptable := negotiateContentEncoding(r)
 		if got != tc.want || acceptable != tc.wantAccept {
-			t.Errorf("pickStreamEncoding(%q) = (%q,%v), want (%q,%v)",
+			t.Errorf("negotiateContentEncoding(%q) = (%q,%v), want (%q,%v)",
 				tc.header, got, acceptable, tc.want, tc.wantAccept)
 		}
 	}

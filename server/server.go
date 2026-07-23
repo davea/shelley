@@ -441,28 +441,28 @@ func (s *Server) RegisterNotificationChannel(ch notifications.Channel) {
 
 // RegisterRoutes registers HTTP routes on the given mux
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
-	// API routes - wrap with gzip where beneficial
-	mux.Handle("/api/conversations", gzipHandler(http.HandlerFunc(s.handleConversations)))
-	mux.Handle("GET /api/conversations/snapshot", gzipHandler(http.HandlerFunc(s.handleConversationsSnapshot)))
-	mux.Handle("GET /api/conversations/search", gzipHandler(http.HandlerFunc(s.handleSearchConversations)))
+	// API routes - wrap with compression where beneficial
+	mux.Handle("/api/conversations", compressionHandler(http.HandlerFunc(s.handleConversations)))
+	mux.Handle("GET /api/conversations/snapshot", compressionHandler(http.HandlerFunc(s.handleConversationsSnapshot)))
+	mux.Handle("GET /api/conversations/search", compressionHandler(http.HandlerFunc(s.handleSearchConversations)))
 	mux.Handle("GET /api/stream2", http.HandlerFunc(s.handleStream))
-	mux.Handle("/api/conversations/archived", gzipHandler(http.HandlerFunc(s.handleArchivedConversations)))
+	mux.Handle("/api/conversations/archived", compressionHandler(http.HandlerFunc(s.handleArchivedConversations)))
 	mux.Handle("/api/conversations/new", http.HandlerFunc(s.handleNewConversation))                         // Small response
 	mux.Handle("POST /api/conversations/draft", http.HandlerFunc(s.handleCreateDraft))                      // Small response
 	mux.Handle("/api/conversations/distill-new-generation", http.HandlerFunc(s.handleDistillNewGeneration)) // Small response
 	mux.Handle("/api/conversation/", http.StripPrefix("/api/conversation", s.conversationMux()))
-	mux.Handle("/api/conversation-by-slug/", gzipHandler(http.HandlerFunc(s.handleConversationBySlug)))
+	mux.Handle("/api/conversation-by-slug/", compressionHandler(http.HandlerFunc(s.handleConversationBySlug)))
 	mux.Handle("/api/validate-cwd", http.HandlerFunc(s.handleValidateCwd)) // Small response
 	mux.Handle("POST /api/model-costs", http.HandlerFunc(s.handleModelCosts))
-	mux.Handle("/api/list-directory", gzipHandler(http.HandlerFunc(s.handleListDirectory)))
+	mux.Handle("/api/list-directory", compressionHandler(http.HandlerFunc(s.handleListDirectory)))
 	mux.Handle("/api/create-directory", http.HandlerFunc(s.handleCreateDirectory))
-	mux.Handle("/api/git/repos", gzipHandler(http.HandlerFunc(s.handleGitRepos)))
-	mux.Handle("/api/git/diffs", gzipHandler(http.HandlerFunc(s.handleGitDiffs)))
-	mux.Handle("/api/git/graph", gzipHandler(http.HandlerFunc(s.handleGitGraph)))
-	mux.Handle("/api/git/commit-detail", gzipHandler(http.HandlerFunc(s.handleGitCommitDetail)))
-	mux.Handle("/api/git/diffs/", gzipHandler(http.HandlerFunc(s.handleGitDiffFiles)))
-	mux.Handle("/api/git/file-diff/", gzipHandler(http.HandlerFunc(s.handleGitFileDiff)))
-	mux.Handle("/api/git/commit-messages", gzipHandler(http.HandlerFunc(s.handleGitCommitMessages)))
+	mux.Handle("/api/git/repos", compressionHandler(http.HandlerFunc(s.handleGitRepos)))
+	mux.Handle("/api/git/diffs", compressionHandler(http.HandlerFunc(s.handleGitDiffs)))
+	mux.Handle("/api/git/graph", compressionHandler(http.HandlerFunc(s.handleGitGraph)))
+	mux.Handle("/api/git/commit-detail", compressionHandler(http.HandlerFunc(s.handleGitCommitDetail)))
+	mux.Handle("/api/git/diffs/", compressionHandler(http.HandlerFunc(s.handleGitDiffFiles)))
+	mux.Handle("/api/git/file-diff/", compressionHandler(http.HandlerFunc(s.handleGitFileDiff)))
+	mux.Handle("/api/git/commit-messages", compressionHandler(http.HandlerFunc(s.handleGitCommitMessages)))
 	mux.Handle("/api/git/amend-message", http.HandlerFunc(s.handleGitAmendMessage))
 	mux.Handle("/api/git/create-worktree", http.HandlerFunc(s.handleGitCreateWorktree))                            // Small response
 	mux.HandleFunc("POST /api/upload/raw", s.handleUploadRaw)                                                      // Raw binary uploads

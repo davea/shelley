@@ -420,80 +420,6 @@ func acceptsGzip(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
 }
 
-// pickStreamEncoding chooses an encoding for SSE responses. Prefers zstd
-// then gzip, then identity. Honours Accept-Encoding q-values per RFC 9110
-// §12.5.3: an entry with q=0 means the client refuses that encoding.
-//
-// Returns ("zstd"|"gzip"|"", acceptable). The second return is false only
-// when the client accepts no encoding we can produce — e.g. explicit
-// `identity;q=0` with neither gzip nor zstd offered — in which case the
-// caller should reply 406 Not Acceptable.
-func pickStreamEncoding(r *http.Request) (string, bool) {
-	ae := r.Header.Get("Accept-Encoding")
-	if strings.TrimSpace(ae) == "" {
-		// Absent header: any encoding is acceptable, default to identity.
-		return "", true
-	}
-	prefs := parseAcceptEncoding(ae)
-	// `*` is a catch-all that applies to any coding not explicitly listed.
-	codingAcceptable := func(name string) bool {
-		if q, ok := prefs[name]; ok {
-			return q > 0
-		}
-		if q, ok := prefs["*"]; ok {
-			return q > 0
-		}
-		return false
-	}
-	if codingAcceptable("zstd") {
-		return "zstd", true
-	}
-	if codingAcceptable("gzip") {
-		return "gzip", true
-	}
-	// Neither compressed encoding is acceptable. Identity is acceptable
-	// unless explicitly refused via `identity;q=0` or a catch-all `*;q=0`
-	// (with no overriding `identity;q>0`).
-	if q, ok := prefs["identity"]; ok {
-		return "", q > 0
-	}
-	if q, ok := prefs["*"]; ok && q == 0 {
-		return "", false
-	}
-	return "", true
-}
-
-// parseAcceptEncoding parses an Accept-Encoding header into a coding->q map.
-// Unknown parameters are ignored; entries without an explicit q default to 1.
-// Lower-cases coding names. Returns an empty map for an empty header.
-func parseAcceptEncoding(h string) map[string]float64 {
-	out := map[string]float64{}
-	for _, part := range strings.Split(h, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		coding, params, _ := strings.Cut(part, ";")
-		coding = strings.ToLower(strings.TrimSpace(coding))
-		if coding == "" {
-			continue
-		}
-		q := 1.0
-		for _, p := range strings.Split(params, ";") {
-			p = strings.TrimSpace(p)
-			name, val, ok := strings.Cut(p, "=")
-			if !ok || strings.ToLower(strings.TrimSpace(name)) != "q" {
-				continue
-			}
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(val), 64); err == nil {
-				q = parsed
-			}
-		}
-		out[coding] = q
-	}
-	return out
-}
-
 // etagMatches checks if the client's If-None-Match header matches the given ETag.
 // Per RFC 7232, If-None-Match can contain multiple ETags (comma-separated)
 // and may use weak validators (W/"..."). For GET/HEAD, weak comparison is used.
@@ -928,7 +854,7 @@ func (s *Server) decorateConversations(ctx context.Context, conversations []db.C
 func (s *Server) conversationMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	// GET /api/conversation/<id> - returns all messages (can be large, compress)
-	mux.Handle("GET /{id}", gzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /{id}", compressionHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.handleGetConversation(w, r, r.PathValue("id"))
 	})))
 	// GET /api/conversation/<id>/subagent-usage - aggregated subagent cost
@@ -1860,7 +1786,7 @@ func (s *Server) runStream(w http.ResponseWriter, r *http.Request, conversationI
 	// can still fail (DB lookups, conversation hydration) and reply with a
 	// plain http.Error; if we'd already set Content-Encoding the client
 	// would try to gunzip that plain-text error body and choke.
-	encoding, acceptable := pickStreamEncoding(r)
+	encoding, acceptable := negotiateContentEncoding(r)
 	if !acceptable {
 		http.Error(w, "no acceptable encoding", http.StatusNotAcceptable)
 		return
