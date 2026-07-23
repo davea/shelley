@@ -131,6 +131,15 @@ export const vi: TranslationKeys = {
   addModel: "Thêm model",
   refreshModels: "Làm mới",
   refreshingModels: "Đang làm mới...",
+  searchModels: "Tìm kiếm models",
+  noModelsFound: "Không tìm thấy model",
+  notReadyBadge: "chưa sẵn sàng",
+  showAllModels: "Tất cả models",
+  showFewerModels: "Ít models hơn",
+  manageModelsAction: "Quản lý models…",
+  effortLabel: "Mức độ suy nghĩ",
+  effortAuto: "tự động",
+  customModelsGroup: "Models tùy chỉnh",
   editModel: "Chỉnh sửa model",
   loadingModels: "Đang tải danh sách models...",
   providerApiFormat: "Provider / API Format",
@@ -152,7 +161,6 @@ export const vi: TranslationKeys = {
   columnName: "Tên",
   columnModelId: "ID model",
   columnProvider: "Kiểu API",
-  columnSource: "Nguồn",
   columnActions: "Hành động",
   columnImages: "Hình ảnh",
   imageSupportAutoShort: "tự động",
@@ -239,8 +247,6 @@ export const vi: TranslationKeys = {
   noModelsConfiguredHint: "Không có model AI sẵn sàng. Nhấn Ctrl+K hoặc ⌘+K để thêm model.",
 
   // Status Bar
-  modelLabel: "Model:",
-  thinkingLabel: "Suy nghĩ:",
   dirLabel: "Thư mục:",
 
   // Sidebar buttons

@@ -1,10 +1,10 @@
-// Design tokens shared by the status-bar PrimeVue Selects (ModelPicker.vue and
-// ThinkingLevelPicker.vue). Rather than override PrimeVue's internal .p-select-*
-// classes in styles.css, we feed our theme's CSS variables straight into
-// PrimeVue's own token system via the :dt prop. PrimeVue then renders itself
-// (trigger, label, overlay, options, hover/selected states) using our colors,
-// so almost no bespoke CSS is needed. Paired with size="small", which drives
-// the compact status-bar font-size/padding from the sm.* tokens below.
+// Design tokens for the status-bar PrimeVue Select (ModelPicker.vue). Rather
+// than override PrimeVue's internal .p-select-* classes in styles.css, we feed
+// our theme's CSS variables straight into PrimeVue's own token system via the
+// :dt prop. PrimeVue then renders itself (trigger, label, overlay, options,
+// hover/selected states) using our colors, so almost no bespoke CSS is needed.
+// Paired with size="small", which drives the compact status-bar
+// font-size/padding from the sm.* tokens below.
 export const statusPickerDt = {
   background: "var(--bg-tertiary)",
   color: "var(--text-primary)",

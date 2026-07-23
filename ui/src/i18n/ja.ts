@@ -131,6 +131,15 @@ export const ja: TranslationKeys = {
   addModel: "モデルの追加",
   refreshModels: "更新",
   refreshingModels: "更新中...",
+  searchModels: "モデルを検索",
+  noModelsFound: "モデルが見つかりません",
+  notReadyBadge: "未準備",
+  showAllModels: "すべてのモデル",
+  showFewerModels: "モデルを減らす",
+  manageModelsAction: "モデルの管理…",
+  effortLabel: "思考量",
+  effortAuto: "自動",
+  customModelsGroup: "カスタムモデル",
   editModel: "モデルの編集",
   loadingModels: "モデルを読み込み中...",
   providerApiFormat: "プロバイダー / API形式",
@@ -152,7 +161,6 @@ export const ja: TranslationKeys = {
   columnName: "名前",
   columnModelId: "モデルID",
   columnProvider: "API形式",
-  columnSource: "ソース",
   columnActions: "操作",
   columnImages: "画像",
   imageSupportAutoShort: "自動",
@@ -239,8 +247,6 @@ export const ja: TranslationKeys = {
     "AIモデルが設定されていません。Ctrl+K または ⌘+K でモデルを追加してください。",
 
   // Status Bar
-  modelLabel: "モデル:",
-  thinkingLabel: "思考量:",
   dirLabel: "ディレクトリ:",
 
   // Sidebar buttons

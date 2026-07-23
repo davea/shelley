@@ -132,6 +132,15 @@ export const es: TranslationKeys = {
   addModel: "Agregar modelo",
   refreshModels: "Actualizar",
   refreshingModels: "Actualizando...",
+  searchModels: "Buscar modelos",
+  noModelsFound: "No se encontraron modelos",
+  notReadyBadge: "no listo",
+  showAllModels: "Todos los modelos",
+  showFewerModels: "Menos modelos",
+  manageModelsAction: "Administrar modelos…",
+  effortLabel: "Esfuerzo de razonamiento",
+  effortAuto: "auto",
+  customModelsGroup: "Modelos personalizados",
   editModel: "Editar modelo",
   loadingModels: "Cargando modelos...",
   providerApiFormat: "Proveedor / Formato de API",
@@ -154,7 +163,6 @@ export const es: TranslationKeys = {
   columnName: "Nombre",
   columnModelId: "ID del modelo",
   columnProvider: "Forma de API",
-  columnSource: "Origen",
   columnActions: "Acciones",
   columnImages: "Imágenes",
   imageSupportAutoShort: "auto",
@@ -242,8 +250,6 @@ export const es: TranslationKeys = {
     "No hay modelos de IA configurados. Presione Ctrl+K o ⌘+K para agregar un modelo.",
 
   // Status Bar
-  modelLabel: "Modelo:",
-  thinkingLabel: "Esfuerzo:",
   dirLabel: "Dir.:",
 
   // Sidebar buttons

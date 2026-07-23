@@ -131,6 +131,15 @@ export const zhCN: TranslationKeys = {
   addModel: "添加模型",
   refreshModels: "刷新",
   refreshingModels: "刷新中...",
+  searchModels: "搜索模型",
+  noModelsFound: "未找到模型",
+  notReadyBadge: "未就绪",
+  showAllModels: "全部模型",
+  showFewerModels: "收起模型",
+  manageModelsAction: "管理模型…",
+  effortLabel: "思考强度",
+  effortAuto: "自动",
+  customModelsGroup: "自定义模型",
   editModel: "编辑模型",
   loadingModels: "加载模型中...",
   providerApiFormat: "提供商 / API 格式",
@@ -152,7 +161,6 @@ export const zhCN: TranslationKeys = {
   columnName: "名称",
   columnModelId: "模型 ID",
   columnProvider: "API 形式",
-  columnSource: "来源",
   columnActions: "操作",
   columnImages: "图片",
   imageSupportAutoShort: "自动",
@@ -238,8 +246,6 @@ export const zhCN: TranslationKeys = {
   noModelsConfiguredHint: "未配置 AI 模型。按 Ctrl+K 或 ⌘+K 添加模型。",
 
   // Status Bar
-  modelLabel: "模型：",
-  thinkingLabel: "思考：",
   dirLabel: "目录：",
 
   // Sidebar buttons

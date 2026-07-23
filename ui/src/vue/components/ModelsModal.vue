@@ -1,11 +1,14 @@
 <!-- Manage Models: lists built-in + custom models and owns duplicate/delete +
      refresh. The list is a compact PrimeVue DataTable (size="small" +
-     modelsTableDt tokens) fed by one `tableRows` computed that merges built-in
-     and custom models; only custom rows carry a `model` and thus the edit/
-     duplicate/delete actions. Adding/editing opens ModelFormModal — a separate
-     stacked dialog layered on top of this one — rather than swapping the list
-     out in place. Uses Modal.vue (#title-right slot), useI18n, customModelsApi;
-     shared form constants live in customModelConstants.ts. -->
+     modelsTableDt tokens) grouped by source via rowGroupMode="subheader": in
+     the default single-gateway install this collapses what used to be two
+     full columns of the same repeated hostname/URL into one quiet group
+     header line. Endpoints render per-row only when they differ from the
+     group's common endpoint. Only custom rows carry a `model` and thus the
+     edit/duplicate/delete actions. Adding/editing opens ModelFormModal — a
+     separate stacked dialog layered on top of this one. Uses Modal.vue
+     (#title-right slot), useI18n, customModelsApi; shared form constants live
+     in customModelConstants.ts. -->
 <template>
   <Modal
     :is-open="isOpen"
@@ -53,43 +56,34 @@
         scroll-height="flex"
         :dt="modelsTableDt"
         class="models-datatable"
+        row-group-mode="subheader"
+        group-rows-by="groupKey"
+        :pt="{ rowGroupHeaderCell: { colspan: 5 } }"
       >
+        <template #groupheader="{ data }">
+          <span class="models-group-name">{{ data.groupLabel }}</span>
+          <span class="models-group-count">({{ groupCounts[data.groupKey] }})</span>
+          <span v-if="data.groupEndpoint" class="models-group-endpoint">{{
+            data.groupEndpoint
+          }}</span>
+        </template>
         <Column :header="t('columnName')" field="name">
           <template #body="{ data }">
             <span class="models-cell-name">{{ data.name }}</span>
+            <span v-for="tag in data.tags" :key="tag" class="models-cell-tag">{{ tag }}</span>
           </template>
         </Column>
         <Column :header="t('columnModelId')" field="modelId">
           <template #body="{ data }">
             <span class="models-cell-mono">{{ data.modelId }}</span>
+            <div v-if="data.endpoint" class="models-cell-endpoint" :title="data.endpoint">
+              {{ data.endpoint }}
+            </div>
           </template>
         </Column>
         <Column :header="t('columnProvider')" field="apiShape">
           <template #body="{ data }">
             <span :class="{ 'models-cell-muted': !data.apiShape }">{{ data.apiShape || "—" }}</span>
-          </template>
-        </Column>
-        <Column :header="t('columnSource')" field="source">
-          <template #body="{ data }">
-            <span :class="{ 'models-cell-muted': data.source === 'custom' }">{{
-              data.source
-            }}</span>
-          </template>
-        </Column>
-        <Column :header="t('endpoint')" field="endpoint">
-          <template #body="{ data }">
-            <span v-if="data.endpoint" class="models-cell-endpoint" :title="data.endpoint">{{
-              data.endpoint
-            }}</span>
-            <span v-else class="models-cell-muted">—</span>
-          </template>
-        </Column>
-        <Column :header="t('tags')" field="tags">
-          <template #body="{ data }">
-            <span v-if="data.tags" class="models-cell-tags" :title="data.tags">{{
-              data.tags
-            }}</span>
-            <span v-else class="models-cell-muted">—</span>
           </template>
         </Column>
         <Column :header="t('columnImages')" field="supportsImages" class="models-col-images">
@@ -187,6 +181,7 @@ import Button from "primevue/button";
 import Modal from "./Modal.vue";
 import ModelFormModal from "./ModelFormModal.vue";
 import { modelsTableDt } from "./modelsTableDt";
+import { prettyModelLabels } from "../../utils/modelNames";
 import { API_TYPE_LABELS, PROVIDER_LABELS } from "./customModelConstants";
 import { useI18n } from "../composables/i18n";
 import { api, customModelsApi, type AvailableModel, type CustomModel } from "../../services/api";
@@ -220,15 +215,20 @@ const showList = computed(
 
 // Normalized rows so built-in + custom models render through one DataTable.
 // `model` is only present for custom rows, which are the editable/deletable
-// ones (built-ins have no actions).
+// ones (built-ins have no actions). Rows are grouped by source (groupKey /
+// groupLabel drive the subheader); a group's common endpoint renders once in
+// the header, so per-row `endpoint` is only set when it differs (or for
+// custom rows, whose endpoints are user-configured and always shown).
 interface TableRow {
   key: string;
+  groupKey: string;
+  groupLabel: string;
+  groupEndpoint: string;
   name: string;
   modelId: string;
   apiShape: string | null;
-  source: string;
   endpoint: string;
-  tags: string;
+  tags: string[];
   supportsImages: boolean;
   imageTitle: string;
   imageAuto: boolean;
@@ -236,33 +236,69 @@ interface TableRow {
 }
 
 const tableRows = computed<TableRow[]>(() => {
-  const builtin: TableRow[] = builtInModelsFiltered.value.map((m) => ({
-    key: `builtin:${m.id}`,
-    name: m.display_name || m.id,
-    modelId: m.id,
-    apiShape: (m.api_type && API_TYPE_LABELS[m.api_type]) || null,
-    source: m.source || "",
-    endpoint: m.base_url || "",
-    tags: "",
-    supportsImages: m.supports_images ?? true,
-    imageTitle: (m.supports_images ?? true) ? t("imageSupportYes") : t("imageSupportNo"),
-    imageAuto: false,
-    model: null,
-  }));
-  const custom: TableRow[] = models.value.map((m) => ({
-    key: `custom:${m.model_id}`,
-    name: m.display_name,
-    modelId: m.model_name,
-    apiShape: PROVIDER_LABELS[m.provider_type],
-    source: "custom",
-    endpoint: m.endpoint,
-    tags: m.tags || "",
-    supportsImages: customModelSupportsImages(m),
-    imageTitle: customModelImageTitle(m),
-    imageAuto: (m.image_support ?? "auto") === "auto",
-    model: m,
-  }));
-  return [...builtin, ...custom];
+  const labels = prettyModelLabels(builtInModelsFiltered.value);
+  // Group built-ins by source, preserving catalog order within and across
+  // groups (first appearance wins).
+  const groups = new Map<string, AvailableModel[]>();
+  for (const m of builtInModelsFiltered.value) {
+    const src = m.source || "";
+    if (!groups.has(src)) groups.set(src, []);
+    groups.get(src)!.push(m);
+  }
+  const rows: TableRow[] = [];
+  for (const [src, group] of groups) {
+    // Endpoint shared by every model in the group renders once in the group
+    // header; otherwise it stays per-row.
+    const endpoints = new Set(group.map((m) => m.base_url || ""));
+    const common = endpoints.size === 1 ? (group[0].base_url ?? "") : "";
+    for (const m of group) {
+      rows.push({
+        key: `builtin:${m.id}`,
+        groupKey: `builtin:${src}`,
+        groupLabel: src,
+        groupEndpoint: common,
+        name: labels.get(m.id) || m.id,
+        modelId: m.id,
+        apiShape: (m.api_type && API_TYPE_LABELS[m.api_type]) || null,
+        endpoint: common ? "" : m.base_url || "",
+        tags: [],
+        supportsImages: m.supports_images ?? true,
+        imageTitle: (m.supports_images ?? true) ? t("imageSupportYes") : t("imageSupportNo"),
+        imageAuto: false,
+        model: null,
+      });
+    }
+  }
+  for (const m of models.value) {
+    rows.push({
+      key: `custom:${m.model_id}`,
+      groupKey: "custom",
+      groupLabel: t("customModelsGroup"),
+      groupEndpoint: "",
+      name: m.display_name,
+      modelId: m.model_name,
+      apiShape: PROVIDER_LABELS[m.provider_type],
+      endpoint: m.endpoint,
+      tags: (m.tags || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      supportsImages: customModelSupportsImages(m),
+      imageTitle: customModelImageTitle(m),
+      imageAuto: (m.image_support ?? "auto") === "auto",
+      model: m,
+    });
+  }
+  return rows;
+});
+
+// Row counts per group for the "(N)" in each group header.
+const groupCounts = computed<Record<string, number>>(() => {
+  const counts: Record<string, number> = {};
+  for (const row of tableRows.value) {
+    counts[row.groupKey] = (counts[row.groupKey] || 0) + 1;
+  }
+  return counts;
 });
 
 // For a custom model, the boolean its image_support setting evaluates to. When

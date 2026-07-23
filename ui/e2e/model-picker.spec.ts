@@ -1,10 +1,10 @@
 import { test, expect } from "@playwright/test";
 
-// The model picker (ChatStatusContent -> ModelPicker.vue) is built on PrimeVue
-// <Select>. It renders on the new-conversation screen. Here we exercise the
-// PrimeVue-specific open/select behavior, the pinned "Add / Remove Models..."
-// and "Refresh Models" footer actions, and persistence of the chosen model to
-// localStorage.
+// The unified model + effort picker (ChatStatusContent -> ModelPicker.vue) is
+// built on PrimeVue <Select>. It renders on the new-conversation screen. Here
+// we exercise the PrimeVue-specific open/select behavior, the inline
+// reasoning-effort pill row, the pinned "Manage models…" footer action, and
+// persistence of the chosen model + effort to localStorage.
 test.describe("Model picker (PrimeVue)", () => {
   test("opens, lists models, selecting one persists, footer opens manage modal", async ({
     page,
@@ -22,30 +22,69 @@ test.describe("Model picker (PrimeVue)", () => {
     const panel = page.locator(".model-picker-panel");
     await expect(panel).toBeVisible();
 
-    // At least one model is offered and both footer actions are present.
+    // At least one model is offered and the footer actions are present.
     const options = panel.locator(".p-select-option");
     expect(await options.count()).toBeGreaterThanOrEqual(1);
-    const manageBtn = panel.getByRole("button", { name: "Add / Remove Models..." });
-    const refreshBtn = panel.getByRole("button", { name: "Refresh Models" });
+    const manageBtn = panel.getByRole("button", { name: "Manage models…" });
     await expect(manageBtn).toBeVisible();
-    await expect(refreshBtn).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Refresh" })).toBeVisible();
 
-    // Pick the first model -> its label shows in the trigger and persists.
+    // In a single-source install, no source sub-labels are rendered.
+    await expect(panel.locator(".model-picker-option-source")).toHaveCount(0);
+
+    // Pick the first model -> its label shows in the trigger and the raw model
+    // id (not the pretty label) persists to localStorage.
     const firstName = (await options
       .first()
       .locator(".model-picker-option-name")
       .textContent())!.trim();
     await options.first().click();
     await expect(panel).toBeHidden();
-    await expect(picker.locator(".p-select-label")).toHaveText(firstName);
+    await expect(picker.locator(".model-picker-value-name")).toHaveText(firstName);
     expect(await page.evaluate(() => localStorage.getItem("shelley_selected_model"))).toBe(
-      firstName,
+      "predictable",
     );
 
     // The footer action opens the manage-models modal.
     await picker.click();
     await expect(panel).toBeVisible();
-    await panel.getByRole("button", { name: "Add / Remove Models..." }).click();
+    await panel.getByRole("button", { name: "Manage models…" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  test("effort pills select a level, persist it, and keep the popover open", async ({ page }) => {
+    test.setTimeout(60000);
+
+    await page.goto("/new");
+    await page.waitForLoadState("domcontentloaded");
+
+    // Reset persisted level so assertions are deterministic across workers.
+    await page.evaluate(() => localStorage.removeItem("shelley.thinkingLevel.v2"));
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+
+    const picker = page.locator(".model-picker.p-select");
+    await expect(picker).toBeVisible({ timeout: 10000 });
+    await picker.click();
+    const panel = page.locator(".model-picker-panel");
+    await expect(panel).toBeVisible();
+
+    // The effort radiogroup offers the real levels (no bare "default" when the
+    // model advertises no concrete default — the sentinel is labeled "auto").
+    const pills = panel.locator(".model-picker-effort-pill");
+    expect(await pills.count()).toBeGreaterThanOrEqual(6);
+
+    // Pick "high" -> persists, popover stays open, trigger shows the suffix.
+    await pills.filter({ hasText: /^high$/ }).click();
+    await expect(panel).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("shelley.thinkingLevel.v2"))).toBe(
+      "high",
+    );
+    await expect(pills.filter({ hasText: /^high$/ })).toHaveAttribute("aria-checked", "true");
+
+    // Close the popover; the trigger reflects the effort.
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await expect(picker.locator(".model-picker-value-effort")).toHaveText("· high");
   });
 });

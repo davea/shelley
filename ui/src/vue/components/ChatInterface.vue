@@ -394,6 +394,7 @@ import { focusMessageInputIfUnfocused } from "../../utils/focusMessageInput";
 import { buildMessageQuote } from "../../utils/messageQuote";
 import { hasMultipleUsers } from "../../utils/messageAuthors";
 import { tildifyPath } from "../../utils/tildify";
+import { prettyModelLabels } from "../../utils/modelNames";
 import { handleModifiedNavClick } from "../utils/openInNewTab";
 import { isAutoExpandTool } from "../../utils/toolMeta";
 import { formatDay } from "../../utils/messageTime";
@@ -802,8 +803,7 @@ const isDistilling = computed(() => {
 });
 
 const selectedModelDisplayName = computed(() => {
-  const modelObj = models.value.find((m) => m.id === selectedModel.value);
-  return modelObj?.display_name || selectedModel.value;
+  return prettyModelLabels(models.value).get(selectedModel.value) || selectedModel.value;
 });
 
 const selectedModelInfo = computed(() => models.value.find((m) => m.id === selectedModel.value));

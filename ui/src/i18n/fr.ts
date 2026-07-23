@@ -133,6 +133,15 @@ export const fr: TranslationKeys = {
   addModel: "Ajouter un modèle",
   refreshModels: "Actualiser",
   refreshingModels: "Actualisation...",
+  searchModels: "Rechercher des modèles",
+  noModelsFound: "Aucun modèle trouvé",
+  notReadyBadge: "pas prêt",
+  showAllModels: "Tous les modèles",
+  showFewerModels: "Moins de modèles",
+  manageModelsAction: "Gérer les modèles…",
+  effortLabel: "Effort de raisonnement",
+  effortAuto: "auto",
+  customModelsGroup: "Modèles personnalisés",
   editModel: "Modifier le modèle",
   loadingModels: "Chargement des modèles...",
   providerApiFormat: "Fournisseur / Format API",
@@ -155,7 +164,6 @@ export const fr: TranslationKeys = {
   columnName: "Nom",
   columnModelId: "ID du modèle",
   columnProvider: "Forme d'API",
-  columnSource: "Source",
   columnActions: "Actions",
   columnImages: "Images",
   imageSupportAutoShort: "auto",
@@ -243,8 +251,6 @@ export const fr: TranslationKeys = {
     "Aucun modèle IA configuré. Appuyez sur Ctrl+K ou ⌘+K pour ajouter un modèle.",
 
   // Status Bar
-  modelLabel: "Modèle :",
-  thinkingLabel: "Effort :",
   dirLabel: "Rép. :",
 
   // Sidebar buttons

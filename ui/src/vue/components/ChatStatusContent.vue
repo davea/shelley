@@ -82,30 +82,16 @@
     class="status-bar-new-conversation"
   >
     <div class="status-field status-field-model">
-      <span class="status-field-label" title="AI model to use for this conversation">{{
-        t("modelLabel")
-      }}</span>
       <ModelPicker
         :models="models"
         :selected-model="selectedModel"
+        :thinking-level="thinkingLevel"
         :disabled="sending"
         :refreshing="refreshingModels"
         @select-model="onSelectModel"
+        @thinking-change="onThinkingChange"
         @manage-models="onManageModels"
         @refresh-models="onRefreshModels"
-      />
-    </div>
-    <div class="status-field status-field-thinking">
-      <span class="status-field-label" title="Reasoning effort the model spends before answering">{{
-        t("thinkingLabel")
-      }}</span>
-      <ThinkingLevelPicker
-        :value="thinkingLevel"
-        :disabled="sending"
-        :supported="selectedModelInfo?.supports_reasoning !== false"
-        :levels="selectedModelInfo?.reasoning_levels"
-        :default-level="selectedModelInfo?.default_reasoning_level"
-        @change="onThinkingChange"
       />
       <div ref="advancedSettingsRef" class="advanced-settings-wrapper">
         <button
@@ -221,7 +207,6 @@ import type { ThinkingLevel } from "./thinkingLevel";
 import AnimatedWorkingStatus from "./AnimatedWorkingStatus.vue";
 import ContextUsageBar from "./ContextUsageBar.vue";
 import ModelPicker from "./ModelPicker.vue";
-import ThinkingLevelPicker from "./ThinkingLevelPicker.vue";
 
 type ModelInfo = {
   id: string;
@@ -273,7 +258,6 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
-const selectedModelInfo = computed(() => props.models.find((m) => m.id === props.selectedModel));
 
 // Local advanced-settings popover state + outside-click close.
 const showAdvancedSettings = ref(false);

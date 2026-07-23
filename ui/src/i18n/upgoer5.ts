@@ -131,6 +131,15 @@ export const upgoer5: TranslationKeys = {
   addModel: "Add Brain",
   refreshModels: "Get Again",
   refreshingModels: "Getting again...",
+  searchModels: "Look for brains",
+  noModelsFound: "No brains found",
+  notReadyBadge: "not ready",
+  showAllModels: "All brains",
+  showFewerModels: "Fewer brains",
+  manageModelsAction: "Set up brains…",
+  effortLabel: "How hard to think",
+  effortAuto: "brain picks",
+  customModelsGroup: "Your own brains",
   editModel: "Change Brain",
   loadingModels: "Getting brains...",
   providerApiFormat: "Who Made It / How to Talk to It",
@@ -152,7 +161,6 @@ export const upgoer5: TranslationKeys = {
   columnName: "Name",
   columnModelId: "Brain Name",
   columnProvider: "How To Talk To It",
-  columnSource: "From",
   columnActions: "Do",
   columnImages: "Pictures",
   imageSupportAutoShort: "maybe",
@@ -239,8 +247,6 @@ export const upgoer5: TranslationKeys = {
   noModelsConfiguredHint: "No brains set up yet. You need to add one to get started.",
 
   // Status Bar
-  modelLabel: "Brain:",
-  thinkingLabel: "Think:",
   dirLabel: "Place:",
 
   // Sidebar buttons

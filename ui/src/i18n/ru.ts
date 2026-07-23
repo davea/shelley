@@ -131,6 +131,15 @@ export const ru: TranslationKeys = {
   addModel: "Добавить модель",
   refreshModels: "Обновить",
   refreshingModels: "Обновление...",
+  searchModels: "Поиск моделей",
+  noModelsFound: "Модели не найдены",
+  notReadyBadge: "не готова",
+  showAllModels: "Все модели",
+  showFewerModels: "Меньше моделей",
+  manageModelsAction: "Управление моделями…",
+  effortLabel: "Усилие рассуждения",
+  effortAuto: "авто",
+  customModelsGroup: "Пользовательские модели",
   editModel: "Редактировать модель",
   loadingModels: "Загрузка моделей...",
   providerApiFormat: "Провайдер / Формат API",
@@ -153,7 +162,6 @@ export const ru: TranslationKeys = {
   columnName: "Имя",
   columnModelId: "ID модели",
   columnProvider: "Формат API",
-  columnSource: "Источник",
   columnActions: "Действия",
   columnImages: "Изображения",
   imageSupportAutoShort: "авто",
@@ -240,8 +248,6 @@ export const ru: TranslationKeys = {
   noModelsConfiguredHint: "Модели ИИ не настроены. Нажмите Ctrl+K или ⌘+K, чтобы добавить модель.",
 
   // Status Bar
-  modelLabel: "Модель:",
-  thinkingLabel: "Усилие:",
   dirLabel: "Каталог:",
 
   // Sidebar buttons
