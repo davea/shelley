@@ -67,7 +67,8 @@ var gzipWriterPool = sync.Pool{
 
 var zstdWriterPool = sync.Pool{
 	New: func() any {
-		zw, err := zstd.NewWriter(nil,
+		zw, err := zstd.NewWriter(
+			nil,
 			zstd.WithEncoderLevel(zstd.SpeedDefault),
 			zstd.WithEncoderConcurrency(1),
 		)

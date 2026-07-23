@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -142,6 +143,48 @@ func TestCompressionHandler_PrefersZstd(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("hello world")) {
 		t.Errorf("decompressed body doesn't contain expected content: %s", body)
+	}
+}
+
+func TestRoutesPreferZstd(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := newTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	tests := []struct {
+		path     string
+		validate func([]byte) bool
+	}{
+		{"/api/models", json.Valid},
+		{"/c/compressed-page", func(body []byte) bool {
+			return bytes.Contains(body, []byte("window.__SHELLEY_INIT__"))
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+			w := httptest.NewRecorder()
+
+			mux.ServeHTTP(w, req)
+
+			if got := w.Header().Get("Content-Encoding"); got != "zstd" {
+				t.Fatalf("Content-Encoding: got %q want zstd", got)
+			}
+			zr, err := zstd.NewReader(bytes.NewReader(w.Body.Bytes()), zstd.WithDecoderConcurrency(1))
+			if err != nil {
+				t.Fatalf("zstd reader: %v", err)
+			}
+			defer zr.Close()
+			body, err := io.ReadAll(zr)
+			if err != nil {
+				t.Fatalf("read zstd body: %v", err)
+			}
+			if !tc.validate(body) {
+				t.Fatalf("unexpected decoded response: %.100s", body)
+			}
+		})
 	}
 }
 

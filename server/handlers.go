@@ -449,6 +449,13 @@ func etagMatches(ifNoneMatch, etag string) bool {
 
 func (s *Server) staticHandler(fsys http.FileSystem) http.Handler {
 	fileServer := http.FileServer(fsys)
+	indexHandler := compressionHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		w.Header().Set("Content-Type", "text/html")
+		s.serveIndexWithInit(w, r, fsys)
+	}))
 
 	// Load checksums for ETag support (content-based, not git-based)
 	checksums := ui.Checksums()
@@ -456,11 +463,7 @@ func (s *Server) staticHandler(fsys http.FileSystem) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Inject initialization data into index.html
 		if r.URL.Path == "/" || r.URL.Path == "/index.html" || isConversationSlugPath(r.URL.Path) || isSPARoute(r.URL.Path) {
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			w.Header().Set("Pragma", "no-cache")
-			w.Header().Set("Expires", "0")
-			w.Header().Set("Content-Type", "text/html")
-			s.serveIndexWithInit(w, r, fsys)
+			indexHandler.ServeHTTP(w, r)
 			return
 		}
 

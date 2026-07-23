@@ -489,8 +489,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("/api/notification-channel-types", http.HandlerFunc(s.handleNotificationChannelTypes))
 
 	// Models API (dynamic list refresh)
-	mux.Handle("POST /api/models/refresh", http.HandlerFunc(s.handleModelRefresh))
-	mux.Handle("/api/models", http.HandlerFunc(s.handleModels))
+	mux.Handle("POST /api/models/refresh", compressionHandler(http.HandlerFunc(s.handleModelRefresh)))
+	mux.Handle("/api/models", compressionHandler(http.HandlerFunc(s.handleModels)))
 	mux.Handle("/api/tools", http.HandlerFunc(s.handleTools))
 
 	// Version endpoints
